@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { BrowserStatus } from "../../../../packages/protocol/src/browser-control.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { readBrowserStatus, restartBrowser } from "./accounts-api.ts";
 
@@ -47,7 +48,7 @@ export function useBrowserStatus(
     setRequesting(true);
     setFailure(null);
     restartBrowser(api, cellId)
-      .then(setStatus, () => setFailure("Couldn't restart the web browser. Try again."))
+      .then(setStatus, () => setFailure(t`Couldn't restart the web browser. Try again.`))
       .finally(() => setRequesting(false));
   }, [api, cellId]);
 

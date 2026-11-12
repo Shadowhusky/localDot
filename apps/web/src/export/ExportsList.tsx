@@ -2,6 +2,7 @@ import type { HostExport } from "@localdot/protocol";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MediaView } from "../deliverables/viewer/MediaView.tsx";
 import { DotLoader } from "../dot/DotLoader.tsx";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { HANDHELD } from "../shell/layout.ts";
@@ -45,9 +46,9 @@ export function ExportsList({
   if (exports.length === 0)
     return loadFailed ? (
       <p className="replay-tasks-note" role="alert">
-        Exported videos couldn’t load.{" "}
+        {t`Exported videos couldn’t load.`}{" "}
         <Button size="sm" variant="quiet" onClick={host.refresh}>
-          Try again
+          {t`Try again`}
         </Button>
       </p>
     ) : null;
@@ -85,7 +86,7 @@ export function ExportsList({
     <>
       <section className="replay-day export-list" aria-labelledby={heading}>
         <h3 id={heading} className="replay-day-title">
-          Exported videos
+          {t`Exported videos`}
         </h3>
         <ul className="replay-day-list">{exports.slice(0, SHOWN).map(row)}</ul>
         {exports.length > SHOWN && (
@@ -101,7 +102,7 @@ export function ExportsList({
               aria-controls={rest}
               onClick={() => setAll((open) => !open)}
             >
-              {all ? "Show fewer" : `Show all ${exports.length}`}
+              {all ? t`Show fewer` : t`Show all ${exports.length}`}
             </Button>
           </>
         )}
@@ -162,7 +163,7 @@ function ExportRow({
                 <Progress
                   variant="ring"
                   size={24}
-                  label="Making the video"
+                  label={t`Making the video`}
                   value={record.total ? record.done : undefined}
                   max={record.total || 1}
                 />
@@ -176,13 +177,13 @@ function ExportRow({
           <>
             <StatusGlyph state={glyph.state} label={glyph.label} />
             <span className="num" role={failed ? "alert" : undefined}>
-              {failed ? "That didn't work. Try again." : exportMeta(record, now)}
+              {failed ? t`That didn't work. Try again.` : exportMeta(record, now)}
             </span>
           </>
         }
         swipe={
           phone && !running
-            ? { label: "Remove", accessibleLabel: `Remove ${record.name}`, onAction: remove }
+            ? { label: t`Remove`, accessibleLabel: t`Remove ${record.name}`, onAction: remove }
             : undefined
         }
         actions={
@@ -190,7 +191,7 @@ function ExportRow({
             <IconButton
               size={28}
               icon="x"
-              label={`Stop making ${record.name}`}
+              label={t`Stop making ${record.name}`}
               onClick={onCancel}
             />
           ) : (
@@ -199,19 +200,19 @@ function ExportRow({
                 <IconButton
                   size={28}
                   icon="download"
-                  label={`Save ${record.name}`}
+                  label={t`Save ${record.name}`}
                   onClick={onSave}
                 />
               ) : (
                 <Button size="sm" onClick={onRetry}>
-                  Try again
+                  {t`Try again`}
                 </Button>
               )}
               {!phone && (
                 <IconButton
                   size={28}
                   icon="trash"
-                  label={`Remove ${record.name}`}
+                  label={t`Remove ${record.name}`}
                   onClick={remove}
                 />
               )}
@@ -277,20 +278,20 @@ function ExportPreview({
               .catch(() => setFailed(true));
           }}
         >
-          Download video
+          {t`Download video`}
         </Button>
       }
     >
       {failed ? (
         <div role="alert" className="export-preview-error">
-          <p>The video couldn’t load. Try again, or download it to watch.</p>
+          <p>{t`The video couldn’t load. Try again, or download it to watch.`}</p>
           <Button
             onClick={() => {
               setUrl(null);
               setAttempt((value) => value + 1);
             }}
           >
-            Try again
+            {t`Try again`}
           </Button>
         </div>
       ) : url ? (
@@ -304,7 +305,7 @@ function ExportPreview({
           />
         </div>
       ) : (
-        <DotLoader label="Opening video" />
+        <DotLoader label={t`Opening video`} />
       )}
     </Sheet>
   );

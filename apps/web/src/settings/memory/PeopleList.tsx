@@ -1,5 +1,6 @@
 import { keyLikePresent, type Person } from "@localdot/protocol";
 import { useRef, useState } from "react";
+import { t } from "../../i18n/index.ts";
 import { Button } from "../../ui/Button.tsx";
 import { EmptyState } from "../../ui/EmptyState.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, Monogram } from "../../ui/Group.tsx";
@@ -25,16 +26,16 @@ const BLANK: PersonDraft = { name: "", app: "", handle: "", note: "" };
 
 export function personProblem(draft: PersonDraft): string | undefined {
   if (!draft.name.trim() || !draft.app.trim())
-    return "Give a name and the app you use to reach them.";
+    return t`Give a name and the app you use to reach them.`;
   if ([draft.name, draft.app, draft.handle, draft.note].some((v) => /[\r\n]/.test(v)))
-    return "Keep each field to one line.";
+    return t`Keep each field to one line.`;
   if (
     draft.name.length > 100 ||
     draft.app.length > 40 ||
     draft.handle.length > 200 ||
     draft.note.length > 300
   )
-    return "One of the fields is too long.";
+    return t`One of the fields is too long.`;
   if ([draft.name, draft.handle, draft.note].some(keyLikePresent)) return KEY_SHAPED;
   return undefined;
 }
@@ -98,10 +99,10 @@ function PersonForm({
       }}
     >
       <div className="memory-person-fields">
-        {field("name", "Name", "Name")}
-        {field("app", "App", "App, such as Email")}
-        {field("handle", "Handle", "Number, email or ID")}
-        {field("note", "Note", "Note (optional)")}
+        {field("name", t`Name`, t`Name`)}
+        {field("app", t`App`, t`App, such as Email`)}
+        {field("handle", t`Handle`, t`Number, email or ID`)}
+        {field("note", t`Note`, t`Note (optional)`)}
       </div>
       {note && (
         <p className="memory-note" role="alert">
@@ -110,7 +111,7 @@ function PersonForm({
       )}
       <div className="memory-edit-actions">
         <Button variant="quiet" size="sm" onClick={onCancel}>
-          Cancel
+          {t`Cancel`}
         </Button>
         <Button type="submit" variant="primary" size="sm" busy={busy}>
           {submit}
@@ -152,7 +153,7 @@ function PersonRow({
       <li>
         <PersonForm
           initial={draftOf(person)}
-          submit="Save"
+          submit={t`Save`}
           onCancel={() => setEditing(false)}
           onSave={async (draft) => {
             const next = fields(draft);
@@ -170,9 +171,9 @@ function PersonRow({
     void known.deletePerson(person).then(
       () =>
         showToast({
-          title: `Removed ${person.name}`,
+          title: t`Removed ${person.name}`,
           action: {
-            label: "Undo",
+            label: t`Undo`,
             onAction: () =>
               void known
                 .addPerson({
@@ -203,7 +204,7 @@ function PersonRow({
             <IconButton
               ref={more}
               icon="more-horizontal"
-              label={`More for ${person.name}`}
+              label={t`More for ${person.name}`}
               {...triggerProps("menu", menu)}
               onClick={() => setMenu(true)}
             />
@@ -212,10 +213,10 @@ function PersonRow({
               onClose={() => setMenu(false)}
               anchor={more}
               align="end"
-              label="Person"
+              label={t`Person`}
             >
-              <MenuItem onSelect={() => setEditing(true)}>Edit</MenuItem>
-              <MenuItem onSelect={remove}>Delete</MenuItem>
+              <MenuItem onSelect={() => setEditing(true)}>{t`Edit`}</MenuItem>
+              <MenuItem onSelect={remove}>{t`Delete`}</MenuItem>
             </Menu>
           </>
         }
@@ -238,11 +239,11 @@ export function PeopleList({
     <section className="memory-section" aria-labelledby="people-title">
       <GroupHead
         id="people-title"
-        title="People"
+        title={t`People`}
         aside={
           !adding && (
             <Button variant="quiet" size="sm" onClick={() => setAdding(true)}>
-              Add someone
+              {t`Add someone`}
             </Button>
           )
         }
@@ -251,7 +252,7 @@ export function PeopleList({
         {adding && (
           <PersonForm
             initial={BLANK}
-            submit="Add"
+            submit={t`Add`}
             onCancel={() => setAdding(false)}
             onSave={async (draft) => {
               await known.addPerson(fields(draft));
@@ -268,19 +269,19 @@ export function PeopleList({
           </div>
         ) : known.people.length === 0 ? (
           !adding && (
-            <EmptyState icon="message-circle" title="No one yet">
-              When dot messages, calls or emails someone for you, it notes how to reach them here.
+            <EmptyState icon="message-circle" title={t`No one yet`}>
+              {t`When dot messages, calls or emails someone for you, it notes how to reach them here.`}
             </EmptyState>
           )
         ) : (
-          <ul className="memory-list" aria-label="People">
+          <ul className="memory-list" aria-label={t`People`}>
             {known.people.map((person) => (
               <PersonRow key={person.id} person={person} known={known} onOpenTask={onOpenTask} />
             ))}
           </ul>
         )}
       </Group>
-      <GroupNote>dot looks people up before asking you how to reach them.</GroupNote>
+      <GroupNote>{t`dot looks people up before asking you how to reach them.`}</GroupNote>
     </section>
   );
 }

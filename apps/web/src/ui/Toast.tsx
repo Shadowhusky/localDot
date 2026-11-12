@@ -11,6 +11,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "./Button.tsx";
 import { DetailLines } from "./Disclosure.tsx";
 import { afterMotion } from "./finished.ts";
@@ -85,7 +86,7 @@ function anchorFocus(anchor: HTMLElement | null): HTMLElement | undefined {
 }
 
 // One toast at a time hangs from the anchor; the queue behind it is the store's.
-export function Toaster({ anchor, label = "Notifications" }: ToasterProps) {
+export function Toaster({ anchor, label = t`Notifications` }: ToasterProps) {
   const toasts = useSyncExternalStore(shared.subscribe, shared.list, shared.list);
   const region = useRef<HTMLElement>(null);
   const cameFrom = useRef<Element | null>(null);
@@ -274,7 +275,7 @@ const ToastItem = memo(function ToastItem({ toast, onDismiss, onHold }: ToastIte
             {toast.action.label}
           </Button>
         )}
-        <IconButton icon="x" size={24} label="Dismiss" onClick={() => onDismiss(id)} />
+        <IconButton icon="x" size={24} label={t`Dismiss`} onClick={() => onDismiss(id)} />
         {!!toast.details?.length && (
           <DetailLines lines={toast.details} className="ui-toast-details" />
         )}

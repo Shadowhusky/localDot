@@ -1,6 +1,7 @@
 import "../ui/work-layout.css";
 import { useEffect, useRef, useState } from "react";
 import { downloadResult } from "../agent/file-transfer.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { DisplayControl } from "../shell/StreamMenu.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -8,12 +9,12 @@ import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Select } from "../ui/Select.tsx";
 import { useReading } from "./reading.ts";
-import type { WorkCard } from "./work-view.ts";
+import { WORK_KIND_NAMES, type WorkCard } from "./work-view.ts";
 
 const MODES = [
-  { value: "auto", label: "Auto" },
-  { value: "screen", label: "Screen" },
-  { value: "work", label: "Work" },
+  { value: "auto", label: tr("Auto") },
+  { value: "screen", label: tr("Screen") },
+  { value: "work", label: tr("Work") },
 ];
 // At most four text paints per second; a new surface must settle before it replaces the screen.
 const PAINT_MS = 250;
@@ -116,15 +117,15 @@ function WorkSurfaceView({
       className="work-view"
       data-work={card ? "" : undefined}
       data-replay={replay || undefined}
-      aria-label="Work display"
+      aria-label={t`Work display`}
       onDoubleClick={(event) => event.stopPropagation()}
     >
       {card && (
         <div className="work-surface">
           <header className="work-heading">
             <span>
-              {card.kind} ·{" "}
-              {mode === "auto" && candidate?.key !== card.key ? "Previous step" : card.status}
+              {WORK_KIND_NAMES[card.kind]} ·{" "}
+              {mode === "auto" && candidate?.key !== card.key ? t`Previous step` : card.status}
             </span>
             <h2>{card.title}</h2>
           </header>
@@ -132,7 +133,7 @@ function WorkSurfaceView({
             key={card.key}
             className="work-content"
             tabIndex={0}
-            aria-label="Work output"
+            aria-label={t`Work output`}
             {...reading}
           >
             <div>
@@ -145,9 +146,9 @@ function WorkSurfaceView({
                   visible={visible}
                 />
               )}
-              <pre>{card.text || "Waiting for output…"}</pre>
+              <pre>{card.text || t`Waiting for output…`}</pre>
               {card.shortened && (
-                <p className="work-note">Recent output. Full details are in Steps.</p>
+                <p className="work-note">{t`Recent output. Full details are in Steps.`}</p>
               )}
             </div>
           </ScrollArea>
@@ -158,7 +159,7 @@ function WorkSurfaceView({
           <Select
             size="sm"
             appearance="inline"
-            aria-label="Display view"
+            aria-label={t`Display view`}
             value={mode}
             items={MODES}
             onValueChange={(value) => {
@@ -173,7 +174,7 @@ function WorkSurfaceView({
               variant="quiet"
               onClick={() => setMode("auto")}
             >
-              Follow work
+              {t`Follow work`}
             </Button>
           )}
         </div>
@@ -252,8 +253,8 @@ function WorkImage({
   ) : (
     <p className="work-note">
       {state?.key === key && state.failed
-        ? "Preview unavailable. The file is still in Steps."
-        : "Loading preview…"}
+        ? t`Preview unavailable. The file is still in Steps.`
+        : t`Loading preview…`}
     </p>
   );
 }

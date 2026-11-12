@@ -6,11 +6,11 @@ import {
   type ExportRequest,
   exportBitrate,
   fileSize,
-  PRIVACY_NOTE,
   planExport,
   validSize,
   videoLength,
 } from "./export-plan.ts";
+import { PRIVACY_NOTE } from "./export-settings.ts";
 
 function fixture(endMs = 60_000) {
   const model = emptyModel();

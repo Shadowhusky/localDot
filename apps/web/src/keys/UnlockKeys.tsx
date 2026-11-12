@@ -1,4 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { passphraseProblem } from "../settings/dot-copy.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
@@ -7,8 +8,7 @@ import { TextField } from "../ui/TextField.tsx";
 import { unlockProblem } from "./keys-api.ts";
 import "./keys.css";
 
-export const UNLOCK_PRIVACY =
-  "Your passphrase is sealed in this page for the key service on the computer running localDot. Neither localDot nor dot can read it.";
+export const UNLOCK_PRIVACY = t`Your passphrase is sealed in this page for the key service on the computer running localDot. Neither localDot nor dot can read it.`;
 
 // The passphrase vault's lock, opened from the page. The fields are never React state: they are
 // read once on submit, cleared whatever happens, and cleared again when the page is hidden.
@@ -82,7 +82,10 @@ export function UnlockKeys({
       autoComplete="on"
       onSubmit={submit}
     >
-      <Field label={setup ? "New passphrase" : "Passphrase"} {...(setup ? {} : { error: problem })}>
+      <Field
+        label={setup ? t`New passphrase` : t`Passphrase`}
+        {...(setup ? {} : { error: problem })}
+      >
         <TextField
           ref={(node) => {
             first.current = node;
@@ -95,7 +98,7 @@ export function UnlockKeys({
         />
       </Field>
       {setup && (
-        <Field label="Type it again" error={problem}>
+        <Field label={t`Type it again`} error={problem}>
           <TextField
             ref={(node) => {
               again.current = node;
@@ -110,7 +113,7 @@ export function UnlockKeys({
       )}
       <div className="keys-unlock-actions">
         <Button type="submit" variant="primary" icon="lock" busy={busy}>
-          {setup ? "Save passphrase" : "Unlock"}
+          {setup ? t`Save passphrase` : t`Unlock`}
         </Button>
         {actions}
       </div>

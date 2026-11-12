@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 import type { ControlStatus } from "./useTaskControls.ts";
 
@@ -23,7 +24,7 @@ export function useControlToast(status: ControlStatus | null, recheck: () => voi
       action:
         phase === "sending"
           ? undefined
-          : { label: "Check task state", onAction: () => latest.current() },
+          : { label: t`Check task state`, onAction: () => latest.current() },
     });
   }, [message, phase]);
   useEffect(() => () => dismissToast(TOAST), []);

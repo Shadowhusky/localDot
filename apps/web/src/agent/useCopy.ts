@@ -1,5 +1,6 @@
 import { keyLikePresent } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 
 export type CopyState = "idle" | "copied" | "failed";
 
@@ -7,9 +8,9 @@ export type CopyState = "idle" | "copied" | "failed";
 export const COPIED_MS = 1500;
 
 export function copyBlocked(text: string): string | undefined {
-  if (keyLikePresent(text)) return "This looks like it holds a key, so it can't be copied.";
+  if (keyLikePresent(text)) return t`This looks like it holds a key, so it can't be copied.`;
   if (typeof navigator === "undefined" || !navigator.clipboard?.writeText)
-    return "Copy isn't available in this browser.";
+    return t`Copy isn't available in this browser.`;
   return undefined;
 }
 

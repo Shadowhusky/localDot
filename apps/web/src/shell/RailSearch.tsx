@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -35,7 +36,7 @@ export function RailSearch({
   resultsId,
 }: RailSearchProps) {
   const { triggerProps: tip, tooltip } = useTooltip({
-    content: expanded ? undefined : "Search conversations",
+    content: expanded ? undefined : t`Search conversations`,
   });
   if (!expanded)
     return (
@@ -44,11 +45,11 @@ export function RailSearch({
           {...tip.handlers}
           variant="quiet"
           className="sessions-row"
-          aria-label="Search conversations"
+          aria-label={t`Search conversations`}
           onClick={onOpen}
         >
           <Icon name="search" />
-          <span className="sessions-title">Search</span>
+          <span className="sessions-title">{t`Search`}</span>
         </Button>
         {tooltip}
       </div>
@@ -66,7 +67,7 @@ export function RailSearch({
             <IconButton
               icon="x"
               size={24}
-              label="Clear search"
+              label={t`Clear search`}
               onClick={() => {
                 onQuery("");
                 inputRef.current?.focus();
@@ -74,9 +75,9 @@ export function RailSearch({
             />
           ) : undefined
         }
-        aria-label="Search conversations"
+        aria-label={t`Search conversations`}
         aria-controls={resultsId}
-        placeholder="Search"
+        placeholder={t`Search`}
         enterKeyHint="search"
         autoComplete="off"
         spellCheck={false}

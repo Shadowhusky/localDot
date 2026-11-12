@@ -2,6 +2,7 @@ import type { AgentSettingsDocument, PersonaId } from "@localdot/protocol";
 import { AutonomyPolicy } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { KeyRecord } from "../keys/keys-api.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
@@ -138,7 +139,7 @@ export function useSettings(
         setPhase("ready");
         if (unresolved.current)
           setError(
-            "A previous save is unverified. Reload saved settings explicitly before another save.",
+            t`A previous save is unverified. Reload saved settings explicitly before another save.`,
           );
       } catch {
         if (
@@ -153,8 +154,8 @@ export function useSettings(
         setPhase("error");
         setError(
           owner.draft
-            ? "Settings could not be loaded. Your edits are kept. Choose Try again."
-            : "Settings could not be loaded. Check that localDot is running, then choose Try again.",
+            ? t`Settings could not be loaded. Your edits are kept. Choose Try again.`
+            : t`Settings could not be loaded. Check that localDot is running, then choose Try again.`,
         );
       } finally {
         if (reading.current === abort) reading.current = null;
@@ -192,7 +193,7 @@ export function useSettings(
       mutating.current?.abort();
       failed.current = "read";
       setPhase("error");
-      setError("The view was interrupted. Reload saved settings before continuing.");
+      setError(t`The view was interrupted. Reload saved settings before continuing.`);
     };
     // Coming back re-reads what the interruption discarded but keeps the draft, so switching apps
     // to copy a key never costs the user their choices.
@@ -474,7 +475,7 @@ export function useSettings(
         setError(
           unknown
             ? new SettingsFailure(true).message
-            : "These settings could not be saved. Your edits are kept; check the choices and try again.",
+            : t`These settings could not be saved. Your edits are kept; check the choices and try again.`,
         );
     } finally {
       if (mutating.current === abort) {
@@ -511,7 +512,7 @@ export function useSettings(
         setIndex(next);
         setPhase("ready");
         if (owner.revision !== revision)
-          setError("Catalog refreshed. Review your current choices before saving.");
+          setError(t`Catalog refreshed. Review your current choices before saving.`);
       }
     } catch {
       if (
@@ -522,7 +523,7 @@ export function useSettings(
       ) {
         failed.current = "refresh";
         setPhase("error");
-        setError("The catalog could not be refreshed. Your choices are retained.");
+        setError(t`The catalog could not be refreshed. Your choices are retained.`);
       }
     } finally {
       if (mutating.current === abort) {
@@ -612,7 +613,7 @@ export function useSettings(
     } catch {
       if (usable())
         setError(
-          "The key was saved, but current model key metadata could not be loaded. Choose its binding after reconnecting.",
+          t`The key was saved, but current model key metadata could not be loaded. Choose its binding after reconnecting.`,
         );
     }
   };

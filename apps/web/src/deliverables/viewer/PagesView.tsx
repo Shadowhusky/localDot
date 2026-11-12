@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../../i18n/index.ts";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "../../ui/media.ts";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -323,11 +324,11 @@ export function PagesView({
               <>
                 <SegmentedControl
                   size={28}
-                  aria-label="Fit"
+                  aria-label={t`Fit`}
                   value={fit}
                   items={[
-                    { value: "width", label: "Fit width" },
-                    { value: "page", label: "Fit page" },
+                    { value: "width", label: t`Fit width` },
+                    { value: "page", label: t`Fit page` },
                   ]}
                   onValueChange={(value) => setZoom({ fit: value === "page" ? "page" : "width" })}
                 />
@@ -335,16 +336,16 @@ export function PagesView({
                   <IconButton
                     icon="minus"
                     size={28}
-                    label="Zoom out"
-                    disabledReason={zoomOut === undefined ? "Zoomed out all the way" : undefined}
+                    label={t`Zoom out`}
+                    disabledReason={zoomOut === undefined ? t`Zoomed out all the way` : undefined}
                     onClick={() => zoomOut !== undefined && setZoom({ scale: zoomOut })}
                   />
                   <span className="viewer-zoom-value num">{Math.round(scale * 100)}%</span>
                   <IconButton
                     icon="plus"
                     size={28}
-                    label="Zoom in"
-                    disabledReason={zoomIn === undefined ? "Zoomed in all the way" : undefined}
+                    label={t`Zoom in`}
+                    disabledReason={zoomIn === undefined ? t`Zoomed in all the way` : undefined}
                     onClick={() => zoomIn !== undefined && setZoom({ scale: zoomIn })}
                   />
                 </div>
@@ -396,7 +397,7 @@ export function PagesView({
             <IconButton
               icon={"fit" in zoom ? "zoom-in" : "zoom-out"}
               size={36}
-              label={"fit" in zoom ? "Zoom in" : "Fit width"}
+              label={"fit" in zoom ? t`Zoom in` : t`Fit width`}
               onClick={() =>
                 setZoom("fit" in zoom ? { scale: Math.min(4, scale * 2) } : { fit: "width" })
               }
@@ -405,7 +406,7 @@ export function PagesView({
               <IconButton
                 icon="layout-grid"
                 size={36}
-                label={strip ? "Hide pages" : "Show pages"}
+                label={strip ? t`Hide pages` : t`Show pages`}
                 aria-pressed={strip}
                 onClick={() => setStrip((was) => !was)}
               />

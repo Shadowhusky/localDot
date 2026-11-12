@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { bytes } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { HitButton } from "../ui/HitButton.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -12,12 +13,12 @@ import { FileName } from "./ResultFiles.tsx";
 import type { UploadRow } from "./useUploads.ts";
 
 const STATUS: Record<UploadRow["phase"], string> = {
-  pending: "Waiting",
-  uploading: "Uploading…",
-  placing: "Saving to computer…",
-  complete: "Uploaded to Downloads",
-  uncertain: "Paused",
-  refused: "Not uploaded",
+  pending: tr("Waiting"),
+  uploading: tr("Uploading…"),
+  placing: tr("Saving to computer…"),
+  complete: tr("Uploaded to Downloads"),
+  uncertain: tr("Paused"),
+  refused: tr("Not uploaded"),
 };
 
 // What a long text moved out of the field says, opened from its chip.
@@ -31,8 +32,8 @@ function LongTextSheet({ row, onClose }: { row?: UploadRow; onClose(): void }) {
       onClose={onClose}
       modal
       title={shown.current?.label}
-      doneLabel="Done"
-      footer={<CopyButton text={text} label="Copy this text" />}
+      doneLabel={t`Done`}
+      footer={<CopyButton text={text} label={t`Copy this text`} />}
     >
       <pre className="composer-text-view">{text}</pre>
     </Sheet>
@@ -54,7 +55,7 @@ export function AttachmentChips({
   const reasons = [...new Set(rows.flatMap((row) => (row.explanation ? [row.explanation] : [])))];
   return (
     <div className="file-chips-block">
-      <ul className="file-chips" aria-label="Attached files">
+      <ul className="file-chips" aria-label={t`Attached files`}>
         {rows.map((row) => (
           <li
             key={row.id}
@@ -65,7 +66,7 @@ export function AttachmentChips({
             {row.text !== undefined && (
               <HitButton
                 className="file-chip-hit"
-                label={`Read ${row.label}`}
+                label={t`Read ${row.label ?? row.name}`}
                 onClick={() => setReading(row.id)}
               />
             )}
@@ -104,16 +105,16 @@ export function AttachmentChips({
                 size="sm"
                 className="file-chip-retry"
                 onClick={() => onRetry(row.id)}
-                aria-label={`Retry ${row.name}`}
+                aria-label={t`Retry ${row.name}`}
               >
-                Retry
+                {t`Retry`}
               </Button>
             )}
             <IconButton
               className="file-chip-remove"
               icon="x"
               size={24}
-              label={`Remove ${row.name}`}
+              label={t`Remove ${row.name}`}
               onClick={() => onRemove(row.id)}
             />
           </li>

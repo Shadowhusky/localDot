@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { StepRow } from "./LiveWorkLine.tsx";
@@ -28,8 +29,8 @@ export function LatestSteps({
   const [open, setOpen] = useState<string | null>(null);
   const toggle = (key: string) => setOpen((was) => (was === key ? null : key));
   return (
-    <section className="phone-latest-steps" aria-label="Latest steps">
-      <h3>{live ? "Latest steps" : "Steps"}</h3>
+    <section className="phone-latest-steps" aria-label={t`Latest steps`}>
+      <h3>{live ? t`Latest steps` : t`Steps`}</h3>
       {newest.length ? (
         newest.map((step, index) => (
           <StepRow
@@ -44,7 +45,7 @@ export function LatestSteps({
           />
         ))
       ) : (
-        <p className="thread-note">No steps yet.</p>
+        <p className="thread-note">{t`No steps yet.`}</p>
       )}
     </section>
   );

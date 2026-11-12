@@ -1,4 +1,5 @@
 import { Fragment, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import type { IconName } from "../ui/icons.ts";
 import { Menu, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
@@ -34,7 +35,7 @@ export function MoreMenu({
         round
         className="toolbar-button"
         icon="more-horizontal"
-        label="More"
+        label={t`More`}
         {...triggerProps("menu", open)}
         onClick={() => {
           onOpen?.();
@@ -47,7 +48,7 @@ export function MoreMenu({
         anchor={button}
         side="top"
         align="end"
-        label="More"
+        label={t`More`}
         dim
       >
         {items.map((item, index) => (

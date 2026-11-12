@@ -1,9 +1,10 @@
 import { useId } from "react";
+import { t } from "../i18n/index.ts";
 
 // A native discrete slider: keyboard arrows, Home/End, touch and screen-reader values all
 // describe the same supported steps. The first step is always the provider default.
 export function EffortSlider({
-  label = "Reasoning effort",
+  label = t`Reasoning effort`,
   value,
   items,
   onChange,
@@ -22,7 +23,7 @@ export function EffortSlider({
     <div className="model-effort-slider">
       <div className="model-effort-heading">
         <label htmlFor={id}>{label}</label>
-        <span className="model-effort-value">{value ? items[index]?.label : "Default"}</span>
+        <span className="model-effort-value">{value ? items[index]?.label : t`Default`}</span>
       </div>
       <div className="model-effort-track">
         <input

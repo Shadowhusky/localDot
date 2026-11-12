@@ -10,6 +10,7 @@ import type {
   ComputerUpdateFailure,
   ComputerUpdateStage,
 } from "../../../../packages/protocol/src/computer-operation.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 import { stageBounds, stageLine, waitNote } from "./computer-update-stage.ts";
@@ -23,7 +24,8 @@ const FAILED = "computer-update-failed";
 const READY = "computer-update-ready";
 const GOING = "computer-update-going";
 const DONE = "computer-update-done";
-export const UPDATE_READY = "A new version of your computer is ready";
+export const UPDATE_READY = t`A new version of your computer is ready`;
+// The daemon's answer, as it says it; the notice shows it in the language on show.
 export const UPDATE_BLOCKED =
   "An installed app changed files this update needs, so it can't be applied automatically. Your computer is unchanged; you can keep using it. To get the new version, Start fresh in Settings; it erases your computer's files.";
 
@@ -48,10 +50,10 @@ const PLAIN = new Set([
 ]);
 
 export function describeUpdateError(status: number | null, text: string): string {
-  if (status === null) return "localDot isn't answering. Check that it's running.";
+  if (status === null) return t`localDot isn't answering. Check that it's running.`;
   if (status === 409 && PLAIN.has(text)) return text;
-  if (status === 502) return `${DOCKER_DOWN}, then try again.`;
-  return "Your computer couldn't be updated. Try again.";
+  if (status === 502) return DOCKER_DOWN;
+  return t`Your computer couldn't be updated. Try again.`;
 }
 
 export interface ComputerUpdate {
@@ -233,7 +235,7 @@ function GoingLine() {
     },
     () => goingLine,
   );
-  return `Updating your computer · ${line}`;
+  return t`Updating your computer · ${line}`;
 }
 
 // While the computer updates, every device says so wherever it is looking, and when it ends, how.
@@ -259,9 +261,9 @@ export function useUpdateProgressNotice(
     dismissToast(DONE);
     showToast({
       id: GOING,
-      title: "Updating your computer",
+      title: t`Updating your computer`,
       live: createElement(GoingLine),
-      action: { label: "Details", onAction: () => detailsRef.current() },
+      action: { label: t`Details`, onAction: () => detailsRef.current() },
     });
   }, [going]);
   // Only what the daemon took on can end in "updated": a refused press never began.
@@ -274,12 +276,12 @@ export function useUpdateProgressNotice(
     watched.current = false;
     showToast({
       id: FAILED,
-      title: "Your computer wasn't updated",
+      title: t`Your computer wasn't updated`,
       description: failure.message,
       tone: "danger",
       ...(offered && {
         action: {
-          label: "Retry",
+          label: t`Retry`,
           onAction: () => {
             dismissToast(FAILED);
             run.current();
@@ -294,8 +296,8 @@ export function useUpdateProgressNotice(
     watched.current = false;
     showToast({
       id: DONE,
-      title: "Your computer is updated",
-      description: "Your files and sign-ins are all still there.",
+      title: t`Your computer is updated`,
+      description: t`Your files and sign-ins are all still there.`,
     });
   }, [settled]);
 }
@@ -335,9 +337,12 @@ export function useUpdateNotice(cell: CellSummary | null, idle: boolean, update:
         ? {
             id: READY,
             title: UPDATE_READY,
-            action: { label: "Update", onAction: () => run.current() },
+            action: { label: t`Update`, onAction: () => run.current() },
           }
-        : { id: READY, title: UPDATE_BLOCKED },
+        : {
+            id: READY,
+            title: t`An installed app changed files this update needs, so it can't be applied automatically. Your computer is unchanged; you can keep using it. To get the new version, Start fresh in Settings; it erases your computer's files.`,
+          },
     );
   }, [id, said, current, idle]);
 }

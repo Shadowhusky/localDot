@@ -1,4 +1,5 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { STILL_MS } from "./focus.ts";
 
@@ -44,7 +45,7 @@ export function StageExpand({
           round
           size={44}
           icon="chevron-up"
-          label="Minimize screen"
+          label={t`Minimize screen`}
           onClick={onMinimize}
         />
       )}
@@ -53,7 +54,7 @@ export function StageExpand({
         round
         size={phone ? 44 : 32}
         icon="expand"
-        label="Full screen"
+        label={t`Full screen`}
         kbd={phone ? undefined : ["F"]}
         onClick={onEnter}
       />

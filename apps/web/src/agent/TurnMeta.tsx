@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import "../ui/conversation-layout.css";
 import { spendText, tokenCount } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { providerName, SPEED_NAMES } from "../settings/choices.ts";
 import { subscription } from "../settings/chooser.ts";
 import type { ModelNames } from "../settings/model-names.ts";
@@ -12,7 +13,7 @@ import type { ThreadItem, TurnModel } from "./thread.ts";
 
 type MetaItem = Extract<ThreadItem, { kind: "meta" }>;
 
-const ROLES: Record<string, string> = { fast: "Fast", local: "Local" };
+const ROLES: Record<string, string> = { fast: tr("Fast"), local: tr("Local") };
 const whole = (value: number) => value.toLocaleString();
 
 // The line names the model, the speed above Standard it ran at, and its plan's app when the plan,
@@ -69,7 +70,7 @@ function Details({ item, names }: { item: MetaItem; names?: ModelNames }) {
     <dl className="thread-meta-models">
       {item.usd !== undefined && (
         <div>
-          <dt>{item.estimated ? "Estimated cost" : "Cost"}</dt>
+          <dt>{item.estimated ? t`Estimated cost` : t`Cost`}</dt>
           <dd className="num">{spendText(item.usd, !!item.estimated)}</dd>
         </div>
       )}
@@ -91,9 +92,9 @@ function Details({ item, names }: { item: MetaItem; names?: ModelNames }) {
               {[
                 provider && providerName(provider),
                 row.speed && SPEED_NAMES[row.speed],
-                `${whole(row.inputTokens)} in`,
-                `${whole(row.outputTokens)} out`,
-                row.reasoningTokens === undefined ? "" : `${whole(row.reasoningTokens)} reasoning`,
+                t`${whole(row.inputTokens)} in`,
+                t`${whole(row.outputTokens)} out`,
+                row.reasoningTokens === undefined ? "" : t`${whole(row.reasoningTokens)} reasoning`,
               ]
                 .filter(Boolean)
                 .join(" · ")}
@@ -124,7 +125,7 @@ export function TurnMeta({ item, names }: { item: MetaItem; names?: ModelNames }
         variant="quiet"
         size="sm"
         className="thread-meta-trigger"
-        aria-label={`This turn: ${line}`}
+        aria-label={t`This turn: ${line}`}
         {...triggerProps("dialog", open)}
         onClick={() => setOpen((shown) => !shown)}
       >
@@ -135,7 +136,7 @@ export function TurnMeta({ item, names }: { item: MetaItem; names?: ModelNames }
         onClose={() => setOpen(false)}
         anchor={trigger}
         side="top"
-        label="Models this turn used"
+        label={t`Models this turn used`}
         className="thread-meta-popover"
       >
         <Details item={item} names={names} />

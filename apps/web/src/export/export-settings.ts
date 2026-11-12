@@ -1,4 +1,5 @@
 import { DOT_PLACEMENTS, type DotPlacement } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import { withBand } from "./dot-band.ts";
 import {
   EXPORT_FORMATS,
@@ -14,6 +15,8 @@ import {
   validSize,
   validSpeed,
 } from "./export-plan.ts";
+
+export const PRIVACY_NOTE = t`This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.`;
 
 export const SIZE_CHOICES = ["480p", "720p", "1080p", "source"] as const;
 export type SizeChoice = (typeof SIZE_CHOICES)[number];
@@ -147,7 +150,7 @@ export function sizeOf(
 }
 
 export function sizeLabel(choice: SizeChoice): string {
-  return choice === "source" ? "Original" : choice;
+  return choice === "source" ? t`Original` : choice;
 }
 
 // Whether this size can be made in this format, as far as is known yet.

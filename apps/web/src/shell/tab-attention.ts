@@ -1,6 +1,7 @@
 import type { AttentionLevel } from "@localdot/protocol";
 import { useEffect, useSyncExternalStore } from "react";
 import attentionIcon from "../favicon-attention.svg";
+import { t, tr } from "../i18n/index.ts";
 import type { Status } from "../session/status.ts";
 
 // What waits for the user across tasks: how many, and the most urgent.
@@ -11,10 +12,10 @@ export interface TabAttention {
 
 const NOTHING: TabAttention = { count: 0, top: "none" };
 const WORDS: Partial<Record<AttentionLevel, string>> = {
-  needs_you: "Needs you",
-  blocked: "Paused",
-  failed: "Failed",
-  done: "Done",
+  needs_you: tr("Needs you"),
+  blocked: tr("Paused"),
+  failed: tr("Failed"),
+  done: tr("Done"),
 };
 
 const needsYou = (status: Status, attention: TabAttention) =>
@@ -29,7 +30,9 @@ export function tabTitle(status: Status, hidden: boolean, attention = NOTHING): 
   const word = own ? status.label : WORDS[attention.top];
   if (!word) return status.title;
   const count = Math.max(attention.count, own ? 1 : 0);
-  return `${needsYou(status, attention) ? "• " : ""}${count > 1 ? `(${count}) ` : ""}${word} · localDot`;
+  if (needsYou(status, attention))
+    return count > 1 ? t`• (${count}) ${word} · localDot` : t`• ${word} · localDot`;
+  return count > 1 ? t`(${count}) ${word} · localDot` : t`${word} · localDot`;
 }
 
 function watchVisibility(onChange: () => void) {

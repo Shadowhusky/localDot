@@ -1,4 +1,5 @@
 import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 export const FILE_LIMITS = Object.freeze({
@@ -35,8 +36,8 @@ export class FileTransferFailure extends Error {
     super(
       message ??
         (uncertain
-          ? "The upload may have finished. Check Downloads before selecting it again."
-          : "The file transfer was refused or could not be verified."),
+          ? t`The upload may have finished. Check Downloads before selecting it again.`
+          : t`The file transfer was refused or could not be verified.`),
     );
   }
 }

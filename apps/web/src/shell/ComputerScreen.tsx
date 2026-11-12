@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../i18n/index.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu } from "../ui/Menu.tsx";
 import { matches } from "../ui/media.ts";
@@ -330,7 +331,7 @@ export function ComputerScreen({
     <section
       ref={screen}
       className="phone-computer"
-      aria-label="Computer"
+      aria-label={t`Computer`}
       inert={!open}
       data-curtain={curtain ? "" : undefined}
     >
@@ -360,7 +361,7 @@ export function ComputerScreen({
             round
             variant="filled"
             icon="chevron-left"
-            label="Back to the conversation"
+            label={t`Back to the conversation`}
             onClick={onBack}
           />
           <div className="phone-title">
@@ -375,7 +376,7 @@ export function ComputerScreen({
             round
             variant="filled"
             icon="more-horizontal"
-            label="More"
+            label={t`More`}
             {...triggerProps("menu", menuOpen)}
             onClick={() => setMenuOpen(true)}
           />
@@ -385,7 +386,7 @@ export function ComputerScreen({
             anchor={more}
             side="bottom"
             align="end"
-            label="More"
+            label={t`More`}
           >
             {menu}
           </Menu>

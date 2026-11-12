@@ -7,13 +7,14 @@ import {
   sealLogin,
   sealLoginImport,
 } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { KeyProblem, loadHealth, lockedVaultError, VAULT_LOCKED } from "./keys-api.ts";
 
 // An export takes keyd a few Keychain writes a login.
 const IMPORT_WAIT_MS = 10 * 60_000;
-const UPDATE_FIRST = "Update localDot key protection to save logins.";
-const OFFLINE = "Key protection is off, so nothing was saved.";
+const UPDATE_FIRST = t`Update localDot key protection to save logins.`;
+const OFFLINE = t`Key protection is off, so nothing was saved.`;
 
 export class ImportUnconfirmed extends Error {
   constructor() {
@@ -65,7 +66,7 @@ export const removeLogin = (api: ApiClient, origin: string) =>
 // this page nor the daemon keeps a copy or a name.
 export async function importLogins(api: ApiClient, file: File): Promise<LoginImport> {
   if (file.size > MAX_EXPORT_BYTES)
-    throw new KeyProblem("This file is too big to be a password export. Export only your logins.");
+    throw new KeyProblem(t`This file is too big to be a password export. Export only your logins.`);
   const bytes = new Uint8Array(await file.arrayBuffer());
   try {
     return await sealedAgain(async () =>
@@ -100,12 +101,12 @@ async function send(api: ApiClient, sealed: Sealed): Promise<LoginImport> {
 export function loginProblem(err: unknown, otherwise: string): string {
   if (err instanceof KeyProblem) return err.message;
   if (err instanceof ImportUnconfirmed)
-    return "Couldn't confirm the import. It may still be running, so your list may fill in by itself.";
+    return t`Couldn't confirm the import. It may still be running, so your list may fill in by itself.`;
   if (lockedVaultError(err)) return VAULT_LOCKED;
   if (err instanceof ApiError) {
     if (errorCode(err) === "not-an-export")
-      return "This file doesn't look like a password export. Export your logins as CSV, then try again.";
-    if (err.status === 413) return "This file is too big to be a password export.";
+      return t`This file doesn't look like a password export. Export your logins as CSV, then try again.`;
+    if (err.status === 413) return t`This file is too big to be a password export.`;
     if (err.status === 503) return OFFLINE;
   }
   return otherwise;

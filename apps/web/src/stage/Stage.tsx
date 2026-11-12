@@ -12,6 +12,7 @@ import {
 } from "react";
 import type { BrowserEngineName } from "../../../../packages/protocol/src/browser-engine.ts";
 import type { CellSummary } from "../cells/types.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { onForeground } from "../lib/foreground.ts";
 import { BrowserWindow, sayApart } from "./BrowserWindow.tsx";
@@ -105,8 +106,8 @@ const SWITCH_KEYS = isApple() ? "Option-Tab" : "Alt+Tab";
 // Where the keys typed go, and the keys that bring the other window forward.
 export function keysTo(front: "desktop" | "browser"): string {
   return front === "browser"
-    ? `Keys go to the web browser's window. ${SWITCH_KEYS} brings the desktop forward.`
-    : `Keys go to the desktop. ${SWITCH_KEYS} brings the web browser forward.`;
+    ? t`Keys go to the web browser's window. ${SWITCH_KEYS} brings the desktop forward.`
+    : t`Keys go to the desktop. ${SWITCH_KEYS} brings the web browser forward.`;
 }
 
 export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
@@ -138,7 +139,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
         ? { ok: true }
         : {
             ok: false,
-            reason: "This browser lacks WebCodecs. Open localDot in a current Chromium browser.",
+            reason: t`This browser lacks WebCodecs. Open localDot in a current Chromium browser.`,
           };
   const canvas = useRef<StageCanvasHandle>(null);
   const keyboard = useRef<ManualSurfaceHandle>(null);

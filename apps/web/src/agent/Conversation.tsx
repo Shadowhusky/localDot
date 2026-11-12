@@ -19,6 +19,7 @@ import {
 import { createPortal, flushSync } from "react-dom";
 import { count } from "../copy/format.ts";
 import { VOICES } from "../dot/voices.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { newestOffers, sameOffers } from "../previews/PreviewCard.tsx";
 import { RoutineCard } from "../routines/RoutineCard.tsx";
@@ -113,18 +114,19 @@ function rowsAtEnd(view: HTMLElement | null): KeptRows {
 
 // What the jump button says has arrived: one kind by its name, a mix as updates. Your answers are
 // messages too.
-const MESSAGES: [string, string] = ["new message", "new messages"];
-const NEW: Partial<Record<ThreadKind, [string, string]>> = {
+const MESSAGES = (n: number) => count(n, "new message", "new messages");
+const NEW: Partial<Record<ThreadKind, (n: number) => string>> = {
   message: MESSAGES,
   answer: MESSAGES,
-  question: ["new question", "new questions"],
-  result: ["new result", "new results"],
-  routine: ["new routine", "new routines"],
+  question: (n) => count(n, "new question", "new questions"),
+  result: (n) => count(n, "new result", "new results"),
+  routine: (n) => count(n, "new routine", "new routines"),
 };
+const UPDATES = (n: number) => count(n, "new update", "new updates");
 function unreadLabel(kinds: readonly ThreadKind[]): string {
   const nouns = new Set(kinds.map((kind) => NEW[kind]));
-  const [one, many] = (nouns.size === 1 && [...nouns][0]) || ["new update", "new updates"];
-  return count(kinds.length, one, many);
+  const said = (nouns.size === 1 && [...nouns][0]) || UPDATES;
+  return said(kinds.length);
 }
 
 const SWITCH_ARMED_MS = 5000;
@@ -232,23 +234,23 @@ const MessageCard = memo(function MessageCard({
       <CopyButton
         className="thread-copy"
         text={body}
-        label={user ? "Copy your message" : "Copy dot's message"}
+        label={user ? t`Copy your message` : t`Copy dot's message`}
         announce={announce}
       />
     </span>
   );
   const tag = message.stopped
-    ? "Not sent"
+    ? t`Not sent`
     : message.interrupted === "wait"
-      ? "dot stopped waiting to read this"
+      ? t`dot stopped waiting to read this`
       : message.interrupted === "command"
-        ? "dot left its command running to read this"
+        ? t`dot left its command running to read this`
         : message.kind === "steer"
-          ? "Sent while working"
+          ? t`Sent while working`
           : message.queued
             ? message.waitsFor
-              ? "After this task, on another model"
-              : "After this task"
+              ? t`After this task, on another model`
+              : t`After this task`
             : undefined;
   return (
     <article
@@ -258,7 +260,7 @@ const MessageCard = memo(function MessageCard({
       data-narration={narration || undefined}
       data-streaming={!message.final || undefined}
       data-holding={holding || undefined}
-      aria-label={user ? "You" : "dot"}
+      aria-label={user ? t`You` : "dot"}
     >
       {user ? (
         <>
@@ -292,7 +294,7 @@ const MessageCard = memo(function MessageCard({
           <SafeMarkdown text={message.text} streaming={!message.final} announce={announce} />
         </>
       )}
-      {message.truncated && <p className="thread-note">Message preview shortened.</p>}
+      {message.truncated && <p className="thread-note">{t`Message preview shortened.`}</p>}
     </article>
   );
 });
@@ -330,14 +332,14 @@ function SteerMessage({
       <Button
         variant="quiet"
         size="sm"
-        disabledReason={busy ? "Updating message…" : undefined}
+        disabledReason={busy ? t`Updating message…` : undefined}
         onClick={() => {
           if (pending.current) return;
           // The composer takes the message back, and says how that went; this row leaves once
           // dot has given it back.
           const taking = editQueued(queue.sessionId, messageId);
           if (!taking) {
-            setError("Couldn't move this message to the composer. Try again.");
+            setError(t`Couldn't move this message to the composer. Try again.`);
             return;
           }
           pending.current = true;
@@ -351,7 +353,7 @@ function SteerMessage({
           });
         }}
       >
-        Edit
+        {t`Edit`}
       </Button>
       {waitsFor !== "handover" && (
         <Button
@@ -362,7 +364,7 @@ function SteerMessage({
             if (pending.current) return;
             if (waitsFor === "switch" && !arming) {
               setArming(true);
-              announce("Switching now ends what dot is running. Press again to switch.");
+              announce(t`Switching now ends what dot is running. Press again to switch.`);
               return;
             }
             setArming(false);
@@ -373,10 +375,10 @@ function SteerMessage({
             lifetime.current = abort;
             void steerQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
               .then(() => {
-                if (!abort.signal.aborted) announce("Message sent to steer dot.");
+                if (!abort.signal.aborted) announce(t`Message sent to steer dot.`);
               })
               .catch(() => {
-                if (!abort.signal.aborted) setError("Couldn't confirm steering. Try again.");
+                if (!abort.signal.aborted) setError(t`Couldn't confirm steering. Try again.`);
               })
               .finally(() => {
                 pending.current = false;
@@ -385,16 +387,16 @@ function SteerMessage({
           }}
         >
           {waitsFor !== "switch"
-            ? "Steer now"
+            ? t`Steer now`
             : arming
-              ? "End what's running and switch"
-              : "Switch now"}
+              ? t`End what's running and switch`
+              : t`Switch now`}
         </Button>
       )}
       <Button
         variant="quiet"
         size="sm"
-        disabledReason={busy ? "Updating message…" : undefined}
+        disabledReason={busy ? t`Updating message…` : undefined}
         onClick={() => {
           if (pending.current) return;
           pending.current = true;
@@ -404,11 +406,11 @@ function SteerMessage({
           lifetime.current = abort;
           void cancelQueuedMessage(queue.api, queue.sessionId, messageId, abort.signal)
             .then(() => {
-              if (!abort.signal.aborted) announce("Queued message cancelled.");
+              if (!abort.signal.aborted) announce(t`Queued message cancelled.`);
             })
             .catch(() => {
               if (!abort.signal.aborted)
-                setError("Couldn't cancel this message. It may have started already. Try again.");
+                setError(t`Couldn't cancel this message. It may have started already. Try again.`);
             })
             .finally(() => {
               pending.current = false;
@@ -416,7 +418,7 @@ function SteerMessage({
             });
         }}
       >
-        Cancel
+        {t`Cancel`}
       </Button>
       {error && (
         <span className="thread-note" role="alert">
@@ -437,10 +439,10 @@ function TakeBack({ onTakeBack }: { onTakeBack(): Promise<boolean> | null }) {
         size="sm"
         onClick={() => {
           setError(null);
-          if (!onTakeBack()) setError("Couldn't move this message to the composer. Try again.");
+          if (!onTakeBack()) setError(t`Couldn't move this message to the composer. Try again.`);
         }}
       >
-        Edit
+        {t`Edit`}
       </Button>
       {error && (
         <span className="thread-note" role="alert">
@@ -504,16 +506,18 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
   },
   unapproved: {
     draw: ({ item }) => (
-      <article className="thread-question" aria-label="Not approved">
+      <article className="thread-question" aria-label={t`Not approved`}>
         <p className="thread-question-text">{item.title}</p>
-        <p className="thread-note">Not approved: you sent a message instead, so it didn't run.</p>
+        <p className="thread-note">
+          {t`Not approved: you sent a message instead, so it didn't run.`}
+        </p>
       </article>
     ),
     same: (was, now) => was.title === now.title,
   },
   answer: {
     draw: ({ item }) => (
-      <article className="thread-message" data-role="user" aria-label="Your answer">
+      <article className="thread-message" data-role="user" aria-label={t`Your answer`}>
         <p className="thread-bubble">{answerSummary(item.question)}</p>
       </article>
     ),
@@ -714,7 +718,7 @@ function heldBubble(
   const user = message.role === "user";
   const text = user ? splitAttachments(message.text).body : message.text;
   const copy: BubbleItem = {
-    label: "Copy",
+    label: t`Copy`,
     icon: "copy",
     run: () => {
       const blocked = copyBlocked(text);
@@ -723,8 +727,8 @@ function heldBubble(
         return;
       }
       navigator.clipboard.writeText(text).then(
-        () => showToast({ title: "Copied" }),
-        () => showToast({ title: "Couldn't copy", tone: "danger" }),
+        () => showToast({ title: t`Copied` }),
+        () => showToast({ title: t`Couldn't copy`, tone: "danger" }),
       );
     },
   };
@@ -732,7 +736,7 @@ function heldBubble(
     return {
       from,
       mine: true,
-      items: [copy, { label: "Edit and send again", icon: "compose", run: () => act.again(text) }],
+      items: [copy, { label: t`Edit and send again`, icon: "compose", run: () => act.again(text) }],
     };
   const at = shown.findIndex((item) => item.kind === "message" && item.message.id === message.id);
   const own = at >= 0 ? (shown[at] as Extract<ThreadItem, { kind: "message" }>) : undefined;
@@ -753,11 +757,11 @@ function heldBubble(
     ...(note ? { note } : {}),
     items: [
       copy,
-      { label: "Select text", icon: "type", run: () => act.select(text) },
+      { label: t`Select text`, icon: "type", run: () => act.select(text) },
       ...(steps?.steps.length
         ? [
             {
-              label: open ? "Hide steps" : "Show steps",
+              label: open ? t`Hide steps` : t`Show steps`,
               icon: "list" as const,
               run: () => act.toggleSteps(steps.key, !open),
             },
@@ -766,7 +770,7 @@ function heldBubble(
       ...(steps?.steps.length && task && finished
         ? [
             {
-              label: "Watch this part",
+              label: t`Watch this part`,
               icon: "history" as const,
               run: () =>
                 act.replay(
@@ -777,7 +781,7 @@ function heldBubble(
           ]
         : []),
       {
-        label: "Share",
+        label: t`Share`,
         icon: "share" as const,
         run: () => {
           if (typeof navigator.share === "function") void navigator.share({ text }).catch(() => {});
@@ -991,7 +995,9 @@ export function Conversation({
     announced.current = { owner: ownerKey, id: message.id };
     speak(
       "thread",
-      keyLikePresent(message.text) ? "dot replied." : `dot replied: ${message.text.slice(0, 200)}`,
+      keyLikePresent(message.text)
+        ? t`dot replied.`
+        : t`dot replied: ${message.text.slice(0, 200)}`,
     );
   }, [completed, ownerKey, visible]);
 
@@ -1468,20 +1474,20 @@ export function Conversation({
           <section
             className="thread"
             ref={history}
-            aria-label="Conversation history"
+            aria-label={t`Conversation history`}
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users focus the history to scroll it.
             tabIndex={0}
           >
             {(earlierInReplay || truncated) && !page.hasOlder && !olderTasks && !loading && (
               <p className="thread-note thread-start">
                 {earlierInReplay
-                  ? "Earlier messages are in Replay."
-                  : "Earlier messages are kept in the task log."}
+                  ? t`Earlier messages are in Replay.`
+                  : t`Earlier messages are kept in the task log.`}
               </p>
             )}
             {(page.hasOlder || olderTasks) && !loading && (
               <div className="thread-older" ref={edges.older}>
-                {earlier?.reading && <Spinner size={16} label="Loading earlier messages" />}
+                {earlier?.reading && <Spinner size={16} label={t`Loading earlier messages`} />}
               </div>
             )}
             <HistoryPages
@@ -1507,13 +1513,13 @@ export function Conversation({
               <div className="thread-empty thread-start-steps">{start}</div>
             ) : empty ? (
               <div className="thread-empty">
-                <h3>What should we do?</h3>
+                <h3>{t`What should we do?`}</h3>
                 <p>
                   {computerReady
-                    ? "dot works on its own computer. Watch, step in or stop it at any time."
+                    ? t`dot works on its own computer. Watch, step in or stop it at any time.`
                     : computerUpdating
-                      ? "Your computer is updating. Ask dot once it's back, in about a minute."
-                      : "Turn on your computer, then ask dot to do something."}
+                      ? t`Your computer is updating. Ask dot once it's back, in about a minute.`
+                      : t`Turn on your computer, then ask dot to do something.`}
                 </p>
                 <div className="thread-suggestions">
                   {suggestions.map((text) => (
@@ -1535,7 +1541,7 @@ export function Conversation({
             )}
             {page.hasNewer && (
               <p className="thread-note thread-newer" ref={edges.newer}>
-                Loading later…
+                {t`Loading later…`}
               </p>
             )}
             {!loading &&
@@ -1583,7 +1589,7 @@ export function Conversation({
           variant="quiet"
           icon="arrow-down"
           aria-label={
-            choiceWaits ? undefined : unread.length ? unreadLabel(unread) : "Jump to latest"
+            choiceWaits ? undefined : unread.length ? unreadLabel(unread) : t`Jump to latest`
           }
           onClick={() => {
             page.latest();
@@ -1593,10 +1599,10 @@ export function Conversation({
         >
           <span className="thread-jump-label">
             {choiceWaits
-              ? "Check your last message"
+              ? t`Check your last message`
               : unread.length
                 ? unreadLabel(unread)
-                : "Latest"}
+                : t`Latest`}
           </span>
         </Button>
       </span>
@@ -1621,9 +1627,9 @@ export function Conversation({
           <Sheet
             open={selecting !== null}
             onClose={() => setSelecting(null)}
-            title="Select text"
+            title={t`Select text`}
             side="bottom"
-            doneLabel="Done"
+            doneLabel={t`Done`}
           >
             <div className="bubble-select">
               <SafeMarkdown text={selecting ?? ""} streaming={false} announce={announce} />

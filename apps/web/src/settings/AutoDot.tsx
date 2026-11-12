@@ -1,11 +1,12 @@
 import type { AgentRoleChoice } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import { Switch } from "../ui/Switch.tsx";
 
 // Why Auto can't pick: a ChatGPT plan's one Codex process is the task's, with nothing to spare
 // for the quick request that picks.
 export function autoDotReason(main: AgentRoleChoice | undefined): string | undefined {
   return main?.provider === "chatgpt"
-    ? "Not with the ChatGPT plan, which answers one request at a time."
+    ? t`Not with the ChatGPT plan, which answers one request at a time.`
     : undefined;
 }
 
@@ -25,8 +26,8 @@ export function AutoDot({
   return (
     <Switch
       className={className}
-      label="Auto"
-      description="Picks each new conversation's dot in the quick request that names it. A new task may wait up to 4 seconds for it."
+      label={t`Auto`}
+      description={t`Picks each new conversation's dot in the quick request that names it. A new task may wait up to 4 seconds for it.`}
       checked={on && !disabledReason}
       {...(disabledReason ? { disabledReason } : {})}
       onCheckedChange={(checked) => onChange(checked)}
@@ -36,6 +37,6 @@ export function AutoDot({
 
 export function dotChoiceNote(auto: boolean): string {
   return auto
-    ? "When Auto can't pick in time, the dot chosen here works the task."
-    : "Your choice applies from the next task.";
+    ? t`When Auto can't pick in time, the dot chosen here works the task.`
+    : t`Your choice applies from the next task.`;
 }

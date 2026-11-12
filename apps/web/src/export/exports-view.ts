@@ -1,4 +1,5 @@
 import type { HostExport } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import { clockLabel, dayLabel, timeLabel } from "../replay/replay-view.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
 import { fileSize, videoLength } from "./export-plan.ts";
@@ -15,17 +16,17 @@ export function exportRunning(record: Pick<HostExport, "phase">): boolean {
 export function exportMeta(record: HostExport, now: Date): string {
   switch (record.phase) {
     case "queued":
-      return "Waiting to start";
+      return t`Waiting to start`;
     case "making":
-      if (!record.total) return "Getting the recording ready";
-      return `${exportPercent(record)}% · ${record.leftMs === null ? "working out the time left" : `about ${timeLabel(record.leftMs)} left`}`;
+      if (!record.total) return t`Getting the recording ready`;
+      return `${exportPercent(record)}% · ${record.leftMs === null ? t`working out the time left` : t`about ${timeLabel(record.leftMs)} left`}`;
     case "done": {
       const made = new Date(record.createdAt).toISOString();
       const length = record.durationS === null ? "" : ` · ${videoLength(record.durationS)}`;
       return `${fileSize(record.bytes)}${length} · ${dayLabel(made, now)} ${clockLabel(made)}`;
     }
     case "failed":
-      return record.error ?? "This video couldn't be made.";
+      return record.error ?? t`This video couldn't be made.`;
   }
 }
 
@@ -35,12 +36,12 @@ export function exportGlyph(record: Pick<HostExport, "phase">): {
 } {
   switch (record.phase) {
     case "queued":
-      return { state: "todo", label: "Waiting" };
+      return { state: "todo", label: t`Waiting` };
     case "making":
-      return { state: "doing", label: "Making" };
+      return { state: "doing", label: t`Making` };
     case "done":
-      return { state: "done", label: "Ready" };
+      return { state: "done", label: t`Ready` };
     case "failed":
-      return { state: "failed", label: "Failed" };
+      return { state: "failed", label: t`Failed` };
   }
 }

@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { timeLabel } from "../replay/replay-view.ts";
@@ -42,12 +43,13 @@ export interface TrimHold {
   dragging: boolean;
 }
 
-export const EDGE_LABEL: Record<TrimEdge, string> = { from: "Start", to: "End" };
+export const EDGE_LABEL: Record<TrimEdge, string> = { from: tr("Start"), to: tr("End") };
+const EDGE_TIME_LABEL: Record<TrimEdge, string> = { from: tr("Start time"), to: tr("End time") };
 
 const SHORTCUT_LABEL: Record<TrimShortcut, string> = {
-  whole: "Whole",
-  chapter: "This step",
-  selection: "Selection",
+  whole: tr("Whole"),
+  chapter: tr("This step"),
+  selection: tr("Selection"),
 };
 
 // The part of the recording that goes in the video: a strip of its key frames with a handle at each
@@ -283,7 +285,7 @@ export function Trim({
           onTime={(time) => onRange(moveEdge(range, whole, "from", time), "from")}
         />
         <span className="trim-length num">
-          {timeLabel(range.toMs - range.fromMs)} of {timeLabel(span)}
+          {t`${timeLabel(range.toMs - range.fromMs)} of ${timeLabel(span)}`}
         </span>
         <TrimTime
           edge="to"
@@ -294,7 +296,7 @@ export function Trim({
       <div className="trim-shortcuts">
         <SegmentedControl
           size={24}
-          aria-label="Range"
+          aria-label={t`Range`}
           items={(["whole", "chapter", "selection"] as const).map((name) => ({
             value: name,
             label: SHORTCUT_LABEL[name],
@@ -308,7 +310,7 @@ export function Trim({
         />
         <Switch
           className="trim-snap"
-          label="Snap to steps"
+          label={t`Snap to steps`}
           checked={snap}
           onCheckedChange={onSnap}
         />
@@ -347,7 +349,7 @@ function TrimTime({
       size="sm"
       className="trim-time num"
       prefix={EDGE_LABEL[edge]}
-      aria-label={`${EDGE_LABEL[edge]} time`}
+      aria-label={EDGE_TIME_LABEL[edge]}
       autoComplete="off"
       spellCheck={false}
       enterKeyHint="done"

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 export interface SharedLook {
@@ -55,7 +56,7 @@ export function SharedScreen({ look }: { look: SharedLook }) {
     <div className="shared-screen">
       <img className="shared-screen-frame" src={look.url} alt="" />
       <p className="shared-screen-note" role="status">
-        Another task is using the screen. This is where this task left it.
+        {t`Another task is using the screen. This is where this task left it.`}
       </p>
     </div>
   );

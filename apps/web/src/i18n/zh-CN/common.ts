@@ -3,6 +3,7 @@ import type { Catalog } from "../index.ts";
 // Words many parts of the app share, kept here once: units, counts, and the short labels buttons and
 // rows use everywhere.
 export const common = {
+  "[source] From": "来源",
   "byte|bytes": "# 字节",
   "{0} token": "{0} 个 token",
   "{0} tokens": "{0} 个 token",
@@ -25,7 +26,6 @@ export const common = {
   Hide: "隐藏",
   Interrupted: "已中断",
   Later: "稍后",
-  "Learn more": "了解更多",
   Memory: "记忆",
   Model: "模型",
   More: "更多",

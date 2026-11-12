@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { rich, t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { Combobox } from "../ui/Combobox.tsx";
@@ -97,9 +98,9 @@ export interface KeyField {
 type Problem = { field: DraftField | "form"; message: string };
 
 const KINDS = [
-  { value: "llm", label: "Provider" },
-  { value: "http", label: "Custom API" },
-  { value: "secret", label: "General key" },
+  { value: "llm", label: tr("Provider") },
+  { value: "http", label: tr("Custom API") },
+  { value: "secret", label: tr("General key") },
 ];
 
 const PROVIDER_PICKS = PROVIDER_GROUPS.map((group) => ({
@@ -122,7 +123,7 @@ function clipboardReadable(): boolean {
 }
 
 export const savedLine = (id: string, restart: boolean) =>
-  restart ? `Saved ${id}. Restart your computer to use it there.` : `Saved ${id}.`;
+  restart ? t`Saved ${id}. Restart your computer to use it there.` : t`Saved ${id}.`;
 
 // The key itself lives only in the key field's DOM value (never in React state): it is read
 // on submit, the field is cleared at once, and the page sends keyd's sealed copy.
@@ -176,8 +177,8 @@ export function KeyForm({
   const overwrites = !reenter && taken.includes(draft.id.trim());
   const asksToReplace = (!!reenter && general) || overwrites;
   const replaceWords = overwrites
-    ? "Replace the saved key with this ID"
-    : "Replace the saved secret";
+    ? t`Replace the saved key with this ID`
+    : t`Replace the saved secret`;
   // A tick is for the key it was given beside.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the ID is what the tick was for
   useEffect(() => setReplacing(false), [draft.id]);
@@ -313,7 +314,7 @@ export function KeyForm({
       : {
           ok: false,
           field: "value",
-          message: "This key can't be entered again here. Remove it, then add it again.",
+          message: t`This key can't be entered again here. Remove it, then add it again.`,
         };
   const hint = reenter
     ? valueHint({ ...draft, kind: reenter.kind, provider: reenter.provider as Provider })
@@ -349,7 +350,7 @@ export function KeyForm({
     } catch {
       setProblem({
         field: "value",
-        message: "The browser kept what you copied to itself. Paste into the field instead.",
+        message: t`The browser kept what you copied to itself. Paste into the field instead.`,
       });
       return;
     }
@@ -391,7 +392,12 @@ export function KeyForm({
     setTried(true);
     setSaved(null);
     if (asksToReplace && !replacing) {
-      setProblem({ field: "value", message: `Tick ${replaceWords}, then save.` });
+      setProblem({
+        field: "value",
+        message: overwrites
+          ? t`Tick Replace the saved key with this ID, then save.`
+          : t`Tick Replace the saved secret, then save.`,
+      });
       reveal();
       return;
     }
@@ -409,7 +415,7 @@ export function KeyForm({
       setProblem({
         ...check,
         message: value
-          ? `${check.message} Paste the key again after correcting it.`
+          ? t`${check.message} Paste the key again after correcting it.`
           : check.message,
       });
       reveal();
@@ -455,8 +461,8 @@ export function KeyForm({
       setProblem({
         field: "form",
         message: lockedVaultError(err)
-          ? `${problemText(err)}, then paste the key again.`
-          : `${problemText(err)} Paste the key again to retry.`,
+          ? t`${problemText(err)}, then paste the key again.`
+          : t`${problemText(err)} Paste the key again to retry.`,
       });
     } finally {
       savingRef.current = false;
@@ -467,7 +473,7 @@ export function KeyForm({
   const readOnly = locked || saving;
   const typed = draft.id.trim();
   const baseURLField = (
-    <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
+    <Field label={t`Base URL`} description={urlHint} error={errorFor("baseURL")}>
       <TextField
         {...PLAIN}
         value={draft.baseURL}
@@ -476,8 +482,8 @@ export function KeyForm({
         enterKeyHint="next"
         placeholder={
           draft.provider === "anthropic-compatible"
-            ? "e.g. https://api.example.com/anthropic"
-            : "e.g. https://api.example.com/v1"
+            ? t`e.g. https://api.example.com/anthropic`
+            : t`e.g. https://api.example.com/v1`
         }
         onChange={(e) => set({ baseURL: e.target.value })}
       />
@@ -489,7 +495,7 @@ export function KeyForm({
       className="keys-form"
       onSubmit={submit}
       noValidate
-      aria-label={reenter ? `Re-enter ${reenter.id}` : "Add a key"}
+      aria-label={reenter ? t`Re-enter ${reenter.id}` : t`Add a key`}
       aria-busy={saving}
       autoComplete="off"
     >
@@ -499,40 +505,35 @@ export function KeyForm({
         <p className="keys-reenter-note">
           <Icon name="lock" size={14} />
           <span>
-            {general ? (
-              "Stored as a general key"
-            ) : (
-              <>
-                Sent only to <span className="keys-reenter-to">{destinationOf(reenter)}</span>
-              </>
-            )}
-            , as before. Its name and everything that uses it stay the same.
+            {general
+              ? t`Stored as a general key, as before. Its name and everything that uses it stay the same.`
+              : rich`Sent only to ${<span className="keys-reenter-to">{destinationOf(reenter)}</span>}, as before. Its name and everything that uses it stay the same.`}
           </span>
         </p>
       ) : (
         <>
-          <Field label="Name" description="A clear label helps dot choose the right key.">
+          <Field label={t`Name`} description={t`A clear label helps dot choose the right key.`}>
             <TextField
               value={metadata.label ?? ""}
               readOnly={readOnly}
               maxLength={80}
-              placeholder="e.g. Studio production"
+              placeholder={t`e.g. Studio production`}
               onChange={(e) => setMetadata({ ...metadata, label: e.target.value })}
             />
           </Field>
           <SegmentedControl
-            aria-label="Kind of key"
+            aria-label={t`Kind of key`}
             items={KINDS}
             value={draft.kind}
             onValueChange={(kind) => set({ kind: kind as KeyDraft["kind"] })}
           />
           {draft.kind === "llm" ? (
             <>
-              <Field label="Provider">
+              <Field label={t`Provider`}>
                 <Combobox
                   value={draft.provider}
                   groups={PROVIDER_PICKS}
-                  searchPlaceholder="Search providers"
+                  searchPlaceholder={t`Search providers`}
                   onValueChange={(provider) => set({ provider: provider as Provider })}
                 />
               </Field>
@@ -541,8 +542,8 @@ export function KeyForm({
           ) : draft.kind === "http" ? (
             <>
               <Field
-                label="Hosts"
-                description="The key goes to these hosts only. Separate several with commas."
+                label={t`Hosts`}
+                description={t`The key goes to these hosts only. Separate several with commas.`}
                 error={errorFor("hosts")}
               >
                 <TextField
@@ -551,22 +552,22 @@ export function KeyForm({
                   readOnly={readOnly}
                   inputMode="url"
                   enterKeyHint="next"
-                  placeholder="e.g. api.example.com"
+                  placeholder={t`e.g. api.example.com`}
                   onChange={(e) => set({ hosts: e.target.value })}
                 />
               </Field>
               <div className="keys-pair">
-                <Field label="Header" error={errorFor("header")} validates={paired}>
+                <Field label={t`Header`} error={errorFor("header")} validates={paired}>
                   <TextField
                     {...PLAIN}
                     value={draft.header}
                     readOnly={readOnly}
                     enterKeyHint="next"
-                    placeholder="e.g. Authorization"
+                    placeholder={t`e.g. Authorization`}
                     onChange={(e) => set({ header: e.target.value })}
                   />
                 </Field>
-                <Field label="Sent as" validates={paired}>
+                <Field label={t`Sent as`} validates={paired}>
                   <Select
                     value={draft.format}
                     items={FORMAT_PICKS}
@@ -577,40 +578,39 @@ export function KeyForm({
             </>
           ) : (
             <p className="keys-general-note">
-              Save any key or configuration value, including a license, database credential or
-              multiline private key. No provider, website or authentication format is required.
+              {t`Save any key or configuration value, including a license, database credential or multiline private key. No provider, website or authentication format is required.`}
             </p>
           )}
           <Field
-            label="Service (optional)"
-            description="An app, project or service that uses this key. It can be anything."
+            label={t`Service (optional)`}
+            description={t`An app, project or service that uses this key. It can be anything.`}
           >
             <TextField
               value={metadata.service ?? ""}
               readOnly={readOnly}
               maxLength={80}
-              placeholder="e.g. My company API"
+              placeholder={t`e.g. My company API`}
               onChange={(e) => setMetadata({ ...metadata, service: e.target.value })}
             />
           </Field>
           <Field
-            label="Use for (optional)"
-            description="Tell dot what this key can do. Describe its purpose or account; never paste secrets here."
+            label={t`Use for (optional)`}
+            description={t`Tell dot what this key can do. Describe its purpose or account; never paste secrets here.`}
           >
             <TextField
               value={metadata.description ?? ""}
               readOnly={readOnly}
               maxLength={600}
-              placeholder="e.g. Search our catalog and read product details"
+              placeholder={t`e.g. Search our catalog and read product details`}
               onChange={(e) => setMetadata({ ...metadata, description: e.target.value })}
             />
           </Field>
           <Field
-            label="Key ID (optional)"
+            label={t`Key ID (optional)`}
             description={
               typed && taken.includes(typed)
-                ? "Saving replaces the key with this ID."
-                : "A short name for tools and scripts. Leave blank to create one."
+                ? t`Saving replaces the key with this ID.`
+                : t`A short name for tools and scripts. Leave blank to create one.`
             }
             error={errorFor("id")}
           >
@@ -626,13 +626,9 @@ export function KeyForm({
         </>
       )}
       <Field
-        label="Key"
+        label={t`Key`}
         description={
-          hint ? (
-            <>
-              Starts with <code className="keys-code">{hint}</code>
-            </>
-          ) : undefined
+          hint ? rich`Starts with ${<code className="keys-code">{hint}</code>}` : undefined
         }
         error={errorFor("value")}
         disabledReason={unavailable}
@@ -667,7 +663,7 @@ export function KeyForm({
               clipboardReadable() ? (
                 <IconButton
                   icon="clipboard-paste"
-                  label="Paste key"
+                  label={t`Paste key`}
                   size={24}
                   disabledReason={unavailable}
                   onClick={() => void paste()}
@@ -691,7 +687,7 @@ export function KeyForm({
       {asksToReplace && (
         <Checkbox
           label={replaceWords}
-          description="What you typed above takes its place."
+          description={t`What you typed above takes its place.`}
           checked={replacing}
           onCheckedChange={(on) => {
             setReplacing(on);
@@ -713,7 +709,7 @@ export function KeyForm({
         {onCancel && (
           <Button
             variant="quiet"
-            disabledReason={saving ? "Wait for the key to save" : undefined}
+            disabledReason={saving ? t`Wait for the key to save` : undefined}
             onClick={() => {
               if (valueRef.current) valueRef.current.value = "";
               report();
@@ -725,7 +721,7 @@ export function KeyForm({
               onCancel();
             }}
           >
-            Cancel
+            {t`Cancel`}
           </Button>
         )}
         {actions}
@@ -736,11 +732,11 @@ export function KeyForm({
           disabledReason={
             saving
               ? undefined
-              : (unavailable ?? (busy ? "Wait for the other key change to finish" : undefined))
+              : (unavailable ?? (busy ? t`Wait for the other key change to finish` : undefined))
           }
           aria-describedby={statusId}
         >
-          Save key
+          {t`Save key`}
         </Button>
       </div>
     </form>

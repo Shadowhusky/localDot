@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
@@ -40,13 +40,13 @@ export function workPictures(
     for (const image of row.agent?.images ?? [])
       pictures.push({
         key: `${step.key}/${image.name}`,
-        label: `Preview image: ${image.alt || step.title}`,
+        label: t`Preview image: ${image.alt || step.title}`,
         image,
       });
     if (row.computer?.frameId)
       screen = {
         key: `${step.key}/screen`,
-        label: `Preview screenshot: ${step.title}`,
+        label: t`Preview screenshot: ${step.title}`,
         frameId: row.computer.frameId,
       };
   }
@@ -65,12 +65,13 @@ function picturesResource(
     noun: "picture",
     index,
     entries: pictures.map((shown) => {
-      if ("frameId" in shown) return { sessionId, frameId: shown.frameId, name: "Step screenshot" };
+      if ("frameId" in shown)
+        return { sessionId, frameId: shown.frameId, name: t`Step screenshot` };
       const { name, alt } = shown.image;
       return {
         sessionId,
         resultId: name,
-        title: alt || "Image output",
+        title: alt || t`Image output`,
         file: { name, path: name, bytes: bytes(shown) ?? 0 },
       };
     }),
@@ -229,7 +230,7 @@ export function WorkPictures({
     <ul
       ref={setStrip}
       className="thread-pictures"
-      aria-label="Pictures"
+      aria-label={t`Pictures`}
       data-strip={unfolded || undefined}
     >
       {pictures.slice(0, more ? SHOWN - 1 : undefined).map((shown, index) => (
@@ -265,7 +266,7 @@ export function WorkPictures({
         <li>
           <ThumbnailButton
             className="thread-picture thread-pictures-more"
-            label={`Show ${count(more, "more picture", "more pictures")}`}
+            label={more === 1 ? t`Show ${more} more picture` : t`Show ${more} more pictures`}
             onClick={() => setUnfolded(true)}
           >
             <span className="num" aria-hidden="true">

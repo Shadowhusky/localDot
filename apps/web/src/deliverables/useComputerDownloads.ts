@@ -1,6 +1,7 @@
 import { computerFileName } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FileState } from "../agent/ResultFiles.tsx";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { downloadComputerFile } from "./api.ts";
 import { anyEntryKey, type ComputerEntry, type ViewerDownloads } from "./viewer/scope.tsx";
@@ -77,7 +78,7 @@ export function useComputerDownloads(api: ApiClient | null): ViewerDownloads<Com
       state: (entry) => states.get(anyEntryKey(entry)),
       blocked: (entry) =>
         busy && states.get(anyEntryKey(entry)) !== "busy"
-          ? "Another download is still running."
+          ? t`Another download is still running.`
           : undefined,
       request: (entry) => void request(entry),
     };

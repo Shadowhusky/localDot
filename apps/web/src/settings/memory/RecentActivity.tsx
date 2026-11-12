@@ -1,4 +1,5 @@
 import type { RecentTask } from "@localdot/protocol";
+import { t } from "../../i18n/index.ts";
 import { Collapse } from "../../ui/Disclosure.tsx";
 import { Group, GroupHead } from "../../ui/Group.tsx";
 import { Switch } from "../../ui/Switch.tsx";
@@ -19,17 +20,17 @@ export function RecentActivity({
 }) {
   return (
     <section className="memory-section" aria-labelledby="recent-title">
-      <GroupHead id="recent-title" title="Recent activity" />
+      <GroupHead id="recent-title" title={t`Recent activity`} />
       <Group>
         <Switch
           className="ui-group-row"
-          label="Tell dot about recent tasks"
-          description="New tasks start with how your last five went, so dot picks up where you left off."
+          label={t`Tell dot about recent tasks`}
+          description={t`New tasks start with how your last five went, so dot picks up where you left off.`}
           checked={control.on}
           onCheckedChange={control.change}
         />
         <Collapse open={control.on && tasks.length > 0}>
-          <ul className="memory-list memory-recent" aria-label="Recent tasks dot hears about">
+          <ul className="memory-list memory-recent" aria-label={t`Recent tasks dot hears about`}>
             {tasks.map((task) => (
               <li key={task.sessionId} className="ui-group-row">
                 <div className="ui-group-row-line">

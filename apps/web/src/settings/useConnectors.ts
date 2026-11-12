@@ -5,6 +5,7 @@ import type {
   ConnectorView,
 } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   addConnector,
@@ -127,7 +128,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
 
   const add = useCallback<ConnectorsView["add"]>(
     (draft, key) =>
-      run("new", "Couldn't add the app. Try again.", async () => {
+      run("new", t`Couldn't add the app. Try again.`, async () => {
         if (key) await saveConnectorKey(api, draft.id, key, key.value);
         const view = await addConnector(api, draft);
         put(view);
@@ -138,7 +139,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
 
   const update = useCallback<ConnectorsView["update"]>(
     async (id, patch) =>
-      (await run(id, "Couldn't save that. Try again.", async () => {
+      (await run(id, t`Couldn't save that. Try again.`, async () => {
         put(await updateConnector(api, id, patch));
         return true;
       })) ?? false,
@@ -147,7 +148,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
 
   const saveKey = useCallback<ConnectorsView["saveKey"]>(
     async (id, key, patch) =>
-      (await run(id, "Couldn't save the key. Try again.", async () => {
+      (await run(id, t`Couldn't save the key. Try again.`, async () => {
         await saveConnectorKey(api, id, key, key.value);
         put(patch ? await updateConnector(api, id, patch) : await refreshConnector(api, id));
         return true;
@@ -157,7 +158,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
 
   const refresh = useCallback(
     (id: string) => {
-      void run(id, "Couldn't check the app. Try again.", async () =>
+      void run(id, t`Couldn't check the app. Try again.`, async () =>
         put(await refreshConnector(api, id)),
       );
     },
@@ -166,7 +167,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
 
   const remove = useCallback<ConnectorsView["remove"]>(
     async (id) =>
-      (await run(id, "Couldn't remove the app. Try again.", async () => {
+      (await run(id, t`Couldn't remove the app. Try again.`, async () => {
         await removeConnector(api, id);
         setConnectors((now) => now.filter((c) => c.id !== id));
         return true;
@@ -177,7 +178,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
   const signIn = useCallback(
     (id: string) => {
       setPage(null);
-      void run(id, "Couldn't open the app's sign-in. Try again.", async () => {
+      void run(id, t`Couldn't open the app's sign-in. Try again.`, async () => {
         const started = await startSignIn(api, id);
         if (started.url) setPage({ id, url: started.url });
         setConnectors((await loadConnectors(api)).connectors);
@@ -189,7 +190,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
   const stopSignIn = useCallback(
     (id: string) => {
       setPage(null);
-      void run(id, "Couldn't cancel that. Try again.", async () => {
+      void run(id, t`Couldn't cancel that. Try again.`, async () => {
         await cancelSignIn(api, id);
         setAttempt((n) => n + 1);
       });
@@ -199,7 +200,7 @@ export function useConnectors(api: ApiClient, visible: boolean): ConnectorsView 
 
   const disconnect = useCallback(
     (id: string) => {
-      void run(id, "Couldn't disconnect the app. Try again.", async () =>
+      void run(id, t`Couldn't disconnect the app. Try again.`, async () =>
         put(await disconnectConnector(api, id)),
       );
     },

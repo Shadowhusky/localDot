@@ -8,6 +8,7 @@ import {
   isOwnWords,
   type QuestionAnswerRequest,
 } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { AgentQuestion } from "./model.ts";
 
 // One field of a question as every surface draws it. A plain question (lettered options and/or
@@ -77,7 +78,7 @@ export function askFields(question: AgentQuestion): readonly AskField[] {
     {
       id: ASK_ANSWER_ID,
       kind: question.options.length ? "choice" : "longtext",
-      label: "Your answer",
+      label: t`Your answer`,
       options: question.options.map((option) => option.text),
       other: question.options.length > 0 && question.allowText,
       required: true,
@@ -187,15 +188,15 @@ export function answerRequest(
   return { askId: question.askId, text: value };
 }
 
-const SECRET_SHOWN = "kept secret";
-export const LEFT_TO_DOT = "Let dot decide";
+const SECRET_SHOWN = t`kept secret`;
+export const LEFT_TO_DOT = t`Let dot decide`;
 
 // Your answer as it reads in the thread: the value alone for one field, otherwise a line per
 // field answered. A secret is never shown, only that it was given.
 export function answerSummary(question: AgentQuestion): string {
   const answer = question.answer;
   if (!answer) return "";
-  if (answer.declined) return question.decline ?? "Not now";
+  if (answer.declined) return question.decline ?? t`Not now`;
   if (!question.fields?.length || !answer.fields) {
     const chosen = question.options.find((option) => option.key === answer.option);
     return [chosen?.text ?? answer.option, answer.text].filter(Boolean).join("\n\n");
@@ -212,8 +213,8 @@ export function answerSummary(question: AgentQuestion): string {
           ? SECRET_SHOWN
           : value === true
             ? field.kind === "qr"
-              ? "Done"
-              : (question.submit ?? "Yes")
+              ? t`Done`
+              : (question.submit ?? t`Yes`)
             : field.kind === "file"
               ? (value.split("/").at(-1) ?? value)
               : value;

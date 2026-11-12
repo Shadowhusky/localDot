@@ -4,10 +4,12 @@ import {
   type ProviderSpec,
   providerById,
 } from "@localdot/providers";
+import { t, tr } from "../i18n/index.ts";
 import { recommendedFast } from "../onboarding/wizard.ts";
 import type { PickerGroup, PickerItem } from "../ui/listbox.ts";
 import {
   customModelAllowed,
+  groupName,
   groupOf,
   type ModelRole,
   modelAllowed,
@@ -31,7 +33,7 @@ const usd = new Intl.NumberFormat("en-US", {
 
 export function priceLine(model: PickerModel): string | undefined {
   if (!model.inputUSDPerMTok && !model.outputUSDPerMTok) return undefined;
-  return `${usd.format(model.inputUSDPerMTok)} in · ${usd.format(model.outputUSDPerMTok)} out`;
+  return t`${usd.format(model.inputUSDPerMTok)} in · ${usd.format(model.outputUSDPerMTok)} out`;
 }
 
 function providerItem(provider: ProviderSpec): PickerItem {
@@ -41,15 +43,15 @@ function providerItem(provider: ProviderSpec): PickerItem {
     // A Claude plan search finds Anthropic, where an API key works.
     keywords: provider.id === "anthropic" ? "anthropic claude code api key token" : provider.id,
     description: provider.notOffered
-      ? "Not available here"
+      ? t`Not available here`
       : provider.local
-        ? "Runs on this Mac"
+        ? t`Runs on this Mac`
         : provider.custom
-          ? "Your own endpoint"
+          ? t`Your own endpoint`
           : provider.plan
-            ? "Uses your plan's limits"
+            ? t`Uses your plan's limits`
             : undefined,
-    disabledReason: provider.availableIn ? "Coming in a later release" : undefined,
+    disabledReason: provider.availableIn ? t`Coming in a later release` : undefined,
   };
 }
 
@@ -59,17 +61,17 @@ export const CUSTOM_FORMATS = [
   {
     value: "openai-compatible",
     label: "OpenAI Chat Completions",
-    description: "Most servers and proxies",
+    description: tr("Most servers and proxies"),
   },
   {
     value: "openai-responses-compatible",
     label: "OpenAI Responses",
-    description: "Needed by GPT-6.1 Sol and newer",
+    description: tr("Needed by GPT-6.1 Sol and newer"),
   },
   {
     value: "anthropic-compatible",
     label: "Anthropic Messages",
-    description: "Servers that speak Claude's API",
+    description: tr("Servers that speak Claude's API"),
   },
 ] as const;
 
@@ -88,8 +90,8 @@ export function providerGroups(role: ModelRole, value: string, main?: string): P
   const groups: PickerGroup[] = [];
   if (value && !subscription(value) && !PROVIDERS.some((provider) => provider.id === value))
     groups.push({
-      label: "Chosen before",
-      items: [{ value, label: value, disabledReason: "No longer offered" }],
+      label: t`Chosen before`,
+      items: [{ value, label: value, disabledReason: t`No longer offered` }],
     });
   for (const label of PROVIDER_GROUPS) {
     const items = offered
@@ -98,14 +100,14 @@ export function providerGroups(role: ModelRole, value: string, main?: string): P
         isCustomFormat(provider.id)
           ? {
               value: isCustomFormat(value) ? value : provider.id,
-              label: "Custom endpoint",
+              label: t`Custom endpoint`,
               keywords: "custom endpoint own server proxy openai compatible responses anthropic",
-              description: "Your own server or proxy",
+              description: t`Your own server or proxy`,
             }
           : providerItem(provider),
       );
     if (label === "Local servers" && role !== "local") groups.push(subscriptions(role, main));
-    if (items.length) groups.push({ label, items });
+    if (items.length) groups.push({ label: groupName(label), items });
   }
   return groups;
 }
@@ -114,34 +116,34 @@ export function providerGroups(role: ModelRole, value: string, main?: string): P
 // one, and the ChatGPT plan's app can't answer a second model while a task holds it.
 function subscriptions(role: ModelRole, main?: string): PickerGroup {
   return {
-    label: "Subscription",
+    label: t`Subscription`,
     items: [
       {
         value: CHATGPT,
-        label: "ChatGPT plan",
+        label: t`ChatGPT plan`,
         keywords: "chatgpt subscription plan",
-        description: "Sign in with your account",
-        disabledReason: role === "main" ? undefined : "Main model only",
+        description: t`Sign in with your account`,
+        disabledReason: role === "main" ? undefined : t`Main model only`,
       },
       {
         value: CLAUDE_CODE,
-        label: "Claude Code (your plan)",
+        label: t`Claude Code (your plan)`,
         keywords: "claude code anthropic subscription plan pro max",
-        description: "Uses your own Claude Code",
+        description: t`Uses your own Claude Code`,
         disabledReason:
           role === "main" || (role === "fast" && main === CLAUDE_CODE)
             ? undefined
             : role === "fast"
-              ? "When the main model uses Claude Code"
-              : "Main model only",
+              ? t`When the main model uses Claude Code`
+              : t`Main model only`,
       },
     ],
   };
 }
 
 function blockedReason(role: ModelRole, providerId: string, model: PickerModel) {
-  if (isOpenRouterRouterId(providerId, model.id)) return "Choose a specific model, not a router";
-  if (!modelAllowed(role, model)) return "Can't use tools, so it can't do the work";
+  if (isOpenRouterRouterId(providerId, model.id)) return t`Choose a specific model, not a router`;
+  if (!modelAllowed(role, model)) return t`Can't use tools, so it can't do the work`;
   return undefined;
 }
 
@@ -169,14 +171,14 @@ export function modelItems(
       value,
       label: value,
       ...(typed
-        ? { description: "Your model ID" }
+        ? { description: t`Your model ID` }
         : {
             disabledReason:
               providerId === CHATGPT
-                ? "This account no longer offers it"
+                ? t`This account no longer offers it`
                 : providerId === CLAUDE_CODE
-                  ? "Your Claude Code doesn't offer it now"
-                  : "Not in the model list now",
+                  ? t`Your Claude Code doesn't offer it now`
+                  : t`Not in the model list now`,
           }),
     });
   }

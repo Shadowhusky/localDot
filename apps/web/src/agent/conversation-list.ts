@@ -12,6 +12,7 @@ import {
   type Wearable,
 } from "@localdot/protocol";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
 import type { SessionStatus } from "../ui/SessionGlyph.tsx";
@@ -22,14 +23,14 @@ export type ConversationStatus = SessionStatus;
 const CONVERSATIONS_POLL_MS = 30_000;
 
 export const STATUS_LABEL: Record<ConversationStatus, string> = {
-  working: "Working",
-  waiting: "Waiting for the computer",
-  "needs-you": "Needs you",
-  idle: "Idle",
-  paused: "Paused",
-  done: "Done",
-  stopped: "Stopped",
-  failed: "Failed",
+  working: tr("Working"),
+  waiting: tr("Waiting for the computer"),
+  "needs-you": tr("Needs you"),
+  idle: tr("Idle"),
+  paused: tr("Paused"),
+  done: tr("Done"),
+  stopped: tr("Stopped"),
+  failed: tr("Failed"),
 };
 
 export interface ConversationRow {
@@ -79,7 +80,7 @@ export function conversationStatus(entry: ConversationEntry, facts: LiveFacts): 
 }
 
 export function conversationTitle(entry: Pick<ConversationEntry, "title" | "said">): string {
-  return entry.title?.trim() || entry.said?.trim() || "Untitled conversation";
+  return entry.title?.trim() || entry.said?.trim() || t`Untitled conversation`;
 }
 
 const startOfDay = (date: Date) =>
@@ -163,9 +164,9 @@ export function whenLabel(value: string, now: Date): string {
   const minutes = Math.floor((now.getTime() - at.getTime()) / 60_000);
   const days = daysBetween(at, now);
   if (days <= 0) {
-    if (minutes < 1) return "Now";
-    if (minutes < 60) return `${minutes} min`;
-    return `${Math.floor(minutes / 60)} h`;
+    if (minutes < 1) return t`Now`;
+    if (minutes < 60) return t`${minutes} min`;
+    return t`${Math.floor(minutes / 60)} h`;
   }
   if (days === 1)
     return at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });

@@ -5,6 +5,7 @@ import type {
   PreviewsStatus,
 } from "@localdot/protocol";
 import { useEffect, useId } from "react";
+import { t } from "../i18n/index.ts";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
@@ -68,9 +69,9 @@ export function arrangeApps(apps: readonly App[]): {
 
 // A server that stops answering leaves the list ten minutes after it last did.
 function stateText(app: App, now: number): string {
-  if (app.state === "answering") return app.server.older ? "Replaced by a newer copy" : "Running";
+  if (app.state === "answering") return app.server.older ? t`Replaced by a newer copy` : t`Running`;
   const minutes = Math.floor((now - Date.parse(app.server.seenAt)) / 60_000);
-  return minutes < 1 ? "Not answering" : `Not answering for ${minutes} min`;
+  return minutes < 1 ? t`Not answering` : t`Not answering for ${minutes} min`;
 }
 
 // The web apps dot runs in its computer, to open on the owner's devices: the panel's Previews tab.
@@ -84,8 +85,8 @@ export function PreviewsPanel({ active }: { active: boolean }) {
     return (
       <p className="activity-empty">
         {previews.settled
-          ? "Previews aren't available for this computer."
-          : "Looking for web apps in dot's computer…"}
+          ? t`Previews aren't available for this computer.`
+          : t`Looking for web apps in dot's computer…`}
       </p>
     );
   const apps = appsOf(status.servers, status.previews);
@@ -94,12 +95,12 @@ export function PreviewsPanel({ active }: { active: boolean }) {
   return (
     <div className="previews-panel">
       <p className="previews-intro">
-        Web apps dot runs on its computer. Open one on this device or your phone.
+        {t`Web apps dot runs on its computer. Open one on this device or your phone.`}
       </p>
       {status.state === "needs-update" && (
         <Banner
           tone="attention"
-          title="Update your computer to open previews"
+          title={t`Update your computer to open previews`}
           actions={<UpdateAction previews={previews} />}
         >
           {notice?.message}
@@ -108,10 +109,10 @@ export function PreviewsPanel({ active }: { active: boolean }) {
       {status.state === "needs-tailscale" && (
         <Banner
           tone="attention"
-          title="Previews open over Tailscale"
+          title={t`Previews open over Tailscale`}
           actions={
             <Button size="sm" onClick={(event) => previews.openSettings(event.currentTarget)}>
-              Open settings
+              {t`Open settings`}
             </Button>
           }
         >
@@ -119,30 +120,30 @@ export function PreviewsPanel({ active }: { active: boolean }) {
         </Banner>
       )}
       {status.state === "computer-off" && (
-        <EmptyState layout="start" title="Your computer is off">
+        <EmptyState layout="start" title={t`Your computer is off`}>
           {notice?.message}
         </EmptyState>
       )}
       {running.length > 0 && (
-        <section aria-label="Web apps in dot's computer">
+        <section aria-label={t`Web apps in dot's computer`}>
           <AppRows apps={running} previews={previews} />
         </section>
       )}
       {status.state === "ready" && !running.length && apps.length > 0 && (
-        <EmptyState layout="start" title="None running from this conversation" />
+        <EmptyState layout="start" title={t`None running from this conversation`} />
       )}
       {others.length > 0 && (
-        <FoldedApps label="From other conversations" apps={others} previews={previews} />
+        <FoldedApps label={t`From other conversations`} apps={others} previews={previews} />
       )}
       {fading.length > 0 && (
-        <FoldedApps label="Replaced or not answering" apps={fading} previews={previews} />
+        <FoldedApps label={t`Replaced or not answering`} apps={fading} previews={previews} />
       )}
       <OnThisMac previews={previews} status={status} />
       {apps.length > 0 && status.previews.length > 0 && (
         <Group>
           <GroupRow
-            label="Signed-in devices"
-            detail="Each stays signed in to an app until it goes unused for two hours."
+            label={t`Signed-in devices`}
+            detail={t`Each stays signed in to an app until it goes unused for two hours.`}
             trailing={
               <Button
                 size="sm"
@@ -150,15 +151,15 @@ export function PreviewsPanel({ active }: { active: boolean }) {
                 busy={previews.pending.has("sign-out")}
                 onClick={(event) => previews.signOut(event.currentTarget)}
               >
-                Sign out
+                {t`Sign out`}
               </Button>
             }
           />
         </Group>
       )}
       {status.state === "ready" && !apps.length && (
-        <EmptyState layout="start" title="No web apps running">
-          When dot starts one in its computer, such as a dev server, it shows up here.
+        <EmptyState layout="start" title={t`No web apps running`}>
+          {t`When dot starts one in its computer, such as a dev server, it shows up here.`}
         </EmptyState>
       )}
     </div>
@@ -226,7 +227,7 @@ function AppRow({ app, previews }: { app: App; previews: Previews }) {
           {"port" in request && (
             <IconButton
               icon="x"
-              label={`Stop ${address}`}
+              label={t`Stop ${address}`}
               aria-busy={previews.pending.has(`stop ${server.port}`) || undefined}
               onClick={(event) => previews.stop(server.port, event.currentTarget)}
             />
@@ -246,7 +247,7 @@ function OnThisMac({ previews, status }: { previews: Previews; status: PreviewsS
   if (!open.length) return null;
   return (
     <section aria-labelledby={heading}>
-      <GroupHead id={heading} title="On this Mac" />
+      <GroupHead id={heading} title={t`On this Mac`} />
       <Group>
         {open.map((preview) => {
           const address = macAddress(preview);
@@ -266,16 +267,16 @@ function OnThisMac({ previews, status }: { previews: Previews; status: PreviewsS
                   {!touch && (
                     <Button
                       size="sm"
-                      aria-label={`Open ${address}`}
+                      aria-label={t`Open ${address}`}
                       busy={previews.pending.has(requestKey(request))}
                       onClick={(event) => previews.open(request, event.currentTarget)}
                     >
-                      Open
+                      {t`Open`}
                     </Button>
                   )}
                   <IconButton
                     icon="x"
-                    label={`Close ${address} on this Mac`}
+                    label={t`Close ${address} on this Mac`}
                     aria-busy={previews.pending.has(`end ${preview.id}`) || undefined}
                     onClick={(event) => previews.end(preview.id, event.currentTarget)}
                   />
@@ -299,12 +300,12 @@ function UpdateAction({ previews }: { previews: Previews }) {
         disabledReason={update.waitReason}
         onClick={() => update.run()}
       >
-        Update
+        {t`Update`}
       </Button>
     );
   return (
     <Button size="sm" onClick={(event) => previews.openSettings(event.currentTarget)}>
-      Open settings
+      {t`Open settings`}
     </Button>
   );
 }

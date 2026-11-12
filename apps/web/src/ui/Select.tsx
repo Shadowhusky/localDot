@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { type KeyboardEvent, useId, useMemo, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { useFieldControl } from "./Field.tsx";
 import { Icon } from "./Icon.tsx";
 import { Listbox, optionId } from "./Listbox.tsx";
@@ -45,7 +46,7 @@ export function Select({
   onValueChange,
   items,
   groups,
-  placeholder = "Choose…",
+  placeholder = t`Choose…`,
   shown,
   size = "md",
   appearance = "field",

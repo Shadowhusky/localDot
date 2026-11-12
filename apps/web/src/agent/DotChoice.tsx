@@ -1,6 +1,8 @@
 import { PERSONAS, type PersonaId, type Wearable } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { Dot } from "../dot/Dot.tsx";
+import { personaName } from "../dot/persona-words.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
@@ -9,9 +11,9 @@ import type { AgentDotChoice } from "./model.ts";
 
 export function dotChoiceLine(choice: AgentDotChoice): string {
   const name = PERSONAS[choice.persona].name;
-  if (choice.by === "user") return `You chose ${name} for this conversation`;
-  if (choice.by === "default") return `Working as ${name}, your usual dot`;
-  return `Auto chose ${name}`;
+  if (choice.by === "user") return t`You chose ${name} for this conversation`;
+  if (choice.by === "default") return t`Working as ${name}, your usual dot`;
+  return t`Auto chose ${name}`;
 }
 
 // Which dot works the conversation while Auto is on, and why, with the way to change it for the
@@ -40,8 +42,8 @@ export function DotChoice({
     } catch (failure) {
       setError(
         failure instanceof ApiError && failure.status === 409
-          ? "Answer what dot is waiting on, then change its dot."
-          : "The dot couldn't be changed. Try again.",
+          ? t`Answer what dot is waiting on, then change its dot.`
+          : t`The dot couldn't be changed. Try again.`,
       );
     } finally {
       setBusy(false);
@@ -69,13 +71,13 @@ export function DotChoice({
             {...triggerProps("menu", open)}
             onClick={() => setOpen(true)}
           >
-            Change
+            {t`Change`}
           </Button>
           <Menu
             open={open}
             onClose={() => setOpen(false)}
             anchor={anchor}
-            label="Dot for this task"
+            label={t`Dot for this task`}
             align="end"
           >
             {Object.values(PERSONAS).map((persona) => (
@@ -84,7 +86,7 @@ export function DotChoice({
                 checked={persona.id === choice.persona}
                 onSelect={() => void change(persona.id)}
               >
-                {persona.name}
+                {personaName(persona.id)}
               </MenuItem>
             ))}
           </Menu>

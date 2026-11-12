@@ -10,6 +10,7 @@ import {
   ticks,
 } from "@localdot/stage";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "./ReplayImage.tsx";
 import { scrubberModel, timeLabel } from "./replay-view.ts";
@@ -150,7 +151,7 @@ export function Scrubber({
   const hovered =
     lastHover.current === null ? undefined : observeAt(replay.model, shownAt, replay.screen);
   const labelAt = (time: number) =>
-    view?.chapters.findLast((chapter) => chapter.startT <= time)?.label ?? "Start";
+    view?.chapters.findLast((chapter) => chapter.startT <= time)?.label ?? t`Start`;
   const half = Math.min(PREVIEW_HALF, width / 2);
   const previewX = Math.max(half, Math.min(width - half, fraction(shownAt) * width));
   return (
@@ -159,14 +160,14 @@ export function Scrubber({
         ref={slider}
         role="slider"
         tabIndex={0}
-        aria-label="Replay timeline"
+        aria-label={t`Replay timeline`}
         aria-valuemin={map?.startMs ?? 0}
         aria-valuemax={map?.endMs ?? 0}
         aria-valuenow={Math.round(replay.tMs)}
-        aria-valuetext={`${timeLabel(replay.tMs)} of ${timeLabel(map?.endMs ?? 0)}, ${labelAt(replay.tMs)}`}
+        aria-valuetext={t`${timeLabel(replay.tMs)} of ${timeLabel(map?.endMs ?? 0)}, ${labelAt(replay.tMs)}`}
         aria-description={
           replay.selection
-            ? `Marked ${timeLabel(replay.selection.fromMs)} to ${timeLabel(replay.selection.toMs)}`
+            ? t`Marked ${timeLabel(replay.selection.fromMs)} to ${timeLabel(replay.selection.toMs)}`
             : undefined
         }
         aria-disabled={!map}

@@ -1,7 +1,9 @@
-import { type AttentionItem, NOTIFY_COPY, notifyRouteOf } from "@localdot/protocol";
+import { type AttentionItem, notifyRouteOf } from "@localdot/protocol";
 import { useEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 import type { ToastOptions } from "../ui/toasts.ts";
+import { notifyCopy } from "./notify-words.ts";
 
 export interface AttentionToastHost {
   show(options: ToastOptions): void;
@@ -39,13 +41,13 @@ export function useAttentionToasts(
     const route = notifyRouteOf(latest.reason);
     if (!route) return host.dismiss(id);
     if (sessionId === place.viewing || !place.island || host.hidden()) return;
-    const copy = NOTIFY_COPY[route.kind];
+    const copy = notifyCopy(route.kind);
     host.show({
       id,
       title: copy.title,
       ...(latest.task ? { description: latest.task } : {}),
       tone: latest.level === "failed" ? "danger" : "neutral",
-      action: { label: "Open", onAction: () => now.current.open(sessionId) },
+      action: { label: t`Open`, onAction: () => now.current.open(sessionId) },
     });
   }, [latest]);
 }

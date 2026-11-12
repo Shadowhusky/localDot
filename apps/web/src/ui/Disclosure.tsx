@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { Icon } from "./Icon.tsx";
 import { mergeHandlers } from "./merge.ts";
 import { pressHandlers } from "./press.ts";
@@ -164,7 +165,7 @@ export function DetailLines({
   className?: string;
 }) {
   return (
-    <Disclosure inline summary="Details" className={className}>
+    <Disclosure inline summary={t`Details`} className={className}>
       <ul className="ui-detail-lines">
         {lines.map((line) => (
           <li key={line}>{line}</li>

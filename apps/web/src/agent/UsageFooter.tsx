@@ -1,6 +1,7 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { count, dollars, spendText } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { providerName, SPEED_NAMES } from "../settings/choices.ts";
 import { Button } from "../ui/Button.tsx";
 import { Meter } from "../ui/Meter.tsx";
@@ -12,10 +13,10 @@ import type { AgentModel, UsageRow } from "./model.ts";
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const whole = (value: number) => value.toLocaleString();
 const ROLES: Record<string, string> = {
-  main: "Main",
-  fast: "Fast",
-  vision: "Vision",
-  subagent: "Subagents",
+  main: tr("Main"),
+  fast: tr("Fast"),
+  vision: tr("Vision"),
+  subagent: tr("Subagents"),
 };
 const roleName = (role: string) => ROLES[role] ?? role;
 
@@ -28,28 +29,45 @@ function speedText(row: UsageRow): string {
   return row.premiumCalls === row.calls ? ` · ${name}` : ` · ${whole(row.premiumCalls)} ${name}`;
 }
 
-export function resetTime(seconds?: number, now = Date.now()): string | null {
+// When a reset comes: its time, and its date when that isn't today.
+export function resetWhen(
+  seconds?: number,
+  now = Date.now(),
+): { time: string; day?: string } | null {
   if (seconds === undefined) return null;
   const date = new Date(seconds * 1000);
   if (!Number.isFinite(date.getTime())) return null;
   const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const sameDay = new Date(now).toDateString() === date.toDateString();
-  return sameDay
-    ? `Resets ${time}`
-    : `Resets ${date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}, ${time}`;
+  if (new Date(now).toDateString() === date.toDateString()) return { time };
+  return {
+    time,
+    day: date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }),
+  };
+}
+
+export function resetTime(seconds?: number, now = Date.now()): string | null {
+  const when = resetWhen(seconds, now);
+  if (!when) return null;
+  return when.day ? t`Resets ${when.day}, ${when.time}` : t`Resets ${when.time}`;
 }
 
 function windowName(minutes?: number): string {
-  if (minutes === undefined) return "Plan window";
-  if (minutes % 1440 === 0) return `${count(minutes / 1440, "day", "days")} window`;
-  if (minutes % 60 === 0) return `${count(minutes / 60, "hour", "hours")} window`;
-  return `${count(minutes, "minute", "minutes")} window`;
+  if (minutes === undefined) return t`Plan window`;
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return days === 1 ? t`${days} day window` : t`${days} days window`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? t`${hours} hour window` : t`${hours} hours window`;
+  }
+  return minutes === 1 ? t`${minutes} minute window` : t`${minutes} minutes window`;
 }
 
 // A plan's own app does the work: its usage is the plan's, not money.
 const planApp = (selection?: TaskModelSelection) =>
   selection?.kind === "chatgpt" || selection?.kind === "claude-code" ? selection : undefined;
-export const PLAN_NAMES = { chatgpt: "ChatGPT plan", "claude-code": "Claude plan" } as const;
+export const PLAN_NAMES = { chatgpt: tr("ChatGPT plan"), "claude-code": tr("Claude plan") };
 
 // Money is shown only where a task is billed per call: never for a plan.
 export const billedPerCall = (selection?: TaskModelSelection) =>
@@ -85,7 +103,7 @@ export function usageParts(
       : null;
   return {
     main: main || undefined,
-    figures: [tokens ? `${compact.format(tokens)} tokens` : "No usage yet", spent]
+    figures: [tokens ? t`${compact.format(tokens)} tokens` : t`No usage yet`, spent]
       .filter(Boolean)
       .join(" · "),
   };
@@ -102,10 +120,10 @@ export function usageSummary(
 
 function limitText(spend: NonNullable<AgentModel["spend"]>): string {
   const limits = [
-    spend.taskLimitUSD === undefined ? null : `${dollars(spend.taskLimitUSD)} per task`,
-    spend.dayLimitUSD === undefined ? null : `${dollars(spend.dayLimitUSD)} a day`,
+    spend.taskLimitUSD === undefined ? null : t`${dollars(spend.taskLimitUSD)} per task`,
+    spend.dayLimitUSD === undefined ? null : t`${dollars(spend.dayLimitUSD)} a day`,
   ].filter(Boolean);
-  return limits.length ? `Limit ${limits.join(" · ")}` : "No spending limit";
+  return limits.length ? t`Limit ${limits.join(" · ")}` : t`No spending limit`;
 }
 
 function Spending({
@@ -123,26 +141,27 @@ function Spending({
     <>
       <dl className="usage-spend">
         <div>
-          <dt>This task</dt>
+          <dt>{t`This task`}</dt>
           <dd className="num">{spendText(spend.taskUSD, spend.estimated)}</dd>
         </div>
         <div>
           <dt>
-            Today<span className="usage-line">All tasks</span>
+            {t`Today`}
+            <span className="usage-line">{t`All tasks`}</span>
           </dt>
           <dd className="num">{spendText(spend.dayUSD, todayEstimated)}</dd>
         </div>
       </dl>
       {(spend.estimated || todayEstimated) && (
-        <p className="usage-note">≈ is an estimate from token counts and list prices.</p>
+        <p className="usage-note">{t`≈ is an estimate from token counts and list prices.`}</p>
       )}
       <div className="usage-limit">
         <span className="usage-line">{limitText(spend)}</span>
         {onSpending && (
           <Button variant="quiet" size="sm" onClick={(event) => onSpending(event.currentTarget)}>
             {spend.taskLimitUSD === undefined && spend.dayLimitUSD === undefined
-              ? "Set a limit…"
-              : "Change…"}
+              ? t`Set a limit…`
+              : t`Change…`}
           </Button>
         )}
       </div>
@@ -171,8 +190,8 @@ export function UsageDetails({
   const app = planApp(selection);
   const plan = app?.kind ?? subscription?.data.provider;
   return (
-    <section className="usage-details" aria-label="Task usage">
-      <h3 className="usage-title">Usage</h3>
+    <section className="usage-details" aria-label={t`Task usage`}>
+      <h3 className="usage-title">{t`Usage`}</h3>
       {money && <Spending model={model} onSpending={onSpending} />}
       <dl className="usage-roles">
         {model.usage.map((row) => {
@@ -191,10 +210,14 @@ export function UsageDetails({
                   )}
                 </span>
                 <span className="usage-line num">
-                  {whole(row.inputTokens)} in · {whole(row.outputTokens)} out
+                  {t`${whole(row.inputTokens)} in`} · {t`${whole(row.outputTokens)} out`}
                   {row.reasoningTokens === undefined
                     ? ""
-                    : ` · ${whole(row.reasoningTokens)} reasoning${row.reasoningPartial ? " (some calls didn't say)" : ""}`}
+                    : ` · ${
+                        row.reasoningPartial
+                          ? t`${whole(row.reasoningTokens)} reasoning (some calls didn't say)`
+                          : t`${whole(row.reasoningTokens)} reasoning`
+                      }`}
                 </span>
                 <span className="usage-line num">
                   {providerName(row.route)} · {count(row.calls, "call", "calls")}
@@ -210,25 +233,29 @@ export function UsageDetails({
             <dt>{roleName(role.role)}</dt>
             <dd>
               <span className="usage-model">{named(role.provider, role.model)}</span>
-              <span className="usage-line">{providerName(role.provider)} · No calls yet</span>
+              <span className="usage-line">
+                {providerName(role.provider)} · {t`No calls yet`}
+              </span>
             </dd>
           </div>
         ))}
         {app && !model.usage.length && (
           <div className="usage-role">
-            <dt>Main</dt>
+            <dt>{t`Main`}</dt>
             <dd>
               <span className="usage-model">{named(app.kind, app.model)}</span>
-              <span className="usage-line">{PLAN_NAMES[app.kind]} · No calls yet</span>
+              <span className="usage-line">
+                {PLAN_NAMES[app.kind]} · {t`No calls yet`}
+              </span>
             </dd>
           </div>
         )}
       </dl>
       {!model.usage.length && !waiting.length && !app && (
-        <p className="usage-note">No model calls reported yet.</p>
+        <p className="usage-note">{t`No model calls reported yet.`}</p>
       )}
       {selection?.kind === "api" && selection.plan && (
-        <p className="usage-note">Included in your plan. Uses your plan's limits.</p>
+        <p className="usage-note">{t`Included in your plan. Uses your plan's limits.`}</p>
       )}
       {plan && (
         <div className="usage-plan">
@@ -245,30 +272,30 @@ export function UsageDetails({
                 <Meter
                   label={windowName(window.windowMinutes)}
                   value={window.usedPercent}
-                  valueText={`${window.usedPercent}% used`}
+                  valueText={t`${window.usedPercent}% used`}
                 />
                 {resets && <span className="usage-line num">{resets}</span>}
               </div>
             );
           })}
           {!subscription?.data.windows.length && (
-            <p className="usage-note">The plan hasn't reported its limits yet.</p>
+            <p className="usage-note">{t`The plan hasn't reported its limits yet.`}</p>
           )}
           {subscription?.data.limitReached && (
             <p className="usage-note">
-              The plan limit is reached. Wait for it to reset, then continue the task.
+              {t`The plan limit is reached. Wait for it to reset, then continue the task.`}
             </p>
           )}
         </div>
       )}
       {retry && (
         <p className="usage-note">
-          {`${roleName(retry.role)} model retried (try ${retry.attempt}) after ${(retry.waitMs / 1000).toFixed(1)} s: `}
+          {t`${roleName(retry.role)} model retried (try ${retry.attempt}) after ${(retry.waitMs / 1000).toFixed(1)} s: `}
           {retry.message}
-          {retry.fallback ? ` Switched to ${retry.fallback}.` : ""}
+          {retry.fallback ? t` Switched to ${retry.fallback}.` : ""}
         </p>
       )}
-      {model.usagePartial && <p className="usage-note">Only recent usage is shown.</p>}
+      {model.usagePartial && <p className="usage-note">{t`Only recent usage is shown.`}</p>}
     </section>
   );
 }
@@ -297,7 +324,7 @@ export function UsageFooter({
         className="activity-usage-trigger"
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={`Usage: ${summary}`}
+        aria-label={t`Usage: ${summary}`}
         onClick={() => setOpen((shown) => !shown)}
       >
         {main && <span className="activity-usage-text">{main}</span>}
@@ -307,7 +334,7 @@ export function UsageFooter({
         open={open}
         onClose={() => setOpen(false)}
         anchor={trigger}
-        label="Usage"
+        label={t`Usage`}
         side="top"
         className="activity-usage-popover"
       >

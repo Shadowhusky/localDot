@@ -1,14 +1,15 @@
 import { Accessory, outfit, type PersonaId } from "@localdot/protocol";
 import { Dot } from "../dot/Dot.tsx";
+import { t, tr } from "../i18n/index.ts";
 import { RadioCards } from "../ui/RadioCards.tsx";
 
 const NONE = "none";
 
 const NAMES: Record<Accessory, string> = {
-  cap: "Cap",
-  sunglasses: "Shades",
-  bow: "Bow",
-  "star-pin": "Star",
+  cap: tr("Cap"),
+  sunglasses: tr("Shades"),
+  bow: tr("Bow"),
+  "star-pin": tr("Star"),
 };
 
 // What this localDot's dot wears to tell it apart from the user's others, shown on the dot they
@@ -28,7 +29,7 @@ export function AccessoryPicker({
       layout="tiles"
       compact
       className="accessory-picker"
-      aria-label="Accessory"
+      aria-label={t`Accessory`}
       value={value ?? NONE}
       onValueChange={(next) => {
         const parsed = Accessory.safeParse(next);
@@ -36,7 +37,7 @@ export function AccessoryPicker({
       }}
       options={options.map((accessory, index) => ({
         value: accessory ?? NONE,
-        label: accessory ? NAMES[accessory] : "None",
+        label: accessory ? NAMES[accessory] : t`None`,
         preview: (
           <span className="accessory-preview">
             <Dot size={48} wearables={outfit(persona, accessory)} seed={index + 11} />

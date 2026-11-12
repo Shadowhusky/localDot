@@ -11,6 +11,7 @@ import { type RefObject, useRef, useState } from "react";
 import { conversationLook, lookSeed } from "../agent/conversation-list.ts";
 import { Dot } from "../dot/Dot.tsx";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
+import { t, tc, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Popover } from "../ui/Popover.tsx";
@@ -20,47 +21,51 @@ import { Sheet } from "../ui/Sheet.tsx";
 const NONE = "none";
 
 const WEAR_NAMES: Record<Wearable, string> = {
-  hoodie: "Hoodie",
-  cap: "Cap",
-  sunglasses: "Shades",
-  bow: "Bow",
-  "star-pin": "Star",
-  headphones: "Headset",
-  mustache: "Mustache",
-  suit: "Suit",
-  mortarboard: "Grad cap",
-  "round-glasses": "Glasses",
-  beret: "Beret",
-  scarf: "Scarf",
-  beanie: "Beanie",
-  "party-hat": "Party hat",
-  crown: "Crown",
-  "wizard-hat": "Wizard hat",
-  "top-hat": "Top hat",
-  "chef-hat": "Chef's hat",
-  "hard-hat": "Hard hat",
-  sprout: "Sprout",
-  "flower-crown": "Flowers",
-  antenna: "Antenna",
-  "cat-ears": "Cat ears",
-  halo: "Halo",
-  "viking-helmet": "Viking",
-  "cowboy-hat": "Cowboy hat",
-  "propeller-cap": "Propeller",
-  headband: "Headband",
-  monocle: "Monocle",
-  "heart-glasses": "Hearts",
-  "clown-nose": "Red nose",
-  blush: "Blush",
-  "bow-tie": "Bow tie",
-  medal: "Medal",
-  pearls: "Pearls",
-  "striped-tee": "Stripes",
-  overalls: "Overalls",
-  lei: "Lei",
+  hoodie: tr("Hoodie"),
+  cap: tr("Cap"),
+  sunglasses: tr("Shades"),
+  bow: tr("Bow"),
+  "star-pin": tr("Star"),
+  headphones: tr("Headset"),
+  mustache: tr("Mustache"),
+  suit: tr("Suit"),
+  mortarboard: tr("Grad cap"),
+  "round-glasses": tr("Glasses"),
+  beret: tr("Beret"),
+  scarf: tr("Scarf"),
+  beanie: tr("Beanie"),
+  "party-hat": tr("Party hat"),
+  crown: tr("Crown"),
+  "wizard-hat": tr("Wizard hat"),
+  "top-hat": tr("Top hat"),
+  "chef-hat": tr("Chef's hat"),
+  "hard-hat": tr("Hard hat"),
+  sprout: tr("Sprout"),
+  "flower-crown": tr("Flowers"),
+  antenna: tr("Antenna"),
+  "cat-ears": tr("Cat ears"),
+  halo: tr("Halo"),
+  "viking-helmet": tr("Viking"),
+  "cowboy-hat": tr("Cowboy hat"),
+  "propeller-cap": tr("Propeller"),
+  headband: tr("Headband"),
+  monocle: tr("Monocle"),
+  "heart-glasses": tr("Hearts"),
+  "clown-nose": tr("Red nose"),
+  blush: tr("Blush"),
+  "bow-tie": tr("Bow tie"),
+  medal: tr("Medal"),
+  pearls: tr("Pearls"),
+  "striped-tee": tr("Stripes"),
+  overalls: tr("Overalls"),
+  lei: tr("Lei"),
 };
 
-const SLOT_NAMES: Record<WearSlot, string> = { head: "Head", face: "Face", body: "Body" };
+const SLOT_NAMES: Record<WearSlot, string> = {
+  head: tr("Head"),
+  face: tr("Face"),
+  body: tr("Body"),
+};
 
 const inSlot = (slot: WearSlot) => Wearable.options.filter((name) => WEAR_SLOT[name] === slot);
 
@@ -82,7 +87,13 @@ export function LookChooser({
   const body = entry && <LookPanel key={entry.sessionId} entry={entry} onChange={onChange} />;
   if (phone)
     return (
-      <Sheet open={!!entry} onClose={onClose} title="Change look" side="bottom" doneLabel="Done">
+      <Sheet
+        open={!!entry}
+        onClose={onClose}
+        title={t`Change look`}
+        side="bottom"
+        doneLabel={t`Done`}
+      >
         {body}
       </Sheet>
     );
@@ -93,7 +104,7 @@ export function LookChooser({
       anchor={anchor}
       side="right"
       align="start"
-      title="Change look"
+      title={t`Change look`}
       size="lg"
     >
       {body}
@@ -131,15 +142,15 @@ function LookPanel({
               choose(taskOutfit(`${seed}:${shuffles.current}:${Date.now()}`, dot));
             }}
           >
-            Surprise me
+            {t`Surprise me`}
           </Button>
           <Button
             size="sm"
             variant="quiet"
-            disabledReason={own ? undefined : "This is the look it started with."}
+            disabledReason={own ? undefined : t`This is the look it started with.`}
             onClick={() => choose(null)}
           >
-            Reset
+            {tc("button", "Reset")}
           </Button>
         </div>
       </div>
@@ -162,7 +173,7 @@ function LookPanel({
                 options={[
                   {
                     value: NONE,
-                    label: "None",
+                    label: t`None`,
                     preview: (
                       <span className="look-tile">
                         <DotAvatar size={40} wearables={[]} />

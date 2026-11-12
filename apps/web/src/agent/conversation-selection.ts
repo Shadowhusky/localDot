@@ -1,4 +1,4 @@
-import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import {
   type ConversationRow,
@@ -13,7 +13,7 @@ import {
 const AT_ONCE = 4;
 
 export const selectedLabel = (n: number) =>
-  n === 0 ? "None selected" : `${n.toLocaleString()} selected`;
+  n === 0 ? t`None selected` : t`${n.toLocaleString()} selected`;
 
 // A press on `id` while selecting. Alone it flips that one; with Shift (`from` the one pressed
 // before) every conversation from there to `id` in `order` takes the state `id` takes.
@@ -44,9 +44,14 @@ export function underWay(
 ): string | undefined {
   const n = rows.filter(running).length;
   if (n === 0) return undefined;
-  return n === 1
-    ? `One of these has a task under way. Stop it or unselect it before ${doing}.`
-    : `${n.toLocaleString()} of these have a task under way. Stop them or unselect them before ${doing}.`;
+  if (n === 1)
+    return doing === "deleting"
+      ? t`One of these has a task under way. Stop it or unselect it before deleting.`
+      : t`One of these has a task under way. Stop it or unselect it before archiving.`;
+  const many = n.toLocaleString();
+  return doing === "deleting"
+    ? t`${many} of these have a task under way. Stop them or unselect them before deleting.`
+    : t`${many} of these have a task under way. Stop them or unselect them before archiving.`;
 }
 
 async function inTurn(ids: readonly string[], run: (id: string) => Promise<void>) {
@@ -88,16 +93,22 @@ export async function deleteConversations(
 export function removalProblem({ deleted, live, failed }: Removal): string {
   if (deleted.length + live.length + failed.length === 1)
     return live.length
-      ? "Stop this conversation's task before deleting it."
-      : "The conversation couldn't be deleted. Try again.";
+      ? t`Stop this conversation's task before deleting it.`
+      : t`The conversation couldn't be deleted. Try again.`;
   if (deleted.length === 0 && live.length === 0)
-    return "The conversations couldn't be deleted. Try again.";
+    return t`The conversations couldn't be deleted. Try again.`;
+  const gone = deleted.length.toLocaleString();
+  const held = live.length.toLocaleString();
   return [
     deleted.length > 0 &&
-      `${count(deleted.length, "conversation was", "conversations were")} deleted.`,
+      (deleted.length === 1
+        ? t`${gone} conversation was deleted.`
+        : t`${gone} conversations were deleted.`),
     live.length > 0 &&
-      `${count(live.length, "has", "have")} a task under way. Stop ${live.length === 1 ? "it" : "them"} before deleting.`,
-    failed.length > 0 && `${failed.length.toLocaleString()} couldn't be deleted. Try again.`,
+      (live.length === 1
+        ? t`${held} has a task under way. Stop it before deleting.`
+        : t`${held} have a task under way. Stop them before deleting.`),
+    failed.length > 0 && t`${failed.length.toLocaleString()} couldn't be deleted. Try again.`,
   ]
     .filter(Boolean)
     .join(" ");

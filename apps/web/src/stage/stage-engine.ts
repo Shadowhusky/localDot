@@ -1,4 +1,5 @@
 import { type LocalDotEvent, MODEL_SCREEN, type Point, type ScreenName } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import { APPEARANCE_EVENT } from "../onboarding/appearance.ts";
 import { type StagePoint, type StageScreen, stagePoint } from "./composite.ts";
 import { type FrameSource, framePath } from "./frame-source.ts";
@@ -97,7 +98,7 @@ export const RESTART_MS = { min: 1_000, max: 30_000 };
 const newCanvas = () => {
   const canvas = document.createElement("canvas");
   canvas.className = "stage-canvas";
-  canvas.setAttribute("aria-label", "The virtual computer");
+  canvas.setAttribute("aria-label", t`The virtual computer`);
   return canvas;
 };
 

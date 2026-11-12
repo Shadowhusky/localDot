@@ -1,5 +1,6 @@
 import { LocalDotLink } from "@localdot/protocol";
 import { DEVICE, HOST_SUFFIX } from "@localdot/protocol/remote";
+import { t } from "../i18n/index.ts";
 
 // What people type or paste for another localDot, such as "office-pc.example.ts.net:4750" or a
 // link to it; https unless it says otherwise.
@@ -35,10 +36,10 @@ export function localDotProblem(
   editing?: string,
 ): string | null {
   const origin = localDotOrigin(typed);
-  if (!origin) return "Enter its address, such as office-pc.example.ts.net:4750.";
-  if (origin === here) return "That's this localDot.";
+  if (!origin) return t`Enter its address, such as office-pc.example.ts.net:4750.`;
+  if (origin === here) return t`That's this localDot.`;
   if (others.some((link) => link.url === origin && link.url !== editing))
-    return "That localDot is already in the list.";
+    return t`That localDot is already in the list.`;
   return null;
 }
 
@@ -46,7 +47,7 @@ export function localDotProblem(
 export function localDotNameProblem(name: string): string | null {
   return !name.trim() || LocalDotLink.shape.name.safeParse(name).success
     ? null
-    : "Use up to 40 letters, numbers and punctuation.";
+    : t`Use up to 40 letters, numbers and punctuation.`;
 }
 
 // The entry for a name and an address, named after the computer when no name is given.

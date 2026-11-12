@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import type { ExportFormat } from "./export-plan.ts";
 
 export interface ExportSink {
@@ -53,8 +54,8 @@ function fileSink(stream: FileSystemWritableFileStream): ExportSink {
   };
 }
 
-export const NO_ENCODER = "Export needs Chrome, Edge or Safari 17 or later";
-export const LONG_EXPORT = "Long exports need Chrome or Edge";
+export const NO_ENCODER = t`Export needs Chrome, Edge or Safari 17 or later`;
+export const LONG_EXPORT = t`Long exports need Chrome or Edge`;
 // Without a save picker the video is held in memory until it is downloaded, so it has a ceiling.
 export const DOWNLOAD_LIMIT = 256 * 1024 * 1024;
 const BLOCK = 4 * 1024 * 1024;
@@ -77,8 +78,8 @@ export function exportSupport(): ExportSupport {
 }
 
 const FILE_TYPES: Record<ExportFormat, { description: string; type: string; extension: string }> = {
-  mp4: { description: "MP4 video", type: "video/mp4", extension: ".mp4" },
-  webm: { description: "WebM video", type: "video/webm", extension: ".webm" },
+  mp4: { description: t`MP4 video`, type: "video/mp4", extension: ".mp4" },
+  webm: { description: t`WebM video`, type: "video/webm", extension: ".webm" },
 };
 
 export function exportFileName(base: string, format: ExportFormat): string {

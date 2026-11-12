@@ -1,5 +1,6 @@
 import type { DotSummary } from "@localdot/protocol";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   dotProblem,
@@ -71,7 +72,7 @@ export function useLocalDots(
 
   const switchOn = useCallback(async (client: ApiClient, dot: DotSummary) => {
     const job = await waitForJob(client, await startDot(client, dot.id));
-    return job.state === "done" ? null : (job.error ?? `${dot.name} didn't start.`);
+    return job.state === "done" ? null : (job.error ?? t`${dot.name} didn't start.`);
   }, []);
 
   return useMemo(
@@ -80,15 +81,15 @@ export function useLocalDots(
       manage,
       busy,
       refresh,
-      start: (dot) => act(dot, (client) => switchOn(client, dot), `${dot.name} didn't start.`),
+      start: (dot) => act(dot, (client) => switchOn(client, dot), t`${dot.name} didn't start.`),
       async stop(dot) {
         return act(
           dot,
           async (client) => {
             const job = await waitForJob(client, await stopDot(client, dot.id));
-            return job.state === "done" ? null : (job.error ?? `${dot.name} didn't stop.`);
+            return job.state === "done" ? null : (job.error ?? t`${dot.name} didn't stop.`);
           },
-          `${dot.name} didn't stop.`,
+          t`${dot.name} didn't stop.`,
         );
       },
       open: (dot) =>
@@ -102,7 +103,7 @@ export function useLocalDots(
             navigateTo.current((await dotSignIn(client, dot.id)).url);
             return null;
           },
-          `Couldn't open ${dot.name}.`,
+          t`Couldn't open ${dot.name}.`,
         ),
     }),
     [dots, manage, busy, refresh, act, switchOn],
@@ -112,12 +113,12 @@ export function useLocalDots(
 // Goes to another dot, starting it first when it is stopped, and says so while it starts.
 export function switchToDot(dots: LocalDots, dot: DotSummary): void {
   if (dot.self) return;
-  if (dot.state !== "running") showToast({ id: "dot-switch", title: `Starting ${dot.name}…` });
+  if (dot.state !== "running") showToast({ id: "dot-switch", title: t`Starting ${dot.name}…` });
   void dots.open(dot).then((problem) => {
     if (problem)
       showToast({
         id: "dot-switch",
-        title: `Couldn't open ${dot.name}`,
+        title: t`Couldn't open ${dot.name}`,
         description: problem,
         tone: "danger",
       });

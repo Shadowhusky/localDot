@@ -1,5 +1,6 @@
 import type { EventOf, Rect } from "@localdot/protocol";
 import type { ActionState, SessionModel } from "@localdot/stage";
+import { t, tr } from "../i18n/index.ts";
 import { past, progressive } from "./status.ts";
 
 export interface StepRowView {
@@ -35,17 +36,17 @@ function gesture(a: ActionState): string {
 }
 
 const CANCEL_REASONS: Record<string, string> = {
-  preflight: "The action was refused before input.",
-  policy: "The action was blocked by policy.",
-  user: "Cancelled by you.",
-  model: "Cancelled by the agent.",
-  timeout: "The action timed out.",
-  stale: "The target changed before input.",
+  preflight: tr("The action was refused before input."),
+  policy: tr("The action was blocked by policy."),
+  user: tr("Cancelled by you."),
+  model: tr("Cancelled by the agent."),
+  timeout: tr("The action timed out."),
+  stale: tr("The target changed before input."),
 };
 // A cancel after the input was delivered: a drag that pressed, then was cancelled before its drop.
 const DROP_CANCEL_REASONS: Record<string, string> = {
-  user: "Stopped before the drop. The drag was cancelled.",
-  stale: "Another window was at the drop point. The drag was cancelled.",
+  user: tr("Stopped before the drop. The drag was cancelled."),
+  stale: tr("Another window was at the drop point. The drag was cancelled."),
 };
 
 // The views last listed for each task: a step that has not changed keeps its view, so what is built
@@ -96,7 +97,7 @@ export function stepRows(model: SessionModel): StepRowView[] {
             reason:
               (a.dispatch ? DROP_CANCEL_REASONS[a.cancel.reason] : undefined) ??
               CANCEL_REASONS[a.cancel.reason] ??
-              "The action was cancelled.",
+              t`The action was cancelled.`,
           }
         : {}),
     });
@@ -110,10 +111,14 @@ export function stepRows(model: SessionModel): StepRowView[] {
       label:
         step.intent ||
         step.title ||
-        ({ shell: "Terminal", file: "File", browser: "Browser", gui: "Screen step", app: "App" }[
-          step.kind
-        ] ??
-          "Step"),
+        ({
+          shell: tr("Terminal"),
+          file: tr("File"),
+          browser: tr("Browser"),
+          gui: tr("Screen step"),
+          app: tr("App"),
+        }[step.kind] ??
+          t`Step`),
       intent: step.intent,
       status:
         step.endT === undefined

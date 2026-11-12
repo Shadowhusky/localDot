@@ -14,6 +14,7 @@ import {
 } from "react";
 import { bytes } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
+import { t, tr } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { useGuest } from "../remote/guest.ts";
 import { dayLabel } from "../settings/memory/memory-copy.ts";
@@ -168,8 +169,8 @@ export function TasksSearch({
       size={size}
       filled={filled}
       prefix={<Icon name="search" />}
-      aria-label="Search recordings"
-      placeholder="Search recordings"
+      aria-label={t`Search recordings`}
+      placeholder={t`Search recordings`}
       enterKeyHint="search"
       autoComplete="off"
       value={value}
@@ -200,13 +201,13 @@ export function shownCards(
 }
 
 const MATCH_KIND: Record<SearchHit["kind"], string> = {
-  title: "Title",
-  user: "You wrote",
-  assistant: "dot replied",
-  summary: "Result",
-  step: "Step",
-  file: "File",
-  note: "Daily note",
+  title: tr("Title"),
+  user: tr("You wrote"),
+  assistant: tr("dot replied"),
+  summary: tr("Result"),
+  step: tr("Step"),
+  file: tr("File"),
+  note: tr("Daily note"),
 };
 
 function rowButtons(list: HTMLElement): HTMLElement[] {
@@ -354,21 +355,21 @@ export function TaskList({
   if (index.failed && index.cards.length === 0)
     body = (
       <EmptyState
-        title="Recordings couldn't load"
+        title={t`Recordings couldn't load`}
         icon="circle-alert"
         actions={
           <Button size="sm" onClick={index.retry}>
-            Try again
+            {t`Try again`}
           </Button>
         }
       />
     );
   else if (loading && index.cards.length === 0)
-    body = <DotLoader className="replay-loading" label="Loading your recordings" />;
+    body = <DotLoader className="replay-loading" label={t`Loading your recordings`} />;
   else if (index.cards.length === 0)
     body = (
-      <EmptyState title="No recordings yet" icon="history">
-        Each task dot runs is recorded here, to watch again.
+      <EmptyState title={t`No recordings yet`} icon="history">
+        {t`Each task dot runs is recorded here, to watch again.`}
       </EmptyState>
     );
   else if (shown.length === 0 && notes.length === 0 && !(more || loading || matches?.pending))
@@ -376,14 +377,14 @@ export function TaskList({
       <EmptyState
         layout="start"
         icon="search"
-        title={search.trim() ? `No recordings match “${search.trim()}”` : "No recordings here"}
+        title={search.trim() ? t`No recordings match “${search.trim()}”` : t`No recordings here`}
       />
     );
   else if (shown.length === 0 && (loading || matches?.pending))
-    body = <DotLoader className="replay-loading" label="Searching recordings" />;
+    body = <DotLoader className="replay-loading" label={t`Searching recordings`} />;
   else
     body = (
-      <ul className="replay-day-list replay-window" aria-label="Recordings">
+      <ul className="replay-day-list replay-window" aria-label={t`Recordings`}>
         <li aria-hidden="true" style={{ height: windowed.before }} />
         {windowed.indexes.map((at) => {
           const item = flat[at];
@@ -430,9 +431,9 @@ export function TaskList({
       {notes.length > 0 && <NoteMatches notes={notes} now={now} />}
       {index.failed && index.cards.length > 0 && (
         <p className="replay-tasks-note" role="alert">
-          More recordings couldn't load.{" "}
+          {t`More recordings couldn't load.`}{" "}
           <Button size="sm" variant="quiet" onClick={index.loadMore}>
-            Try again
+            {t`Try again`}
           </Button>
         </p>
       )}
@@ -479,7 +480,7 @@ function Day({ day, children }: { day: string; children: ReactNode }) {
 // Daily notes that match: dot's own notes, from tasks that may since have been deleted.
 function NoteMatches({ notes, now }: { notes: readonly SearchHit[]; now: Date }) {
   return (
-    <Day day="Daily notes">
+    <Day day={t`Daily notes`}>
       {notes.map((note) => (
         <li key={`${note.at}:${note.snippet}`} className="replay-note">
           <span className="replay-note-text">
@@ -587,14 +588,14 @@ function TaskRow({
                     }
                     onClick={() => continueTask.run(card.id)}
                   >
-                    Continue
+                    {t`Continue`}
                   </Button>
                 )}
                 {wide && !guest && (
                   <IconButton
                     size={28}
                     icon="trash"
-                    label={`Delete ${title}`}
+                    label={t`Delete ${title}`}
                     onClick={(event) => onDelete(event.currentTarget)}
                   />
                 )}
@@ -603,7 +604,7 @@ function TaskRow({
           }
           swipe={
             phone && !picking && !guest
-              ? { label: "Delete", accessibleLabel: `Delete ${title}`, onAction: onDelete }
+              ? { label: t`Delete`, accessibleLabel: t`Delete ${title}`, onAction: onDelete }
               : undefined
           }
         />
@@ -649,8 +650,8 @@ export function DeleteTask({
       announce(
         "replay-delete",
         failure instanceof ApiError && failure.status === 409
-          ? "That task is still running. Stop it before deleting its recording."
-          : "The recording couldn't be deleted. Try again.",
+          ? t`That task is still running. Stop it before deleting its recording.`
+          : t`The recording couldn't be deleted. Try again.`,
         "assertive",
       ),
     );
@@ -665,10 +666,10 @@ export function DeleteTask({
       description={deleteBody(1)}
     >
       <Button variant="quiet" onClick={onClose}>
-        Cancel
+        {t`Cancel`}
       </Button>
       <Button variant="destructive" onClick={remove}>
-        Delete
+        {t`Delete`}
       </Button>
     </Dialog>
   );

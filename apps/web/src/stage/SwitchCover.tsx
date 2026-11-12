@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { announce, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Presence } from "../ui/Presence.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import type { StageSwitch } from "./stage-switch.ts";
 
-const SLOW_TITLE = "This conversation's screen is taking longer than usual";
-const SLOW_DETAIL = "Its picture hasn't come through yet.";
+const SLOW_TITLE = t`This conversation's screen is taking longer than usual`;
+const SLOW_DETAIL = t`Its picture hasn't come through yet.`;
 
 // Over the stage while a conversation just taken up brings its screen: a likeness of a screen under
 // the conversation's name, which gives way to the picture once it is in. A screen that never comes
@@ -27,7 +28,7 @@ export function SwitchCover({
   const spoken = up && slow;
   useEffect(() => {
     if (!spoken) return;
-    announce("stage-switch", `${SLOW_TITLE}. ${SLOW_DETAIL}`);
+    announce("stage-switch", t`${SLOW_TITLE}. ${SLOW_DETAIL}`);
     return () => withdraw("stage-switch");
   }, [spoken]);
   return (
@@ -40,7 +41,7 @@ export function SwitchCover({
               <p className="stage-away-detail">{SLOW_DETAIL}</p>
             </div>
             <Button size="sm" onClick={onShowComputer}>
-              Show the computer
+              {t`Show the computer`}
             </Button>
           </div>
         ) : (

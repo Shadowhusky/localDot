@@ -4,17 +4,15 @@ import {
   UserBrowserSignInReply,
   UserBrowserSignInRequest,
 } from "../../../../packages/protocol/src/browser-sign-in.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { setBrowserRelaunching } from "../stage/browser-relaunch.ts";
 import { Button } from "../ui/Button.tsx";
 import { controlRequest } from "./control-api.ts";
 
-const OWN_BROWSER_LINE =
-  "Google blocks browsers under agent control, so this one has dot's control turned off while you sign in.";
-const SIGN_IN_MODE_LIMITS =
-  "Saved logins can't be filled here, because nothing but you is connected to the page. Type yours or paste it.";
-const PASSKEY_LINE =
-  "Passkeys and security keys can't work in this browser: it has no Bluetooth, USB or device unlock. Choose the site's password or code option, such as “Try another way”.";
+const OWN_BROWSER_LINE = t`Google blocks browsers under agent control, so this one has dot's control turned off while you sign in.`;
+const SIGN_IN_MODE_LIMITS = t`Saved logins can't be filled here, because nothing but you is connected to the page. Type yours or paste it.`;
+const PASSKEY_LINE = t`Passkeys and security keys can't work in this browser: it has no Bluetooth, USB or device unlock. Choose the site's password or code option, such as “Try another way”.`;
 
 // How often the page the user holds is asked what it wants of them.
 const PAGE_EVERY_MS = 3000;
@@ -22,12 +20,13 @@ const PAGE_EVERY_MS = 3000;
 const PASSWORD_WAIT_TRIES = 4;
 
 const FILL_LINES: Partial<Record<UserBrowserFill, string>> = {
-  filled: "Your saved login is in. Check the page, then choose Sign in there.",
-  "no-field":
+  filled: tr("Your saved login is in. Check the page, then choose Sign in there."),
+  "no-field": tr(
     "There's no sign-in box showing on this page yet. Open the sign-in form, then try again.",
-  form: "This page's form couldn't be verified, so nothing was filled. Type it here instead.",
-  locked: "Saved logins are locked. Unlock them in Keys, then try again.",
-  refused: "Nothing was filled, because the page changed. Check it, then try again.",
+  ),
+  form: tr("This page's form couldn't be verified, so nothing was filled. Type it here instead."),
+  locked: tr("Saved logins are locked. Unlock them in Keys, then try again."),
+  refused: tr("Nothing was filled, because the page changed. Check it, then try again."),
 };
 
 // Mounted only for the user's live browser hold. No password, page URL or cookie
@@ -93,7 +92,7 @@ export function BrowserSignIn({
         if (abort.signal.aborted) return;
       }
       if (++attempts < 30) timer = setTimeout(() => void poll(), 1000);
-      else setError("Couldn't confirm sign-in mode. Check the browser before trying again.");
+      else setError(t`Couldn't confirm sign-in mode. Check the browser before trying again.`);
     };
     timer = setTimeout(() => void poll(), 500);
     return () => {
@@ -139,7 +138,7 @@ export function BrowserSignIn({
         } catch {
           /* Leave the user in control. */
         }
-        setError("Couldn't confirm sign-in mode. Check the browser before trying again.");
+        setError(t`Couldn't confirm sign-in mode. Check the browser before trying again.`);
       }
     } finally {
       if (!signal.aborted) setBusy(false);
@@ -179,7 +178,7 @@ export function BrowserSignIn({
       setFillLine((outcome && FILL_LINES[outcome]) ?? "");
     } catch {
       if (!signal.aborted)
-        setFillLine("Couldn't confirm the fill. Check the page before trying again.");
+        setFillLine(t`Couldn't confirm the fill. Check the page before trying again.`);
     } finally {
       if (!signal.aborted) setFilling(false);
     }
@@ -191,14 +190,13 @@ export function BrowserSignIn({
     <div className="thread-browser-signin">
       {changing ? (
         <p role="status">
-          Restarting the browser without dot's connection. Your tabs come back in a moment.
+          {t`Restarting the browser without dot's connection. Your tabs come back in a moment.`}
         </p>
       ) : signingIn ? (
         <>
-          <strong>Sign-in mode is on — you're in control</strong>
+          <strong>{t`Sign-in mode is on — you're in control`}</strong>
           <p role="status">
-            Sign in now in the browser, then choose Hand back. dot can't see the page while you sign
-            in, and stays signed in afterwards.
+            {t`Sign in now in the browser, then choose Hand back. dot can't see the page while you sign in, and stays signed in afterwards.`}
           </p>
           {defaulted.current && <p>{OWN_BROWSER_LINE}</p>}
           <p>{SIGN_IN_MODE_LIMITS}</p>
@@ -209,28 +207,26 @@ export function BrowserSignIn({
         <>
           {saved && (
             <div className="thread-browser-signin-saved">
-              <strong>Your saved login for {saved.site}</strong>
+              <strong>{t`Your saved login for ${saved.site}`}</strong>
               <Button variant="primary" busy={filling} onClick={() => void fill()}>
-                {saved.username ? `Sign in as ${saved.username}` : "Fill saved password"}
+                {saved.username ? t`Sign in as ${saved.username}` : t`Fill saved password`}
               </Button>
-              <p>localDot enters it on this site without sharing it with dot.</p>
+              <p>{t`localDot enters it on this site without sharing it with dot.`}</p>
             </div>
           )}
           {fillLine && <p role="status">{fillLine}</p>}
-          <strong>Sign in yourself</strong>
+          <strong>{t`Sign in yourself`}</strong>
           <p>
-            If a site won't accept sign-in while dot controls the browser, switch to a browser that
-            only you control — same tabs and sign-ins, with dot's automation disconnected. Sign in,
-            then choose Hand back; dot stays signed in afterwards and never sees your password.
+            {t`If a site won't accept sign-in while dot controls the browser, switch to a browser that only you control — same tabs and sign-ins, with dot's automation disconnected. Sign in, then choose Hand back; dot stays signed in afterwards and never sees your password.`}
           </p>
           <Button
             variant={saved ? "secondary" : "primary"}
             busy={busy || state?.changing}
             onClick={() => void start()}
           >
-            Sign in without agent control
+            {t`Sign in without agent control`}
           </Button>
-          <p>Only the browser restarts; your tabs and saved sign-ins are kept.</p>
+          <p>{t`Only the browser restarts; your tabs and saved sign-ins are kept.`}</p>
           <p>{PASSKEY_LINE}</p>
         </>
       )}
@@ -239,7 +235,7 @@ export function BrowserSignIn({
           <p role="alert">{error}</p>
           {changing && (
             <Button variant="secondary" size="sm" busy={busy} onClick={() => void start()}>
-              Check status
+              {t`Check status`}
             </Button>
           )}
         </>

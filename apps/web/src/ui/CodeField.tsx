@@ -1,4 +1,5 @@
 import { type ClipboardEvent, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { enterCode, eraseCode } from "./code.ts";
 import { useFieldControl } from "./Field.tsx";
 
@@ -52,7 +53,7 @@ export function CodeField({
           spellCheck={false}
           autoComplete={index === 0 ? "one-time-code" : "off"}
           enterKeyHint={index === length - 1 ? "done" : "next"}
-          aria-label={`${label}, ${index + 1} of ${length}`}
+          aria-label={t`${label}, ${index + 1} of ${length}`}
           aria-describedby={control.describedBy}
           aria-invalid={control.invalid}
           readOnly={unavailable}

@@ -53,8 +53,6 @@ export interface ExportPlan {
   captionAt(frame: number): string | null;
   gapAt(frame: number): RecordingGapReason | null;
 }
-export const PRIVACY_NOTE =
-  "This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.";
 
 // Bits per pixel of each frame the encoder is asked for, at 30 fps. A screen changes little from one
 // frame to the next, so a higher frame rate costs less than its share: the rate grows by fps^0.6.

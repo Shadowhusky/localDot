@@ -1,5 +1,6 @@
 import { DeleteSessionsResult, type SessionCard } from "@localdot/protocol";
 import { bytes, count } from "../copy/format.ts";
+import { locale, t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { cardBytes, inFilter } from "./replay-view.ts";
 
@@ -11,6 +12,8 @@ const DELETE_BATCH = 25;
 export const deletable = (card: Pick<SessionCard, "verdict">) => card.verdict !== "live";
 
 const recordings = (n: number) => count(n, "recording", "recordings");
+// A count as count() writes it, for a sentence that holds one.
+const number = (n: number) => n.toLocaleString(locale());
 
 // One of Free up space's quick choices: which recordings it picks from the whole library, newest
 // first, and how its confirmation asks.
@@ -23,13 +26,16 @@ export interface Cleanup {
 }
 
 const olderThan = (days: number): Cleanup => ({
-  label: `Older than ${days} days`,
-  none: `Nothing older than ${days} days`,
+  label: t`Older than ${days} days`,
+  none: t`Nothing older than ${days} days`,
   picks: (cards, now) =>
     cards.filter(
       (card) => deletable(card) && now.getTime() - Date.parse(card.startedAt) > days * DAY_MS,
     ),
-  title: (n) => `Delete ${recordings(n)} older than ${days} days?`,
+  title: (n) =>
+    n === 1
+      ? t`Delete ${number(n)} recording older than ${days} days?`
+      : t`Delete ${number(n)} recordings older than ${days} days?`,
 });
 
 const NEWEST = 10;
@@ -39,25 +45,33 @@ export const CLEANUPS: readonly Cleanup[] = [
   olderThan(30),
   olderThan(90),
   {
-    label: "Stopped or failed",
-    none: "None stopped or failed",
+    label: t`Stopped or failed`,
+    none: t`None stopped or failed`,
     picks: (cards) => cards.filter((card) => deletable(card) && inFilter(card, "stopped")),
     title: (n) =>
-      `Delete ${n.toLocaleString()} stopped or failed ${n === 1 ? "recording" : "recordings"}?`,
+      n === 1
+        ? t`Delete ${n.toLocaleString()} stopped or failed recording?`
+        : t`Delete ${n.toLocaleString()} stopped or failed recordings?`,
   },
   {
-    label: `All but the newest ${NEWEST}`,
-    none: `${NEWEST} recordings or fewer`,
+    label: t`All but the newest ${NEWEST}`,
+    none: t`${NEWEST} recordings or fewer`,
     picks: (cards) => cards.slice(NEWEST).filter(deletable),
-    title: (n) => `Delete ${recordings(n)} and keep the newest ${NEWEST}?`,
+    title: (n) =>
+      n === 1
+        ? t`Delete ${number(n)} recording and keep the newest ${NEWEST}?`
+        : t`Delete ${number(n)} recordings and keep the newest ${NEWEST}?`,
   },
 ];
 
-export const deleteTitle = (n: number) => `Delete ${n === 1 ? "this recording" : recordings(n)}?`;
+export const deleteTitle = (n: number) =>
+  n === 1 ? t`Delete this recording?` : t`Delete ${number(n)} recordings?`;
 
 // What deleting removes, as the code does it: the task's whole folder and its history.
 export const deleteBody = (n: number) =>
-  `${n === 1 ? "Its video" : "Their videos"}, screenshots, steps, messages and saved files are removed from this Mac. You can't undo this.`;
+  n === 1
+    ? t`Its video, screenshots, steps, messages and saved files are removed from this Mac. You can't undo this.`
+    : t`Their videos, screenshots, steps, messages and saved files are removed from this Mac. You can't undo this.`;
 
 export const totalBytes = (cards: readonly SessionCard[]) =>
   cards.reduce((sum, card) => sum + cardBytes(card), 0);
@@ -150,12 +164,17 @@ async function deleteInBatches(
 // What the confirmation says when some recordings stayed.
 export function deleteProblem({ deleted, live, failed }: DeleteSessionsResult): string {
   if (deleted.length === 0 && live.length === 0)
-    return "The recordings couldn't be deleted. Try again.";
+    return t`The recordings couldn't be deleted. Try again.`;
   return [
-    deleted.length > 0 && `${count(deleted.length, "recording was", "recordings were")} deleted.`,
+    deleted.length > 0 &&
+      (deleted.length === 1
+        ? t`${number(deleted.length)} recording was deleted.`
+        : t`${number(deleted.length)} recordings were deleted.`),
     live.length > 0 &&
-      `${count(live.length, "is", "are")} still running. Stop ${live.length === 1 ? "it" : "them"} before deleting.`,
-    failed.length > 0 && `${failed.length.toLocaleString()} couldn't be deleted. Try again.`,
+      (live.length === 1
+        ? t`${number(live.length)} is still running. Stop it before deleting.`
+        : t`${number(live.length)} are still running. Stop them before deleting.`),
+    failed.length > 0 && t`${failed.length.toLocaleString()} couldn't be deleted. Try again.`,
   ]
     .filter(Boolean)
     .join(" ");

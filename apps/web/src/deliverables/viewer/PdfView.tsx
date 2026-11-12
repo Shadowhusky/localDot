@@ -8,6 +8,7 @@ import {
 } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { type ReactNode, useEffect, useState } from "react";
+import { t, tr } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { type KeptFile, type LoadedPages, loadPages, loadPreviewBytes } from "../api.ts";
 import { PagesView } from "./PagesView.tsx";
@@ -22,10 +23,10 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 const SIZES_AT_ONCE = 32;
 const RETRY = new Set<PreviewReason>(["busy", "failed", "computer_off"]);
 const PAGES_PROBLEMS: Partial<Record<PreviewReason, string>> = {
-  computer_off: "Turn on your computer to see its pages",
-  busy: "Your computer is busy",
-  failed: "Your computer couldn't open it",
-  missing: "This version is no longer available",
+  computer_off: tr("Turn on your computer to see its pages"),
+  busy: tr("Your computer is busy"),
+  failed: tr("Your computer couldn't open it"),
+  missing: tr("This version is no longer available"),
 };
 
 // A PDF the browser loads by its preview link.
@@ -42,12 +43,12 @@ export function PdfFile({ api, url, name }: { api: ApiClient; url: string; name:
     );
     return () => controller.abort();
   }, [api, url, attempt]);
-  if (data === null) return <ViewerLoading label="Loading the PDF" />;
+  if (data === null) return <ViewerLoading label={t`Loading the PDF`} />;
   if (data === "failed")
     return (
       <ViewerMessage
         name={name}
-        title="Couldn't load the preview"
+        title={t`Couldn't load the preview`}
         retry={() => setAttempt((n) => n + 1)}
       />
     );
@@ -89,7 +90,7 @@ function OfficeAttempt({
     <>
       <ViewerBar>{lead}</ViewerBar>
       {loaded === null ? (
-        <ViewerLoading label="Making the pages" note="Making the pages on your computer" />
+        <ViewerLoading label={t`Making the pages`} note={t`Making the pages on your computer`} />
       ) : (
         <ViewerMessage
           name={name}
@@ -142,17 +143,17 @@ export function PdfView({
       void task?.destroy();
     };
   }, [data]);
-  if (opened === null) return <ViewerLoading label="Loading the PDF" />;
+  if (opened === null) return <ViewerLoading label={t`Loading the PDF`} />;
   if (opened === "locked")
     return (
-      <ViewerMessage name={name} title="This PDF is locked">
-        It needs a password.
+      <ViewerMessage name={name} title={t`This PDF is locked`}>
+        {t`It needs a password.`}
       </ViewerMessage>
     );
   if (opened === "failed")
     return (
-      <ViewerMessage name={name} title="Can't show this PDF">
-        It may be damaged.
+      <ViewerMessage name={name} title={t`Can't show this PDF`}>
+        {t`It may be damaged.`}
       </ViewerMessage>
     );
   return <Paged opened={opened} name={name} lead={lead} />;

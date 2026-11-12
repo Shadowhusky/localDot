@@ -1,4 +1,5 @@
 import type { Ref } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
@@ -6,7 +7,7 @@ import type { Delivery } from "./Composer.tsx";
 import { timeLabel } from "./thread.ts";
 import { UserBubble } from "./UserBubble.tsx";
 
-const ARRIVING = "Waiting for the message to arrive.";
+const ARRIVING = t`Waiting for the message to arrive.`;
 
 // A message on its way, drawn as its own row will be: faint while it is sent, whole once dot has it.
 // The row replaces it in place when it arrives, where the copy button takes the spinner's place.
@@ -39,7 +40,7 @@ export function PendingMessage({
       <p className="thread-time">
         <time>{timeLabel(delivery.at)}</time>
       </p>
-      <section className="thread-message" data-role="user" aria-label="Message delivery">
+      <section className="thread-message" data-role="user" aria-label={t`Message delivery`}>
         <UserBubble
           text={delivery.draftText}
           files={delivery.files}
@@ -56,13 +57,13 @@ export function PendingMessage({
             {delivery.request.mode === "followup" && (
               <>
                 <Button size="sm" variant="quiet" disabledReason={ARRIVING}>
-                  Edit
+                  {t`Edit`}
                 </Button>
                 <Button size="sm" variant="quiet" disabledReason={ARRIVING}>
-                  Steer now
+                  {t`Steer now`}
                 </Button>
                 <Button size="sm" variant="quiet" disabledReason={ARRIVING}>
-                  Cancel
+                  {t`Cancel`}
                 </Button>
               </>
             )}
@@ -72,10 +73,10 @@ export function PendingMessage({
           <div className="thread-pending-status">
             <p>
               <Icon name="circle-alert" size={12} className="thread-pending-icon" />
-              <span>{started ? "Task not started" : "Not sent"}</span>
+              <span>{started ? t`Task not started` : t`Not sent`}</span>
             </p>
             <Button size="sm" variant="quiet" onClick={onEdit}>
-              Edit
+              {t`Edit`}
             </Button>
           </div>
         ) : (
@@ -84,17 +85,17 @@ export function PendingMessage({
               <p>
                 <Icon name="circle-alert" size={12} className="thread-pending-icon" />
                 <span>
-                  Not sure dot got that.
+                  {t`Not sure dot got that.`}
                   <br />
-                  Sending again could repeat it.
+                  {t`Sending again could repeat it.`}
                 </span>
               </p>
               <div className="thread-pending-actions">
                 <Button size="sm" disabledReason={retryReason} onClick={onRetry}>
-                  Send again
+                  {t`Send again`}
                 </Button>
                 <Button size="sm" variant="quiet" onClick={onDismiss}>
-                  Keep as draft
+                  {t`Keep as draft`}
                 </Button>
               </div>
             </div>

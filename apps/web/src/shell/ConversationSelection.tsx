@@ -1,7 +1,7 @@
 import { clsx } from "clsx";
 import type { ConversationRow, Organize } from "../agent/conversation-list.ts";
 import { organizeConversations, selectedLabel, underWay } from "../agent/conversation-selection.ts";
-import { count } from "../copy/format.ts";
+import { locale, t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -13,6 +13,39 @@ import { fileConversations } from "./conversation-leave.ts";
 // Pressed with Cmd or Ctrl, a row starts selecting rather than opening.
 export const adds = (event: { metaKey: boolean; ctrlKey: boolean }) =>
   event.metaKey || event.ctrlKey;
+
+const number = (k: number) => k.toLocaleString(locale());
+
+// What filing several says once done, and when some were refused, by how many.
+const FILED = {
+  pinned: (k: number) =>
+    k === 1 ? t`1 conversation pinned.` : t`${number(k)} conversations pinned.`,
+  unpinned: (k: number) =>
+    k === 1 ? t`1 conversation unpinned.` : t`${number(k)} conversations unpinned.`,
+  archived: (k: number) =>
+    k === 1 ? t`1 conversation archived.` : t`${number(k)} conversations archived.`,
+  unarchived: (k: number) =>
+    k === 1 ? t`1 conversation unarchived.` : t`${number(k)} conversations unarchived.`,
+};
+const REFUSED = {
+  pinned: (k: number) =>
+    k === 1
+      ? t`1 conversation couldn't be pinned. Try again.`
+      : t`${number(k)} conversations couldn't be pinned. Try again.`,
+  unpinned: (k: number) =>
+    k === 1
+      ? t`1 conversation couldn't be unpinned. Try again.`
+      : t`${number(k)} conversations couldn't be unpinned. Try again.`,
+  archived: (k: number) =>
+    k === 1
+      ? t`1 conversation couldn't be archived. Try again.`
+      : t`${number(k)} conversations couldn't be archived. Try again.`,
+  unarchived: (k: number) =>
+    k === 1
+      ? t`1 conversation couldn't be unarchived. Try again.`
+      : t`${number(k)} conversations couldn't be unarchived. Try again.`,
+};
+type Filing = keyof typeof FILED;
 
 export function SelectAll({
   shown,
@@ -29,7 +62,7 @@ export function SelectAll({
   return (
     <Checkbox
       className={clsx("conversations-select-all", className)}
-      label="Select all"
+      label={t`Select all`}
       checked={all}
       indeterminate={!all && chosen > 0}
       onCheckedChange={onChange}
@@ -62,23 +95,17 @@ export function SelectionActions({
   className,
 }: SelectionActionsProps) {
   const n = picked.length;
-  const none = n === 0 ? "Select conversations first." : undefined;
+  const none = n === 0 ? t`Select conversations first.` : undefined;
   const pin = n === 0 || picked.some((row) => !row.entry.pinned);
   const archive = n === 0 || picked.some((row) => !row.entry.archived);
-  const conversations = (k: number) => count(k, "conversation", "conversations");
   // The change shows at once and selecting ends; the saves go on behind, and only a refusal says so.
-  const file = (change: Organize, done: string, undone: string) => {
+  const file = (change: Organize, filing: Filing) => {
     const ids = picked.map((row) => row.entry.sessionId);
     fileConversations(ids, change, () => {
-      announce("conversation", `${conversations(ids.length)} ${done}.`);
+      announce("conversation", FILED[filing](ids.length));
       onDone();
       void organizeConversations(api, ids, change).then((refused) => {
-        if (refused > 0)
-          announce(
-            "conversation",
-            `${conversations(refused)} couldn't be ${undone}. Try again.`,
-            "assertive",
-          );
+        if (refused > 0) announce("conversation", REFUSED[filing](refused), "assertive");
       });
     });
   };
@@ -87,25 +114,23 @@ export function SelectionActions({
     <div
       className={clsx("conversations-actions", className)}
       role="group"
-      aria-label="Selected conversations"
+      aria-label={t`Selected conversations`}
     >
       <span className="conversations-chosen num">{selectedLabel(n)}</span>
       <span className="conversations-actions-tools">
         <Action
           compact={compact}
           icon={pin ? "pin" : "pin-off"}
-          label={pin ? "Pin" : "Unpin"}
+          label={pin ? t`Pin` : t`Unpin`}
           disabledReason={none}
           onClick={() =>
-            pin
-              ? file({ pinned: true }, "pinned", "pinned")
-              : file({ pinned: false }, "unpinned", "unpinned")
+            pin ? file({ pinned: true }, "pinned") : file({ pinned: false }, "unpinned")
           }
         />
         <Action
           compact={compact}
           icon={archive ? "archive" : "archive-restore"}
-          label={archive ? "Archive" : "Unarchive"}
+          label={archive ? t`Archive` : t`Unarchive`}
           disabledReason={
             none ??
             (archive
@@ -117,16 +142,14 @@ export function SelectionActions({
               : undefined)
           }
           onClick={() =>
-            archive
-              ? file({ archived: true }, "archived", "archived")
-              : file({ archived: false }, "unarchived", "unarchived")
+            archive ? file({ archived: true }, "archived") : file({ archived: false }, "unarchived")
           }
         />
         <Action
           compact={compact}
           destructive
           icon="trash"
-          label="Delete…"
+          label={t`Delete…`}
           disabledReason={none ?? underWay(picked, running, "deleting")}
           onClick={onDelete}
         />

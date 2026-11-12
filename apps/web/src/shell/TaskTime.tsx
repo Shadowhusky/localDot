@@ -1,4 +1,5 @@
 import { clock } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import { type TaskTimer, timerSeconds } from "../session/status.ts";
 import { useSessionNow } from "../session/useNowMs.ts";
 
@@ -22,5 +23,5 @@ export function TaskTime({ timer, elapsedS, countdownS = null }: TaskTimeProps) 
           ? { counted: elapsedS }
           : null;
   if (!shown) return null;
-  return "left" in shown ? `in ${shown.left} s` : clock(shown.counted);
+  return "left" in shown ? t`in ${shown.left} s` : clock(shown.counted);
 }

@@ -126,7 +126,41 @@ function callArguments(text: string, at: number): string[] {
 const literal = (arg: string | undefined) =>
   arg && /^(["'])(?:\\.|(?!\1).)*\1$/s.test(arg) ? stringAt(arg, 0) : undefined;
 
-// The source with its comments blanked, strings and templates left as they are.
+// Where a slash starts a regular expression rather than a division: after an operator, an opening
+// bracket, a comma or a keyword that takes an expression. Never after < or >: in TSX that is a tag
+// closing (`</b>`, `/>`) or the text after one.
+function startsRegex(out: string): boolean {
+  const before = out.trimEnd();
+  return (
+    before === "" ||
+    /[(,=:[!&|?{;+\-*%~^]$/.test(before) ||
+    /\b(?:return|typeof|case|in|of)$/.test(before)
+  );
+}
+
+// Past a regular expression whose opening slash is at `at`.
+function skipRegex(text: string, at: number): number {
+  let i = at + 1;
+  let inClass = false;
+  while (i < text.length && text[i] !== "\n") {
+    const char = text[i];
+    if (char === "\\") i += 2;
+    else {
+      if (char === "[") inClass = true;
+      else if (char === "]") inClass = false;
+      else if (char === "/" && !inClass) {
+        i++;
+        while (/[a-z]/.test(text[i] ?? "")) i++;
+        return i;
+      }
+      i++;
+    }
+  }
+  return i;
+}
+
+// The source with its comments and regular expressions blanked, strings and templates left as
+// they are.
 function withoutComments(text: string): string {
   let out = "";
   let i = 0;
@@ -136,6 +170,9 @@ function withoutComments(text: string): string {
       const end = skipQuoted(text, i);
       out += text.slice(i, end);
       i = end;
+    } else if (char === "/" && text[i + 1] !== "/" && text[i + 1] !== "*" && startsRegex(out)) {
+      i = skipRegex(text, i);
+      out += " ";
     } else if (char === "/" && text[i + 1] === "/") {
       const end = text.indexOf("\n", i);
       i = end < 0 ? text.length : end;
@@ -155,6 +192,15 @@ export function messagesIn(source: string): string[] {
   const found: string[] = [];
   for (const match of text.matchAll(/(?<![\w$.])(?:t|rich)`/g))
     found.push(templateKey(text, (match.index ?? 0) + match[0].length - 1));
+  for (const match of text.matchAll(/(?<![\w$.])tc\(\s*/g)) {
+    const args = callArguments(
+      text,
+      (match.index ?? 0) + match[0].length - 1 - (match[0].length - 3),
+    );
+    const context = literal(args[0]);
+    const source = literal(args[1]);
+    if (context !== undefined && source !== undefined) found.push(`[${context}] ${source}`);
+  }
   for (const match of text.matchAll(/(?<![\w$.])tr\(\s*/g)) {
     const key = stringAt(text, (match.index ?? 0) + match[0].length);
     if (key !== undefined) found.push(key);

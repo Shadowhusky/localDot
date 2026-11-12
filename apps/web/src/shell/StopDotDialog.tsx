@@ -1,5 +1,6 @@
 import type { DotSummary } from "@localdot/protocol";
 import { type RefObject, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 
@@ -23,11 +24,11 @@ export function StopDotDialog({
       open={!!dot}
       onClose={onClose}
       anchor={anchor}
-      title={`Stop ${shown.current?.name ?? "this dot"}?`}
-      description="Its tasks stop and its computer shuts down. Its files, keys and sign-ins are kept, and you can start it again here."
+      title={shown.current?.name ? t`Stop ${shown.current.name}?` : t`Stop this dot?`}
+      description={t`Its tasks stop and its computer shuts down. Its files, keys and sign-ins are kept, and you can start it again here.`}
     >
       <Button variant="quiet" onClick={onClose}>
-        Cancel
+        {t`Cancel`}
       </Button>
       <Button
         variant="destructive"
@@ -35,7 +36,7 @@ export function StopDotDialog({
           if (shown.current) onStop(shown.current);
         }}
       >
-        Stop
+        {t`Stop`}
       </Button>
     </Dialog>
   );

@@ -9,15 +9,17 @@ import {
   connectorSecretId,
   connectorUrlProblem,
 } from "@localdot/protocol";
+import { count } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { ConnectorKey } from "./useConnectors.ts";
 
 // What a tool does when dot calls it, as the user picks it per tool.
 export type ToolMode = "runs" | "asks" | "off";
 
 export const TOOL_MODES: readonly { value: ToolMode; label: string }[] = [
-  { value: "runs", label: "Just runs" },
-  { value: "asks", label: "Asks first" },
-  { value: "off", label: "Off" },
+  { value: "runs", label: tr("Just runs") },
+  { value: "asks", label: tr("Asks first") },
+  { value: "off", label: tr("Off") },
 ];
 
 export function toolMode(tool: Pick<ConnectorToolView, "enabled" | "access">): ToolMode {
@@ -50,24 +52,24 @@ export function signInOf(view: Pick<ConnectorView, "server">): { signedIn: boole
 }
 
 export function statusLine(view: ConnectorView): string {
-  if (view.enabled && view.signIn) return "Waiting for your approval";
+  if (view.enabled && view.signIn) return t`Waiting for your approval`;
   switch (view.status) {
     case "off":
-      return "Off";
+      return t`Off`;
     case "connecting":
-      return "Connecting";
+      return t`Connecting`;
     case "needs_key":
-      return "No key yet";
+      return t`No key yet`;
     case "needs_sign_in":
-      return signInOf(view)?.signedIn ? "Needs reconnecting" : "Not connected";
+      return signInOf(view)?.signedIn ? t`Needs reconnecting` : t`Not connected`;
     case "failed":
-      return "Not connected";
+      return t`Not connected`;
     case "ready": {
-      const on = view.tools.filter((t) => t.enabled);
-      if (!view.tools.length) return "No tools";
-      const asks = on.filter((t) => t.access === "write").length;
-      const count = `${on.length} ${on.length === 1 ? "tool" : "tools"}`;
-      return asks ? `${count} · ${asks} ask first` : count;
+      const on = view.tools.filter((tool) => tool.enabled);
+      if (!view.tools.length) return t`No tools`;
+      const asks = on.filter((tool) => tool.access === "write").length;
+      const tools = count(on.length, "tool", "tools");
+      return asks ? t`${tools} · ${asks} ask first` : tools;
     }
   }
 }
@@ -98,13 +100,13 @@ export function parseCommand(line: string): { command: string; args: string[] } 
       started = true;
     }
   }
-  if (quote) return "A quote isn't closed.";
+  if (quote) return t`A quote isn't closed.`;
   if (started) words.push(word);
   const [command, ...args] = words;
-  if (!command) return "Enter the command that starts the app.";
+  if (!command) return t`Enter the command that starts the app.`;
   if (!/^[A-Za-z0-9][A-Za-z0-9._+/-]{0,127}$/.test(command))
-    return "Start with the program's name, such as npx or uvx.";
-  if (args.length > 32) return "That command is too long.";
+    return t`Start with the program's name, such as npx or uvx.`;
+  if (args.length > 32) return t`That command is too long.`;
   return { command, args };
 }
 
@@ -194,19 +196,19 @@ export function customDraft(
 ): { draft: ConnectorDraft & { id: string }; key?: ConnectorKey } | { problems: CustomProblems } {
   const problems: CustomProblems = {};
   const name = form.name.trim();
-  if (!name) problems.name = "Give the app a name.";
+  if (!name) problems.name = t`Give the app a name.`;
   const id = connectorIdFor(name || "app", taken);
   const secret = connectorSecretId(id);
   const value = form.key.trim();
   const header = form.header.trim() || "Authorization";
   if (!/^[A-Za-z0-9-]{1,128}$/.test(header))
-    problems.header = "Use a header name, such as Authorization.";
+    problems.header = t`Use a header name, such as Authorization.`;
   const format = header.toLowerCase() === "authorization" ? "bearer" : "raw";
   if (form.kind === "address") {
     const url = form.url.trim();
     const urlProblem = connectorUrlProblem(url);
     if (urlProblem) problems.url = urlProblem;
-    if (form.signIn === "key" && !value) problems.key = "Paste the app's key.";
+    if (form.signIn === "key" && !value) problems.key = t`Paste the app's key.`;
     if (Object.keys(problems).length) return { problems };
     const auth =
       form.signIn === "key"
@@ -228,10 +230,10 @@ export function customDraft(
   const withKey = Boolean(keyEnv || value || keyHost);
   if (withKey) {
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(keyEnv))
-      problems.keyEnv = "Name the variable the app reads its key from, such as API_KEY.";
+      problems.keyEnv = t`Name the variable the app reads its key from, such as API_KEY.`;
     if (!HOST.test(keyHost))
-      problems.keyHost = "Name the host the key is for, such as api.example.com.";
-    if (!value) problems.key = "Paste the app's key.";
+      problems.keyHost = t`Name the host the key is for, such as api.example.com.`;
+    if (!value) problems.key = t`Paste the app's key.`;
   }
   if (Object.keys(problems).length || typeof parsed === "string") return { problems };
   return {

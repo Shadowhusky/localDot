@@ -1,6 +1,7 @@
 import { type AgentRoleChoice, PlanProvider } from "@localdot/protocol";
 import { sameModelOptions } from "@localdot/providers";
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { premiumSpeed, SPEED_NAMES } from "../settings/choices.ts";
 import { ModelOptionsFields, optionsLabel } from "../settings/ModelOptionsFields.tsx";
 import type { ModelGroup, ModelOption } from "../settings/model-options.ts";
@@ -53,7 +54,7 @@ export function ModelMenu(props: ModelMenuProps) {
       anchor={props.anchor}
       side={props.side}
       align={props.align}
-      label="Model and thinking"
+      label={t`Model and thinking`}
       className="model-config-panel"
     >
       <ModelMenuBody key={props.open ? "open" : "closed"} {...props} />
@@ -88,12 +89,12 @@ function ModelMenuBody({
   return (
     <div className="model-config-content">
       <div className="model-config-heading">
-        <span>Model & thinking</span>
+        <span>{t`Model & thinking`}</span>
         <IconButton
           icon="undo-2"
           size={24}
-          label="Reset to provider defaults"
-          disabledReason={draft?.choice.options ? undefined : "Using provider defaults"}
+          label={t`Reset to provider defaults`}
+          disabledReason={draft?.choice.options ? undefined : t`Using provider defaults`}
           onClick={() => {
             if (draft) setDraft({ ...draft, choice: { ...draft.choice, options: undefined } });
           }}
@@ -102,12 +103,12 @@ function ModelMenuBody({
       {(working || moves) && (
         <p className="model-options-note">
           {moves
-            ? "This model keeps its own history, so dot brings over a summary of this task, not every step."
-            : "Applies from your next message."}
+            ? t`This model keeps its own history, so dot brings over a summary of this task, not every step.`
+            : t`Applies from your next message.`}
         </p>
       )}
       <Select
-        aria-label="Model"
+        aria-label={t`Model`}
         value={draft?.id ?? ""}
         groups={groups.map((group) => ({
           label: group.label,
@@ -137,13 +138,13 @@ function ModelMenuBody({
               if (props.anchor.current) onManage(props.anchor.current);
             }}
           >
-            Manage models…
+            {t`Manage models…`}
           </Button>
         )}
         <Button
           variant="primary"
           size="sm"
-          disabledReason={dirty ? undefined : "Settings are already selected"}
+          disabledReason={dirty ? undefined : t`Settings are already selected`}
           onClick={() => {
             if (draft && dirty) {
               onChoose(draft);
@@ -151,7 +152,7 @@ function ModelMenuBody({
             }
           }}
         >
-          Apply
+          {t`Apply`}
         </Button>
       </div>
     </div>
@@ -173,7 +174,7 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const { triggerProps: tip, tooltip } = useTooltip({
-    content: !disabledReason && next ? "Starts with your next message" : undefined,
+    content: !disabledReason && next ? t`Starts with your next message` : undefined,
   });
   // The menu and the label give the full name; the chip leaves out a family name the rest says.
   const label = name.replace(/^Claude (?=[A-Za-z])/, "");
@@ -191,7 +192,7 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
         size="sm"
         className="composer-model"
         disabledReason={disabledReason}
-        aria-label={next ? `Model for your next message: ${said}` : `Model: ${said}`}
+        aria-label={next ? t`Model for your next message: ${said}` : t`Model: ${said}`}
         aria-describedby={tip["aria-describedby"]}
         {...triggerProps("dialog", open)}
         onClick={() => {

@@ -41,6 +41,7 @@ import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { HandedOverFiles, latestFiles } from "../deliverables/HandedOverFiles.tsx";
 import { useConversationFiles } from "../deliverables/useConversationFiles.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { type Previews, PreviewsScope } from "../previews/PreviewsContext.tsx";
 import { PreviewsPanel } from "../previews/PreviewsPanel.tsx";
@@ -98,9 +99,9 @@ export interface ActivityRailProps {
 }
 
 const FILTERS = [
-  { value: "all", label: "All" },
-  { value: "screen", label: "Screen" },
-  { value: "tools", label: "Tools" },
+  { value: "all", label: tr("All") },
+  { value: "screen", label: tr("Screen") },
+  { value: "tools", label: tr("Tools") },
 ] as const;
 const estimateStep = () => 64;
 const entryKey = (entry: ActivityEntry) => entry.key;
@@ -235,12 +236,12 @@ export function ActivityRail({
   const tabs: SegmentItem[] = [
     {
       value: "steps",
-      label: "Steps",
+      label: t`Steps`,
       icon: TAB_ICONS.steps,
       count: onPlan ? `${progress.done}/${progress.total}` : entries.length || undefined,
       ...(onPlan && progress.current
         ? {
-            hint: `${progress.done} of ${progress.total} done. Now: ${markdownToPlain(progress.current.text)}`,
+            hint: t`${progress.done} of ${progress.total} done. Now: ${markdownToPlain(progress.current.text)}`,
           }
         : {}),
     },
@@ -248,7 +249,7 @@ export function ActivityRail({
       ? [
           {
             value: "files",
-            label: "Files",
+            label: t`Files`,
             icon: TAB_ICONS.files,
             count: files || undefined,
             fresh,
@@ -259,7 +260,7 @@ export function ActivityRail({
       ? [
           {
             value: "sources",
-            label: "Sources",
+            label: t`Sources`,
             icon: TAB_ICONS.sources,
             count: research.sources.length,
           },
@@ -267,11 +268,11 @@ export function ActivityRail({
       : []),
     {
       value: "agents",
-      label: "Agents",
+      label: t`Agents`,
       icon: TAB_ICONS.agents,
       count: model.subagents.size || undefined,
     },
-    ...(showPreviews ? [{ value: "previews", label: "Previews", icon: TAB_ICONS.previews }] : []),
+    ...(showPreviews ? [{ value: "previews", label: t`Previews`, icon: TAB_ICONS.previews }] : []),
   ];
   const tabKey = tabs.map((item) => item.value).join(",");
   const tabValues = useMemo(() => tabKey.split(","), [tabKey]);
@@ -433,7 +434,7 @@ export function ActivityRail({
       {/* A tab or the column names it on screen; Replay's transport says how far its record runs. */}
       <div className="ui-visually-hidden">
         <h2>{PANEL_NAME}</h2>
-        {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
+        {replay && <span className="num">{t`As of ${timeLabel(asOfMs)}`}</span>}
       </div>
       <div className="activity-controls">
         {(started || tabs.length > 1) && (
@@ -459,7 +460,7 @@ export function ActivityRail({
                 <PlanStrip
                   plan={plan}
                   phase={phase}
-                  label={replay ? "Plan at replay time" : "Task plan"}
+                  label={replay ? t`Plan at replay time` : t`Task plan`}
                   over={stepsList}
                 />
               </div>
@@ -467,7 +468,7 @@ export function ActivityRail({
             {started && entries.length > 0 && (
               <div className="activity-filter">
                 <SegmentedControl
-                  aria-label="Activity filter"
+                  aria-label={t`Activity filter`}
                   size={32}
                   variant="quiet"
                   items={FILTERS}
@@ -489,15 +490,19 @@ export function ActivityRail({
             >
               <div className="activity-content">
                 {!started && (
-                  <p className="activity-empty">Plan and steps appear here once dot starts.</p>
+                  <p className="activity-empty">{t`Plan and steps appear here once dot starts.`}</p>
                 )}
                 {history.hasOlder && (
                   <Button className="activity-page" size="sm" variant="quiet" onClick={older}>
-                    Earlier steps
+                    {t`Earlier steps`}
                   </Button>
                 )}
                 {started && (
-                  <section ref={timeline} className="activity-timeline" aria-label="Recorded steps">
+                  <section
+                    ref={timeline}
+                    className="activity-timeline"
+                    aria-label={t`Recorded steps`}
+                  >
                     <div aria-hidden="true" style={{ height: virtual.before, flexShrink: 0 }} />
                     {sessionId &&
                       virtual.indexes.map((index) => {
@@ -528,7 +533,11 @@ export function ActivityRail({
                                   className="activity-read-group"
                                   leading={<StatusGlyph state="done" />}
                                   title={group.label}
-                                  meta={`${group.entries.length} read-only steps · ${isOpen ? "Hide" : "Show"} details`}
+                                  meta={
+                                    isOpen
+                                      ? t`${group.entries.length} read-only steps · Hide details`
+                                      : t`${group.entries.length} read-only steps · Show details`
+                                  }
                                   count={group.entries.length}
                                   open={isOpen}
                                   onToggle={(trigger) => {
@@ -554,15 +563,15 @@ export function ActivityRail({
                 {started && (!sessionId || !selected.length) && (
                   <p className="activity-empty">
                     {sessionId && entries.length
-                      ? "No steps match this filter."
+                      ? t`No steps match this filter.`
                       : (empty ??
                         (replay
-                          ? "No steps to show for this recording."
-                          : "Steps appear here as dot works."))}
+                          ? t`No steps to show for this recording.`
+                          : t`Steps appear here as dot works.`))}
                   </p>
                 )}
                 {model.historyTruncated && (
-                  <p className="activity-note">Older activity is kept in the task log.</p>
+                  <p className="activity-note">{t`Older activity is kept in the task log.`}</p>
                 )}
               </div>
             </ScrollArea>
@@ -581,7 +590,7 @@ export function ActivityRail({
                   {handed > 0 && sessionId && (
                     <section className="activity-section" aria-labelledby={`${domId}-handed`}>
                       <div className="activity-section-head">
-                        <h3 id={`${domId}-handed`}>Handed over</h3>
+                        <h3 id={`${domId}-handed`}>{t`Handed over`}</h3>
                         <span className="activity-section-meta num">{handed}</span>
                       </div>
                       <HandedOverFiles
@@ -592,7 +601,7 @@ export function ActivityRail({
                       />
                       {conversationFiles.more && (
                         <p className="activity-note">
-                          Files from the oldest part of this conversation aren't listed.
+                          {t`Files from the oldest part of this conversation aren't listed.`}
                         </p>
                       )}
                     </section>
@@ -609,7 +618,7 @@ export function ActivityRail({
                   {fileChanges.length > 0 && (
                     <section className="activity-section" aria-labelledby={`${domId}-changed`}>
                       <div className="activity-section-head">
-                        <h3 id={`${domId}-changed`}>Changed</h3>
+                        <h3 id={`${domId}-changed`}>{t`Changed`}</h3>
                         <span className="activity-section-meta num">{fileChanges.length}</span>
                       </div>
                       <VirtualList items={fileChanges} itemKey={changeKey}>
@@ -620,7 +629,7 @@ export function ActivityRail({
                   {memoryChanges.length > 0 && (
                     <section className="activity-section" aria-labelledby={`${domId}-memory`}>
                       <div className="activity-section-head">
-                        <h3 id={`${domId}-memory`}>Memory</h3>
+                        <h3 id={`${domId}-memory`}>{t`Memory`}</h3>
                         <span className="activity-section-meta num">{memoryChanges.length}</span>
                       </div>
                       <VirtualList items={memoryChanges} itemKey={changeKey}>
@@ -628,7 +637,9 @@ export function ActivityRail({
                       </VirtualList>
                     </section>
                   )}
-                  {!files && <p className="activity-empty">Files dot hands over appear here.</p>}
+                  {!files && (
+                    <p className="activity-empty">{t`Files dot hands over appear here.`}</p>
+                  )}
                 </div>
               </ScrollArea>
             </TabPanel>
@@ -673,7 +684,7 @@ export function ActivityRail({
             }}
           >
             <Icon name="arrow-down" size={14} />
-            Jump to latest
+            {t`Jump to latest`}
           </button>
         )}
       </div>

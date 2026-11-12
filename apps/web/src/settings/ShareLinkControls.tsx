@@ -1,5 +1,6 @@
 import type { AgentRoleChoice, AgentSettingsDocument } from "@localdot/protocol";
 import { useEffect, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
@@ -56,7 +57,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
       })
       .catch(() => {
         if (!abort.signal.aborted)
-          setError("Shared links could not load. Reopen this page to retry.");
+          setError(t`Shared links could not load. Reopen this page to retry.`);
       });
     return () => abort.abort();
   }, [api]);
@@ -64,12 +65,12 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
     if (busy) return;
     const maxTasks = limit.trim() ? Number(limit) : null;
     const found = {
-      ...(label.trim() ? {} : { label: "Give the link a name." }),
+      ...(label.trim() ? {} : { label: t`Give the link a name.` }),
       ...(maxTasks !== null && (!Number.isInteger(maxTasks) || maxTasks < 1 || maxTasks > 10000)
-        ? { limit: "Enter a task limit from 1 to 10,000, or leave it empty." }
+        ? { limit: t`Enter a task limit from 1 to 10,000, or leave it empty.` }
         : {}),
       ...(!Number.isFinite(Number(budget)) || Number(budget) < 0.01 || Number(budget) > 10000
-        ? { budget: "Enter a budget from $0.01 to $10,000." }
+        ? { budget: t`Enter a budget from $0.01 to $10,000.` }
         : {}),
     };
     setProblems(found);
@@ -97,7 +98,9 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
       setUrl(link.url);
       setLabel("");
     } catch {
-      setError("The link could not be created. Check the remote connection and configured models.");
+      setError(
+        t`The link could not be created. Check the remote connection and configured models.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -110,47 +113,46 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
       setLinks((old) => old.map((link) => (link.id === id ? { ...link, revoked: true } : link)));
       setUrl("");
     } catch {
-      setError("This link could not be revoked. Try again; it may still be active.");
+      setError(t`This link could not be revoked. Try again; it may still be active.`);
     } finally {
       setBusy(false);
     }
   };
   return (
-    <section ref={scope} className="share-links" aria-label="Shared links">
+    <section ref={scope} className="share-links" aria-label={t`Shared links`}>
       <header className="settings-group-intro">
-        <GroupHead title="Links for other people" />
+        <GroupHead title={t`Links for other people`} />
         <GroupNote>
-          Recipients use the same computer, files and conversation. Share only with people you
-          trust. Their tasks never get your memory, contacts or routines.
+          {t`Recipients use the same computer, files and conversation. Share only with people you trust. Their tasks never get your memory, contacts or routines.`}
         </GroupNote>
       </header>
       <Group>
         <Field
-          label="Link name"
+          label={t`Link name`}
           className="ui-group-row"
           {...(problems.label ? { error: problems.label } : {})}
         >
           <TextField
             value={label}
             maxLength={80}
-            placeholder="e.g. Alex"
+            placeholder={t`e.g. Alex`}
             onChange={(e) => setLabel(e.target.value)}
           />
         </Field>
-        <Field label="Expires" inline className="ui-group-row">
+        <Field label={t`Expires`} inline className="ui-group-row">
           <Select
             value={hours}
             onValueChange={setHours}
             items={[
-              { value: "1", label: "In 1 hour" },
-              { value: "24", label: "In 1 day" },
-              { value: "168", label: "In 7 days" },
-              { value: "720", label: "In 30 days" },
-              { value: "", label: "Never · until revoked" },
+              { value: "1", label: t`In 1 hour` },
+              { value: "24", label: t`In 1 day` },
+              { value: "168", label: t`In 7 days` },
+              { value: "720", label: t`In 30 days` },
+              { value: "", label: t`Never · until revoked` },
             ]}
           />
         </Field>
-        <Field label="Model" className="ui-group-row">
+        <Field label={t`Model`} className="ui-group-row">
           <Select
             value={model}
             onValueChange={setModel}
@@ -162,36 +164,36 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
         </Field>
         <Switch
           className="ui-group-row"
-          label="Allow model switching"
-          description="Only between your configured models."
+          label={t`Allow model switching`}
+          description={t`Only between your configured models.`}
           checked={chooseModel}
           onCheckedChange={setChooseModel}
         />
         <Switch
           className="ui-group-row"
-          label="Allow replays"
-          description="Every task's full record: what was said, dot's thinking and its files, archived ones too."
+          label={t`Allow replays`}
+          description={t`Every task's full record: what was said, dot's thinking and its files, archived ones too.`}
           checked={replay}
           onCheckedChange={setReplay}
         />
         <Switch
           className="ui-group-row"
-          label="Use your apps, keys and browser"
-          description="Their tasks can use your connected apps, saved keys and the web browser you're signed in to. Sign-ins saved on the computer itself, such as gh or git, work for every link."
+          label={t`Use your apps, keys and browser`}
+          description={t`Their tasks can use your connected apps, saved keys and the web browser you're signed in to. Sign-ins saved on the computer itself, such as gh or git, work for every link.`}
           checked={apps}
           onCheckedChange={setApps}
         />
         <Switch
           className="ui-group-row"
-          label="Show chat settings"
-          description="Their model and limits. Owner settings and saved keys remain private."
+          label={t`Show chat settings`}
+          description={t`Their model and limits. Owner settings and saved keys remain private.`}
           checked={settings}
           onCheckedChange={setSettings}
         />
         <Field
-          label="Task limit"
+          label={t`Task limit`}
           className="ui-group-row"
-          description="Leave empty for unlimited tasks."
+          description={t`Leave empty for unlimited tasks.`}
           {...(problems.limit ? { error: problems.limit } : {})}
         >
           <TextField
@@ -203,9 +205,9 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
           />
         </Field>
         <Field
-          label="API budget per task ($)"
+          label={t`API budget per task ($)`}
           className="ui-group-row"
-          description="The lower of this and your own limit applies. Subscription plans use their own allowance."
+          description={t`The lower of this and your own limit applies. Subscription plans use their own allowance.`}
           {...(problems.budget ? { error: problems.budget } : {})}
         >
           <TextField
@@ -222,15 +224,19 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
         onClick={() => void create()}
         busy={busy}
         disabledReason={
-          !loaded ? "Loading link settings" : !models.length ? "Configure a model first" : undefined
+          !loaded
+            ? t`Loading link settings`
+            : !models.length
+              ? t`Configure a model first`
+              : undefined
         }
       >
-        Create shared link
+        {t`Create shared link`}
       </Button>
       {url && (
         <Field
-          label="New shared link"
-          description="Copy it now. The secret is not stored and cannot be shown again."
+          label={t`New shared link`}
+          description={t`Copy it now. The secret is not stored and cannot be shown again.`}
         >
           <TextField readOnly value={url} onFocus={(e) => e.target.select()} />
           <Button
@@ -239,10 +245,10 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
             onClick={() => {
               void navigator.clipboard
                 .writeText(url)
-                .catch(() => setError("Select the link above to copy it manually."));
+                .catch(() => setError(t`Select the link above to copy it manually.`));
             }}
           >
-            Copy link
+            {t`Copy link`}
           </Button>
         </Field>
       )}
@@ -251,7 +257,7 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
           {error}
         </p>
       )}
-      <section className="share-link-list" aria-label="Existing shared links">
+      <section className="share-link-list" aria-label={t`Existing shared links`}>
         {links.map((link) => {
           const ended = link.revoked || (link.expiresAt !== null && link.expiresAt <= Date.now());
           return (
@@ -260,26 +266,28 @@ export function ShareLinkControls({ api }: { api: ApiClient }) {
                 <strong>{link.label}</strong>
                 <p>
                   {link.revoked
-                    ? "Revoked"
+                    ? t`Revoked`
                     : ended
-                      ? "Expired"
+                      ? t`Expired`
                       : link.expiresAt === null
-                        ? "No expiry"
-                        : `Expires ${new Date(link.expiresAt).toLocaleString()}`}{" "}
-                  · {link.tasks}
-                  {link.maxTasks === null ? " tasks" : ` / ${link.maxTasks} tasks`}
-                  {link.apps && " · Your apps, keys and browser"}
+                        ? t`No expiry`
+                        : t`Expires ${new Date(link.expiresAt).toLocaleString()}`}{" "}
+                  ·{" "}
+                  {link.maxTasks === null
+                    ? t`${link.tasks} tasks`
+                    : t`${link.tasks} / ${link.maxTasks} tasks`}
+                  {link.apps && <> · {t`Your apps, keys and browser`}</>}
                 </p>
               </div>
               {!ended && (
                 <Button variant="quiet" busy={busy} onClick={() => void revoke(link.id)}>
-                  Revoke
+                  {t`Revoke`}
                 </Button>
               )}
             </div>
           );
         })}
-        {loaded && !links.length && <GroupNote>No shared links yet.</GroupNote>}
+        {loaded && !links.length && <GroupNote>{t`No shared links yet.`}</GroupNote>}
       </section>
     </section>
   );

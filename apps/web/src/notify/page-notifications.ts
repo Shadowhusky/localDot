@@ -1,4 +1,5 @@
-import { type AttentionItem, NOTIFY_COPY, notifyRouteOf } from "@localdot/protocol";
+import { type AttentionItem, notifyRouteOf } from "@localdot/protocol";
+import { notifyCopy } from "./notify-words.ts";
 
 export interface PageNotificationHost {
   Notification?: {
@@ -20,7 +21,7 @@ export function showPageNotification(
   if (!route || shown.has(item.key)) return "skipped";
   if (host.Notification?.permission !== "granted") return "skipped";
   shown.add(item.key);
-  const copy = NOTIFY_COPY[route.kind];
+  const copy = notifyCopy(route.kind);
   try {
     const notification = new host.Notification(copy.title, {
       body: item.task ?? copy.body,

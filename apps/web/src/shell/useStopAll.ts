@@ -1,6 +1,6 @@
 import type { StopAllOutcome } from "@localdot/protocol";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { count } from "../copy/format.ts";
+import { locale, t } from "../i18n/index.ts";
 import type { RoutinesApi } from "../routines/routines-api.ts";
 import { showToast } from "../ui/Toast.tsx";
 import type { ToastOptions } from "../ui/toasts.ts";
@@ -9,14 +9,22 @@ const TOAST = "stop-all";
 
 // What Stop everything did, in plain words.
 export function stoppedText(outcome: StopAllOutcome): string {
+  const number = (value: number) => value.toLocaleString(locale());
+  const tasks = outcome.sessions.length;
+  const computers = outcome.cells.length;
+  const routines = outcome.routinesPaused;
   const parts = [
-    outcome.sessions.length ? count(outcome.sessions.length, "task stopped", "tasks stopped") : "",
-    outcome.cells.length ? count(outcome.cells.length, "computer paused", "computers paused") : "",
-    outcome.routinesPaused
-      ? count(outcome.routinesPaused, "routine paused", "routines paused")
+    tasks ? (tasks === 1 ? t`1 task stopped` : t`${number(tasks)} tasks stopped`) : "",
+    computers
+      ? computers === 1
+        ? t`1 computer paused`
+        : t`${number(computers)} computers paused`
       : "",
+    routines ? (routines === 1 ? t`1 routine paused` : t`${number(routines)} routines paused`) : "",
   ].filter(Boolean);
-  return parts.length ? `${parts.join(", ")}.` : "Nothing was running.";
+  if (!parts.length) return t`Nothing was running.`;
+  const list = parts.reduce((done, part) => t`${done}, ${part}`);
+  return t`${list}.`;
 }
 
 export interface StopAll {
@@ -41,20 +49,20 @@ export function useStopAll(
         if (!outcome.confirmed) throw new Error("unconfirmed");
         toast({
           id: TOAST,
-          title: "Everything stopped",
+          title: t`Everything stopped`,
           description: stoppedText(outcome),
           ...(outcome.routinesPaused > 0
             ? {
                 action: {
-                  label: "Continue routines",
+                  label: t`Continue routines`,
                   onAction: () =>
                     void api
                       .resume()
-                      .then(() => toast({ id: TOAST, title: "Routines are running again" }))
+                      .then(() => toast({ id: TOAST, title: t`Routines are running again` }))
                       .catch(() =>
                         toast({
                           id: TOAST,
-                          title: "Routines couldn't be turned back on",
+                          title: t`Routines couldn't be turned back on`,
                           tone: "danger",
                         }),
                       ),
@@ -65,11 +73,11 @@ export function useStopAll(
       } catch {
         toast({
           id: TOAST,
-          title: "Couldn't confirm that everything stopped",
-          description: "Keep an eye on your computer, and check again.",
+          title: t`Couldn't confirm that everything stopped`,
+          description: t`Keep an eye on your computer, and check again.`,
           tone: "danger",
           urgency: "assertive",
-          action: { label: "Check again", onAction: () => void run() },
+          action: { label: t`Check again`, onAction: () => void run() },
         });
       } finally {
         setRunning(false);

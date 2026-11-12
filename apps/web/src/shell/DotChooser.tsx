@@ -1,5 +1,6 @@
 import type { Accessory, PersonaId } from "@localdot/protocol";
 import type { RefObject } from "react";
+import { t } from "../i18n/index.ts";
 import { PersonaPicker } from "../onboarding/PersonaPicker.tsx";
 import { AutoDot, dotChoiceNote } from "../settings/AutoDot.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
@@ -36,7 +37,7 @@ export function DotChooser({
   );
   if (phone)
     return (
-      <Sheet open={open} onClose={onClose} title="Your dot" side="bottom" doneLabel="Done">
+      <Sheet open={open} onClose={onClose} title={t`Your dot`} side="bottom" doneLabel={t`Done`}>
         {choices}
       </Sheet>
     );
@@ -47,7 +48,7 @@ export function DotChooser({
       anchor={anchor}
       side="top"
       align="start"
-      title="Your dot"
+      title={t`Your dot`}
     >
       {choices}
     </Popover>

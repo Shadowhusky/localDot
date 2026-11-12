@@ -1,4 +1,5 @@
 import { isOpenRouterRouterId, providerById } from "@localdot/providers";
+import { t } from "../i18n/index.ts";
 import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Select } from "../ui/Select.tsx";
@@ -36,14 +37,14 @@ export interface ModelChooserProps {
 }
 
 export function providerNote(id: string): string | undefined {
-  if (id === CHATGPT) return "Uses your ChatGPT account. No key or price needed.";
-  if (id === CLAUDE_CODE) return "No key or price needed.";
+  if (id === CHATGPT) return t`Uses your ChatGPT account. No key or price needed.`;
+  if (id === CLAUDE_CODE) return t`No key or price needed.`;
   const provider = providerById(id);
-  if (!provider) return id ? "This provider is no longer offered. Choose another." : undefined;
+  if (!provider) return id ? t`This provider is no longer offered. Choose another.` : undefined;
   if (provider.notOffered) return provider.notOffered;
-  if (provider.plan) return ["Uses your plan's limits.", provider.rule].filter(Boolean).join(" ");
+  if (provider.plan) return [t`Uses your plan's limits.`, provider.rule].filter(Boolean).join(" ");
   if (provider.id === "anthropic")
-    return "Uses API keys. To use your Claude plan, choose Claude Code (your plan).";
+    return t`Uses API keys. To use your Claude plan, choose Claude Code (your plan).`;
   return undefined;
 }
 
@@ -55,7 +56,7 @@ export function modelNote(
     .find((row) => row.id === value.provider)
     ?.models.find((model) => model.id === value.model);
   return chosen && isOpenRouterRouterId(value.provider, chosen.id)
-    ? "Choose a specific model. A router can't set aside a known price."
+    ? t`Choose a specific model. A router can't set aside a known price.`
     : chosen?.note;
 }
 
@@ -86,16 +87,16 @@ export function ModelChooser({
   const items = modelItems(role, provider, value.provider, models, subscriptionModels, value.model);
   const empty =
     value.provider === CHATGPT
-      ? "Sign in and check the account to load its models."
+      ? t`Sign in and check the account to load its models.`
       : value.provider === CLAUDE_CODE
-        ? "Set up Claude Code to load its models."
-        : "No models in the list yet. Refresh the model list.";
+        ? t`Set up Claude Code to load its models.`
+        : t`No models in the list yet. Refresh the model list.`;
   const idProblem = (value.model ? modelIdProblem(value.model) : null) ?? problem;
   const chooseModel = plan || (provider && !provider.notOffered);
   return (
     <>
       <Field
-        label="Provider"
+        label={t`Provider`}
         inline
         className="ui-group-row"
         {...(problem && !chooseModel ? { error: problem } : {})}
@@ -105,13 +106,13 @@ export function ModelChooser({
           value={value.provider}
           groups={providerGroups(role, value.provider, main)}
           aria-describedby={describedBy}
-          placeholder="Choose a provider"
-          searchPlaceholder="Search providers"
+          placeholder={t`Choose a provider`}
+          searchPlaceholder={t`Search providers`}
           onValueChange={(id) => onChange({ provider: id, model: "" })}
         />
       </Field>
       {isCustomFormat(value.provider) && (
-        <Field label="API format" inline className="ui-group-row">
+        <Field label={t`API format`} inline className="ui-group-row">
           <Select
             appearance="inline"
             value={value.provider}
@@ -122,7 +123,7 @@ export function ModelChooser({
       )}
       {chooseModel &&
         (typed && !models.length ? (
-          <Field label="Model ID" inline className="ui-group-row" error={idProblem ?? undefined}>
+          <Field label={t`Model ID`} inline className="ui-group-row" error={idProblem ?? undefined}>
             <TextField
               size="sm"
               value={value.model}
@@ -130,7 +131,7 @@ export function ModelChooser({
               autoComplete="off"
               autoCapitalize="off"
               spellCheck={false}
-              placeholder="e.g. my-model-1"
+              placeholder={t`e.g. my-model-1`}
               onChange={(event) =>
                 onChange({ ...value, model: event.target.value, options: undefined })
               }
@@ -138,7 +139,7 @@ export function ModelChooser({
           </Field>
         ) : (
           <Field
-            label="Model"
+            label={t`Model`}
             inline
             className="ui-group-row"
             {...(typed || idProblem ? { error: idProblem ?? undefined } : {})}
@@ -149,9 +150,9 @@ export function ModelChooser({
               value={value.model}
               items={items}
               aria-describedby={describedBy}
-              placeholder="Choose a model"
-              searchPlaceholder="Search models"
-              customDescription={typed ? "Use this model ID" : undefined}
+              placeholder={t`Choose a model`}
+              searchPlaceholder={t`Search models`}
+              customDescription={typed ? t`Use this model ID` : undefined}
               onValueChange={(model) =>
                 onChange({ ...value, model, options: undefined, price: undefined })
               }

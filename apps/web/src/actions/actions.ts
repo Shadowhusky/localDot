@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import type { IconName } from "../ui/icons.ts";
 
 // One list of what the user can do from the keyboard: the composer's slash commands are the actions
@@ -213,10 +214,12 @@ export function rowInput(
   const text = typed?.spaced ? typed.arg.trim() : "";
   if (action.input === "required" && !text)
     return {
-      problem: `Write the ${(action.hint ?? "words").replace(/[<>[\]]/g, "")} after /${action.command}.`,
+      problem: action.hint
+        ? t`Write the ${action.hint.replace(/[<>[\]]/g, "")} after /${action.command ?? ""}.`
+        : t`Write the words after /${action.command ?? ""}.`,
     };
   if (action.choices && !action.input)
-    return { problem: text ? `Nothing matches “${text}”.` : "Choose one from the list." };
+    return { problem: text ? t`Nothing matches “${text}”.` : t`Choose one from the list.` };
   return { text };
 }
 

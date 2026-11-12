@@ -1,5 +1,6 @@
 import type { Routine } from "@localdot/protocol";
 import type { RefObject } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 
@@ -24,14 +25,14 @@ export function DeleteRoutine({
         if (!busy) onClose();
       }}
       anchor={anchor}
-      title={routine ? `Delete ${routine.name}?` : "Delete this routine?"}
-      description="It stops running and its run history goes. Recordings of its runs stay in Replay."
+      title={routine ? t`Delete ${routine.name}?` : t`Delete this routine?`}
+      description={t`It stops running and its run history goes. Recordings of its runs stay in Replay.`}
     >
-      <Button variant="quiet" disabledReason={busy ? "Deleting…" : undefined} onClick={onClose}>
-        Cancel
+      <Button variant="quiet" disabledReason={busy ? t`Deleting…` : undefined} onClick={onClose}>
+        {t`Cancel`}
       </Button>
       <Button variant="destructive" busy={busy} onClick={() => routine && onDelete(routine)}>
-        Delete
+        {t`Delete`}
       </Button>
     </Dialog>
   );

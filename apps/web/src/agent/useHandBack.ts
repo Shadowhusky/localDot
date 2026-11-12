@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { AgentTakeover } from "./model.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 
@@ -35,7 +36,7 @@ export function useHandBack({
   const sending =
     controls.status?.kind === "handback" &&
     (controls.status.phase === "sending" || controls.status.phase === "checking");
-  const reason = controls.canHandback ? undefined : "Wait for the computer to be ready";
+  const reason = controls.canHandback ? undefined : t`Wait for the computer to be ready`;
   return {
     run: () => give(false),
     decline: () => give(true),

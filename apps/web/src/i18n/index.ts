@@ -2,9 +2,9 @@ import { createElement, Fragment, type ReactNode } from "react";
 
 // The app's words in the language the person chose. The English as written in the code is both what
 // shows in English and each message's key, so a message is written once, where it is used; another
-// language is a catalog of translations of those keys. A language's catalog loads before the app's
-// modules do (main.tsx), so words a module fixes as it loads are in it too, and changing language
-// reloads the page.
+// language is a catalog of translations of those keys. A language's catalog loads as this module
+// does, before any module that imports it runs, so words a module fixes as it loads are in it too,
+// and changing language reloads the page.
 //
 // In a message, `{0}`, `{1}` stand for its values in order, and `#` in a count for the number.
 
@@ -95,6 +95,16 @@ export function tr(source: string, ...values: readonly (string | number)[]): str
   return fill(catalog[source] ?? source, values);
 }
 
+// The same English with another meaning, told apart by what it names: tc("button", "Reset") beside a
+// tc("status", "Reset"). The catalog keys it "[button] Reset"; with none there it reads as written.
+export function tc(
+  context: string,
+  source: string,
+  ...values: readonly (string | number)[]
+): string {
+  return fill(catalog[`[${context}] ${source}`] ?? source, values);
+}
+
 // A message with elements inside it, such as a link or bold words: rich`Open ${<b>Keys</b>} to unlock`.
 export function rich(parts: TemplateStringsArray, ...values: readonly ReactNode[]): ReactNode {
   const key = keyOf(parts);
@@ -122,4 +132,15 @@ export function plural(value: number, one: string, other: string): string {
   const rules = plurals.get("en") ?? new Intl.PluralRules("en");
   plurals.set("en", rules);
   return `${number} ${rules.select(value) === "one" ? one : other}`;
+}
+
+// Every module asking for a message imports this one, so each waits here for the catalog. English
+// awaits nothing and so runs on at once.
+const startLocale = resolveLocale(localeChoice());
+if (startLocale !== "en") {
+  try {
+    setLocale(startLocale, (await import("./zh-CN/index.ts")).zhCN);
+  } catch {
+    // A catalog that couldn't load leaves the app in English, not blank.
+  }
 }

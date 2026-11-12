@@ -1,5 +1,6 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
 import { describeRequestError, MEMORY_ADVICE } from "./errors.ts";
@@ -155,7 +156,7 @@ export function useCell(api: ApiClient): CellController {
           try {
             next = parseCell(JSON.parse(data), cellId);
           } catch {
-            setError("Computer status could not be verified.");
+            setError(t`Computer status could not be verified.`);
             setStatus("unknown");
             return;
           }

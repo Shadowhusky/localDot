@@ -1,4 +1,5 @@
 import type { RoutineRun } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -19,10 +20,10 @@ export function RunHistory({
   onAnswer?(sessionId: string): void;
 }) {
   if (runs === undefined) return <Skeleton loading shape="block" width="100%" height="132px" />;
-  if (runs.length === 0) return <p className="routine-history-empty">It hasn't run yet.</p>;
+  if (runs.length === 0) return <p className="routine-history-empty">{t`It hasn't run yet.`}</p>;
   const now = Date.now();
   return (
-    <ol className="routine-history" aria-label="Recent runs">
+    <ol className="routine-history" aria-label={t`Recent runs`}>
       {runs.map((run) => {
         const recorded = run.sessionId;
         return (
@@ -36,7 +37,7 @@ export function RunHistory({
             </span>
             {run.outcome === "needs_you" && run.endedAt === null && onAnswer && recorded ? (
               <Button size="sm" onClick={() => onAnswer(recorded)}>
-                Answer
+                {t`Answer`}
               </Button>
             ) : (
               recorded &&
@@ -44,7 +45,7 @@ export function RunHistory({
               run.outcome !== "running" &&
               run.outcome !== "pending" && (
                 <Button variant="quiet" size="sm" onClick={() => onOpen(recorded)}>
-                  Watch
+                  {t`Watch`}
                 </Button>
               )
             )}

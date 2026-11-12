@@ -1,3 +1,5 @@
+import { t } from "../i18n/index.ts";
+
 // What an approval card shows for a value: every character in order, with nothing able to hide
 // part of it. Long blank runs and floods of lines that draw nothing collapse into counted markers,
 // other blanks become visible dots, and invisible, control, look-alike space and bidi characters
@@ -35,8 +37,8 @@ const code = (point: number, repeats: number) => {
 
 function blanks(run: string): string {
   const tabs = run.split("\t").length - 1;
-  const kind = tabs === 0 ? "spaces" : tabs === run.length ? "tabs" : "spaces and tabs";
-  return `${count(run.length)} ${kind}`;
+  const n = count(run.length);
+  return tabs === 0 ? t`${n} spaces` : tabs === run.length ? t`${n} tabs` : t`${n} spaces and tabs`;
 }
 
 export function revealText(value: string): Revealed {
@@ -88,9 +90,13 @@ export function revealText(value: string): Revealed {
         found.set(point, (found.get(point) ?? 0) + 1);
         isBidi ||= BIDI.test(char);
       }
-    const label = `${count(rows.length)} blank lines`;
-    if (!found.size) mark({ kind: "lines", text: label });
-    else flag(`${label} with ${[...found].map(([point, n]) => code(point, n)).join(", ")}`, isBidi);
+    const n = count(rows.length);
+    if (!found.size) mark({ kind: "lines", text: t`${n} blank lines` });
+    else
+      flag(
+        t`${n} blank lines with ${[...found].map(([point, n]) => code(point, n)).join(", ")}`,
+        isBidi,
+      );
   };
   // A CR only counts as part of a line break when an LF follows it.
   const rows = value
@@ -121,6 +127,6 @@ export function plainReveal(parts: readonly RevealPart[]): string {
 export function hiddenWarning(value: Revealed): string | undefined {
   if (!value.hidden) return undefined;
   return value.bidi
-    ? "Contains hidden characters that change text direction, shown as U+ codes."
-    : "Contains hidden characters, shown as U+ codes.";
+    ? t`Contains hidden characters that change text direction, shown as U+ codes.`
+    : t`Contains hidden characters, shown as U+ codes.`;
 }

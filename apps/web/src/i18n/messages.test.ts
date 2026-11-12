@@ -10,6 +10,8 @@ describe("finding the messages a file asks for", () => {
       "Saved {0} files to {1}",
       "Open {0} now",
       "Line one\nand `two`",
+      "close",
+      "[button] Reset",
       "Done",
       "item|items",
     ]);

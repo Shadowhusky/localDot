@@ -12,6 +12,7 @@ import {
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { RECOVERY_RUNTIME_UNAVAILABLE } from "../cells/errors.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 export class ControlFailure extends Error {
@@ -20,7 +21,7 @@ export class ControlFailure extends Error {
     readonly status?: number,
     readonly detail?: string,
   ) {
-    super(uncertain ? "Action delivery could not be confirmed." : "The action was refused.");
+    super(uncertain ? t`Action delivery could not be confirmed.` : t`The action was refused.`);
   }
 }
 function endpoint(api: ApiClient, path: string) {
@@ -100,7 +101,7 @@ export async function controlRequest<T>(
         runtimeUnavailable
           ? RECOVERY_RUNTIME_UNAVAILABLE
           : response.headers.get("x-localdot-recovery") === "task-retirement"
-            ? "The previous task has not finished shutting down. Recovery is blocked until its cleanup is confirmed. Run localdot doctor for details."
+            ? t`The previous task has not finished shutting down. Recovery is blocked until its cleanup is confirmed. Run localdot doctor for details.`
             : undefined,
       );
     }

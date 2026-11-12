@@ -1,6 +1,7 @@
 import type { CompareReply, FileVersion } from "@localdot/protocol";
 import { useEffect, useState } from "react";
 import { DiffViewer } from "../agent/DiffViewer.tsx";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Progress } from "../ui/Progress.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
@@ -52,19 +53,17 @@ export function CompareSheet({
   }, [api, sessionId, name, from, to]);
   const reply = state.reply;
   return (
-    <Sheet open={open} onClose={onClose} title={`Compare ${name}`} className="compare-sheet">
+    <Sheet open={open} onClose={onClose} title={t`Compare ${name}`} className="compare-sheet">
       {state.failed ? (
-        <p className="compare-note">Couldn't compare these versions.</p>
+        <p className="compare-note">{t`Couldn't compare these versions.`}</p>
       ) : !reply ? (
-        <Progress label="Comparing" className="compare-progress" />
+        <Progress label={t`Comparing`} className="compare-progress" />
       ) : reply.patch === "" ? (
-        <p className="compare-note">
-          No changes between v{from.label} and v{to.label}.
-        </p>
+        <p className="compare-note">{t`No changes between v${from.label} and v${to.label}.`}</p>
       ) : (
         <div className="compare-body">
           {reply.truncated && (
-            <p className="compare-note">Showing the first part of the changes.</p>
+            <p className="compare-note">{t`Showing the first part of the changes.`}</p>
           )}
           <DiffViewer
             change={{

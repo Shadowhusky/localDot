@@ -1,6 +1,7 @@
 import type { ManualStreamInput, ScreenName, ScreenSelectionSnapshot } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 // Whether the web browser's window is in front on the desktop: where dot is working, unless the user
@@ -26,7 +27,7 @@ interface Pick {
   key: string;
 }
 
-const NOT_RUNNING = "The web browser isn't running yet. Try again in a moment.";
+const NOT_RUNNING = t`The web browser isn't running yet. Try again in a moment.`;
 
 export function useStageFront(
   api: ApiClient,

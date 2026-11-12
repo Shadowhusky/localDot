@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { isApple } from "../ui/Kbd.tsx";
 import { startHearing } from "./hearing.ts";
@@ -113,7 +114,7 @@ export function useVoice(opts: VoiceOptions): Voice {
   return {
     enabled: opts.enabled && !(route.kind === "none" && route.why === "checking"),
     state,
-    notice: downloading && !downloadDismissed ? "Getting speech ready on this device…" : notice,
+    notice: downloading && !downloadDismissed ? t`Getting speech ready on this device…` : notice,
     route,
     level: () => turns.level(),
     finish: () => turns.finish(),

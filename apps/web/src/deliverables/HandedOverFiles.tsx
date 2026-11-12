@@ -3,6 +3,7 @@ import { useMemo, useRef } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import { useResultDownloads } from "../agent/ResultFiles.tsx";
 import { timeLabel } from "../agent/thread.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { useVirtualRows } from "../ui/useVirtualRows.ts";
 import { DeliverableFile } from "./DeliverableFile.tsx";
@@ -58,7 +59,7 @@ export function HandedOverFiles({
   const windowed = useVirtualRows(list, keys, estimateFile);
   return (
     <FileViewerScope api={api} entries={entries} downloads={downloads} onMac={onMac}>
-      <ul ref={list} className="deliverables activity-deliverables" aria-label="Handed over">
+      <ul ref={list} className="deliverables activity-deliverables" aria-label={t`Handed over`}>
         <li aria-hidden="true" style={{ height: windowed.before }} />
         {windowed.indexes.map((index) => {
           const item = files[index];

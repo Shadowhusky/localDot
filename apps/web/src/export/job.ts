@@ -1,5 +1,6 @@
 import type { HostExport } from "@localdot/protocol";
 import { useSyncExternalStore } from "react";
+import { t } from "../i18n/index.ts";
 import { ApiError } from "../lib/api.ts";
 import { suggestedExportName } from "../replay/replay-view.ts";
 import type { ExportContext } from "./export-context.ts";
@@ -73,8 +74,8 @@ export interface ExpectedExport {
   fitted: ExportEstimate;
 }
 
-export const CANCELLED_NOTE = "Cancelled. Nothing was saved.";
-const NOT_STARTED = "The video couldn't be started. Try again.";
+export const CANCELLED_NOTE = t`Cancelled. Nothing was saved.`;
+const NOT_STARTED = t`The video couldn't be started. Try again.`;
 // The host's video this tab shows, kept across a reload (a phone may reload a page it put away).
 const FOLLOWING_KEY = "localdot.export.following";
 
@@ -94,7 +95,7 @@ function remember(id: string | null): void {
     // The video is still followed while this page stays open.
   }
 }
-const OPEN_FAILED = "The file could not be opened for saving. Choose another place and try again.";
+const OPEN_FAILED = t`The file could not be opened for saving. Choose another place and try again.`;
 const IDLE: ExportJobState = {
   phase: "options",
   done: 0,
@@ -350,7 +351,7 @@ export function createExportJob(host?: HostExports): ExportJob {
             set({ phase: "downloaded" });
           })
           .catch(() => {
-            if (mine === run) set({ note: "The video couldn't be saved. Try again." });
+            if (mine === run) set({ note: t`The video couldn't be saved. Try again.` });
           });
         return;
       }

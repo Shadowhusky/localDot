@@ -1,10 +1,19 @@
-import { plural, t } from "../i18n/index.ts";
+import { locale, plural, t } from "../i18n/index.ts";
 
 const plurals = new Intl.PluralRules("en");
 
 // "3 steps", in the language on show: write the English pair, one and other, where it is used.
 export function count(value: number, one: string, other: string): string {
   return plural(value, one, other);
+}
+
+// "a, b and c" or "a, b or c", with no comma before the last as the English copy writes it; another
+// language joins a list its own way.
+export function wordList(items: readonly string[], type: "conjunction" | "disjunction"): string {
+  if (locale() !== "en") return new Intl.ListFormat(locale(), { type }).format(items);
+  const last = items.at(-1) ?? "";
+  if (items.length < 2) return last;
+  return `${items.slice(0, -1).join(", ")} ${type === "conjunction" ? "and" : "or"} ${last}`;
 }
 
 export function bytes(value: number): string {

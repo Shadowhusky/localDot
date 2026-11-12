@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { t } from "../i18n/index.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 
 export function ChatToggle({
@@ -14,7 +15,7 @@ export function ChatToggle({
     <IconButton
       ref={buttonRef}
       icon="panel-right"
-      label={chat ? "Hide chat" : "Show chat"}
+      label={chat ? t`Hide chat` : t`Show chat`}
       size={32}
       onClick={onChat}
     />

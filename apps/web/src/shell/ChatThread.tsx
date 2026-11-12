@@ -17,6 +17,7 @@ import {
 } from "../agent/thread.ts";
 import { billedPerCall } from "../agent/UsageFooter.tsx";
 import type { AgentSessionView } from "../agent/useAgentSession.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { type Previews, PreviewsScope } from "../previews/PreviewsContext.tsx";
 import { PendingRoutines } from "../routines/RoutineCard.tsx";
@@ -45,7 +46,7 @@ export function NewConversationButton({ run, reason }: NewConversation) {
       size={32}
       variant="filled"
       round
-      label="New conversation"
+      label={t`New conversation`}
       disabledReason={reason}
       onClick={() => run()}
     />

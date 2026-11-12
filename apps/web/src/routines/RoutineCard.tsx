@@ -1,5 +1,6 @@
 import type { Routine } from "@localdot/protocol";
 import type { RoutineProposal } from "../agent/model.ts";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -20,18 +21,18 @@ function RoutineChoices({ routine }: { routine: Routine }) {
           void view?.act((api) => api.confirm(routine.id, { revision: routine.revision }))
         }
       >
-        Save routine
+        {t`Save routine`}
       </Button>
       <Button
         onClick={(event) => control?.open({ mode: "confirm", id: routine.id }, event.currentTarget)}
       >
-        Edit
+        {t`Edit`}
       </Button>
       <Button
         variant="quiet"
         onClick={() => void view?.act((api) => api.remove(routine.id, routine.revision))}
       >
-        Discard
+        {t`Discard`}
       </Button>
     </div>
   );
@@ -50,12 +51,13 @@ export function PendingRoutines({ sessions }: { sessions: readonly string[] }) {
   const routine = waiting[0];
   if (!routine) return null;
   return (
-    <section className="routine-pending" aria-label={`Routine waiting for you: ${routine.name}`}>
+    <section className="routine-pending" aria-label={t`Routine waiting for you: ${routine.name}`}>
       <div className="routine-pending-text">
         <span className="routine-card-eyebrow">
           <Icon name="repeat" size={14} />
-          Save this routine?
-          {waiting.length > 1 && ` 1 of ${waiting.length}`}
+          {waiting.length > 1
+            ? t`Save this routine? 1 of ${waiting.length}`
+            : t`Save this routine?`}
         </span>
         <strong className="routine-pending-name">{routine.name}</strong>
         <span className="routine-card-when">{routine.summary}</span>
@@ -74,38 +76,38 @@ export function RoutineCard({ proposal }: { proposal: RoutineProposal }) {
   const shown = routine ?? proposal;
   const known = view?.reply !== undefined;
   return (
-    <article className="routine-card" aria-label={`Routine: ${shown.name}`}>
+    <article className="routine-card" aria-label={t`Routine: ${shown.name}`}>
       <div className="routine-card-head">
         <span className="routine-card-eyebrow">
           <Icon name="repeat" size={14} />
-          Routine
+          {t`Routine`}
         </span>
         <h3 className="routine-card-name">{shown.name}</h3>
         <span className="routine-card-when">{shown.summary}</span>
       </div>
       <p className="routine-card-what">{shown.instruction}</p>
       <dl className="routine-card-facts">
-        <dt>While you're away</dt>
+        <dt>{t`While you're away`}</dt>
         <dd>{AWAY[shown.profile].label}</dd>
-        <dt>Tell me</dt>
+        <dt>{t`Tell me`}</dt>
         <dd>{NOTIFY[shown.notify]}</dd>
-        <dt>Spending limit</dt>
+        <dt>{t`Spending limit`}</dt>
         <dd>{budgetText(shown.budgetUSD)}</dd>
       </dl>
       {known && !routine ? (
         <p className="routine-card-outcome" role="status">
-          <StatusGlyph state="skipped" label="Discarded" />
-          Discarded
+          <StatusGlyph state="skipped" label={t`Discarded`} />
+          {t`Discarded`}
         </p>
       ) : routine && routine.state !== "proposed" ? (
         <p className="routine-card-outcome" role="status">
-          <StatusGlyph state="done" label="Saved" />
-          Saved · {nextRunText(routine, Date.now())}
+          <StatusGlyph state="done" label={t`Saved`} />
+          {t`Saved · ${nextRunText(routine, Date.now())}`}
         </p>
       ) : (
         <p className="routine-card-outcome" role="status">
-          <StatusGlyph state="ask" label="Waiting" />
-          Waiting for your answer
+          <StatusGlyph state="ask" label={t`Waiting`} />
+          {t`Waiting for your answer`}
         </p>
       )}
     </article>

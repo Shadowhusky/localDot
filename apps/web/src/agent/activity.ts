@@ -1,6 +1,7 @@
 import { microsToMs, sameRunningModel } from "@localdot/protocol";
 import { type KeyUseState, plainText } from "@localdot/stage";
 import { clock as runningClock } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import {
   type KeyUseRowView,
   stepRow,
@@ -111,10 +112,13 @@ export function matchesFilter(row: TimelineRow<ActivityStep>, filter: ActivityFi
 
 export function stepStatus(step: AgentStep, ended: boolean): string {
   if (step.status)
-    return { ok: "Done", failed: "Failed", blocked: "Blocked", cancelled: "Cancelled" }[
-      step.status
-    ];
-  return ended ? "Not confirmed" : "Running";
+    return {
+      ok: tr("Done"),
+      failed: tr("Failed"),
+      blocked: tr("Blocked"),
+      cancelled: tr("Cancelled"),
+    }[step.status];
+  return ended ? t`Not confirmed` : t`Running`;
 }
 
 export function memoryUndoEligible(change: AgentChange, changes: readonly AgentChange[]): boolean {
@@ -144,24 +148,24 @@ export function diffStat(patches: readonly (string | undefined)[]): string {
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1) || path;
 
 const KIND_TITLES: Record<NonNullable<AgentStep["kind"]>, string> = {
-  gui: "Screen step",
-  shell: "Command",
-  file: "Changed files",
-  browser: "Browser step",
-  ask: "Asked you a question",
-  think: "Thinking",
-  app: "Used a connected app",
+  gui: tr("Screen step"),
+  shell: tr("Command"),
+  file: tr("Changed files"),
+  browser: tr("Browser step"),
+  ask: tr("Asked you a question"),
+  think: tr("Thinking"),
+  app: tr("Used a connected app"),
 };
 
 // Where a step that dot took without the screen happened, in the place of a screen step's app.
 const KIND_PLACES: Record<NonNullable<AgentStep["kind"]>, string> = {
-  gui: "Screen",
-  shell: "Terminal",
-  file: "Files",
-  browser: "Browser",
+  gui: tr("Screen"),
+  shell: tr("Terminal"),
+  file: tr("Files"),
+  browser: tr("Browser"),
   ask: "",
   think: "",
-  app: "App",
+  app: tr("App"),
 };
 
 // The web tools run in the browser's step kind but never touch the user's browser.
@@ -185,31 +189,36 @@ export interface EntryView {
 
 function fileTitle(changes: readonly AgentChange[]): string {
   const [only] = changes;
-  if (changes.length !== 1 || !only) return changes.length ? `Changed ${changes.length} files` : "";
-  const verb = only.op === "create" ? "Created" : only.op === "delete" ? "Deleted" : "Changed";
-  return `${verb} ${baseName(only.path)}`;
+  if (changes.length !== 1 || !only)
+    return changes.length ? t`Changed ${changes.length} files` : "";
+  const name = baseName(only.path);
+  return only.op === "create"
+    ? t`Created ${name}`
+    : only.op === "delete"
+      ? t`Deleted ${name}`
+      : t`Changed ${name}`;
 }
 
 function agentState(step: AgentStep, ended: boolean): [GlyphState, string] {
-  if (step.status === "ok") return ["done", "Done"];
-  if (step.status === "failed") return ["failed", "Failed"];
-  if (step.status === "blocked") return ["failed", "Blocked"];
-  if (step.status === "cancelled") return ["skipped", "Cancelled"];
-  return ended ? ["todo", "Not confirmed"] : ["doing", "Running"];
+  if (step.status === "ok") return ["done", t`Done`];
+  if (step.status === "failed") return ["failed", t`Failed`];
+  if (step.status === "blocked") return ["failed", t`Blocked`];
+  if (step.status === "cancelled") return ["skipped", t`Cancelled`];
+  return ended ? ["todo", t`Not confirmed`] : ["doing", t`Running`];
 }
 
 const COMPUTER_STATES: Record<StepRowView["status"], [GlyphState, string]> = {
-  doing: ["doing", "Running"],
-  ok: ["done", "Done"],
-  failed: ["failed", "Failed"],
-  cancelled: ["skipped", "Cancelled"],
+  doing: ["doing", tr("Running")],
+  ok: ["done", tr("Done")],
+  failed: ["failed", tr("Failed")],
+  cancelled: ["skipped", tr("Cancelled")],
 };
 
 const joined = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" · ");
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 // A step's time on the m:ss clock; anything that took time shows at least a second.
 const stepTime = (ms: number) => clock(ms > 0 ? Math.max(ms, 1000) : 0);
-const asSentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+const asSentence = (text: string) => (/[.!?…。！？]$/.test(text) ? text : `${text}.`);
 
 type StepRow = Extract<TimelineRow<ActivityStep>, { kind: "step" }>;
 
@@ -226,7 +235,7 @@ function rowWords(row: StepRow, own: readonly AgentChange[], ended: boolean) {
     computer?.label ||
     agent?.tool?.title ||
     (kind === "file" ? fileTitle(own) : "") ||
-    (kind ? KIND_TITLES[kind] : "Step");
+    (kind ? KIND_TITLES[kind] : t`Step`);
   // dot's own line for the call leads its first row; what it did moves to the meta line.
   const given = agent?.intent ?? computer?.intent;
   const intent = (given && plainText(given)) || undefined;
@@ -234,9 +243,9 @@ function rowWords(row: StepRow, own: readonly AgentChange[], ended: boolean) {
   const reason = failed
     ? ((agent?.note && markdownToPlain(agent.note)) ??
       computer?.reason ??
-      (agent?.tool?.exitCode !== undefined ? `Exit code ${agent.tool.exitCode}` : undefined))
+      (agent?.tool?.exitCode !== undefined ? t`Exit code ${agent.tool.exitCode}` : undefined))
     : state === "todo"
-      ? "The task ended before this step finished."
+      ? t`The task ended before this step finished.`
       : undefined;
   const distinctAction = intent && !same(intent, what) ? what : undefined;
   // A gesture says something only with what it touched: "click F3", never a bare "click".
@@ -244,7 +253,7 @@ function rowWords(row: StepRow, own: readonly AgentChange[], ended: boolean) {
   const where = computer
     ? joined(computer.app, intent ? distinctAction : touched)
     : joined(
-        WEB_TOOLS.has(agent?.tool?.name ?? "") ? "Web" : kind && KIND_PLACES[kind],
+        WEB_TOOLS.has(agent?.tool?.name ?? "") ? t`Web` : kind && KIND_PLACES[kind],
         distinctAction,
         diffStat(own.map((change) => change.patch)),
       );
@@ -271,10 +280,10 @@ export function entryView(
     return {
       testId: "key-use",
       title: row.label,
-      meta: row.blocked ? row.detail : row.count > 1 ? `${row.count} times` : "",
+      meta: row.blocked ? row.detail : row.count > 1 ? t`${row.count} times` : "",
       time: "",
       state: row.blocked ? "failed" : "done",
-      stateLabel: row.blocked ? "Blocked" : "Allowed",
+      stateLabel: row.blocked ? t`Blocked` : t`Allowed`,
       ...(row.blocked ? { failed: true } : {}),
       startT: row.t,
       endT: row.t,
@@ -366,16 +375,16 @@ export function changeView(change: AgentChange): EntryView {
     change.type === "memory"
       ? change.undoes
         ? notes
-          ? "Daily note undone"
-          : "Memory change undone"
+          ? t`Daily note undone`
+          : t`Memory change undone`
         : notes
-          ? "Added to today's notes"
-          : "Memory updated"
+          ? t`Added to today's notes`
+          : t`Memory updated`
       : change.op === "create"
-        ? "Created"
+        ? t`Created`
         : change.op === "delete"
-          ? "Deleted"
-          : "Changed";
+          ? t`Deleted`
+          : t`Changed`;
   return {
     testId: "change-row",
     icon: "file",
@@ -383,7 +392,7 @@ export function changeView(change: AgentChange): EntryView {
     meta: joined(verb, diffStat([change.patch])),
     time: "",
     state: "done",
-    stateLabel: "Done",
+    stateLabel: t`Done`,
     startT: Number.NaN,
     endT: null,
   };
@@ -462,7 +471,7 @@ export function groupReadSteps<T extends { key: string }>(
       groups.push({
         key: entry.key,
         entries: [entry],
-        ...(scope !== undefined ? { label: "Read files and instructions" } : {}),
+        ...(scope !== undefined ? { label: t`Read files and instructions` } : {}),
       });
   }
   return groups;

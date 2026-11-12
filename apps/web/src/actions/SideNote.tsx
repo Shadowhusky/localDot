@@ -2,7 +2,8 @@ import type { PlanProvider, PlanUsageReply } from "@localdot/protocol";
 import type { ReactNode } from "react";
 import { PlanUsageList } from "../agent/PlanUsage.tsx";
 import { SafeMarkdown } from "../agent/SafeMarkdown.tsx";
-import { count, spendText } from "../copy/format.ts";
+import { count, spendText, wordList } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -27,35 +28,50 @@ const opensOnly = (links: readonly string[] | undefined) => {
 };
 const opensNone = () => undefined;
 const SOURCE_WORDS: Record<string, string> = {
-  record: "what was said in the task",
-  log: "the task's log",
-  terminal: "the terminal output",
-  screen: "the screen",
-  file: "a file on the computer",
-  deliverable: "the files dot handed over",
-  earlier: "earlier conversations",
-  web: "the web",
+  record: tr("what was said in the task"),
+  log: tr("the task's log"),
+  terminal: tr("the terminal output"),
+  screen: tr("the screen"),
+  file: tr("a file on the computer"),
+  deliverable: tr("the files dot handed over"),
+  earlier: tr("earlier conversations"),
+  web: tr("the web"),
 };
 const ENDED: Record<NonNullable<SideAnswer["ended"]>, string> = {
-  time: "It stopped at a side question's time limit, with what it had found.",
-  cost: "It stopped at a side question's cost limit, with what it had found.",
-  "no-main": "There's no other model to ask, so this is as far as it got.",
+  time: tr("It stopped at a side question's time limit, with what it had found."),
+  cost: tr("It stopped at a side question's cost limit, with what it had found."),
+  "no-main": tr("There's no other model to ask, so this is as far as it got."),
 };
 
 function sourcesText(sources: readonly string[] | undefined): string | undefined {
   const words = [...new Set(sources ?? [])].flatMap((source) => SOURCE_WORDS[source] ?? []);
   if (!words.length) return undefined;
-  const last = words.at(-1);
-  return `From ${words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${last}` : last}.`;
+  return t`From ${wordList(words, "conjunction")}.`;
 }
 
 function spentLine(spend: SideAnswer["spend"]): string | undefined {
   if (!spend) return undefined;
   if (spend.plan && !spend.usd)
-    return `Used ${count(spend.inputTokens + spend.outputTokens, "token", "tokens")} of your plan.`;
+    return t`Used ${count(spend.inputTokens + spend.outputTokens, "token", "tokens")} of your plan.`;
   if (!spend.usd) return undefined;
-  const earlier = spend.taskUSD - spend.usd > 0.0005;
-  return `Cost ${spendText(spend.usd, true)}${earlier ? `, ${spendText(spend.taskUSD, true)} for this task's side questions so far` : ""}. Not counted in the task's budget.`;
+  const cost = spendText(spend.usd, true);
+  return spend.taskUSD - spend.usd > 0.0005
+    ? t`Cost ${cost}, ${spendText(spend.taskUSD, true)} for this task's side questions so far. Not counted in the task's budget.`
+    : t`Cost ${cost}. Not counted in the task's budget.`;
+}
+
+function answeredBy(answer: SideAnswer, modelName: (provider: string, model: string) => string) {
+  const by = modelName(answer.provider, answer.model);
+  const before = answer.handedOver
+    ? modelName(answer.handedOver.provider, answer.handedOver.model)
+    : undefined;
+  const failed = answer.failed;
+  if (!failed)
+    return before ? t`Answered by ${by}, after ${before} couldn't find it` : t`Answered by ${by}`;
+  const didnt = modelName(answer.provider, failed.model);
+  return before
+    ? t`Answered by ${by}, after ${before} couldn't find it, as ${didnt} didn't: ${failed.reason}`
+    : t`Answered by ${by}, as ${didnt} didn't: ${failed.reason}`;
 }
 
 // What it has done so far: the newest line is what it's doing now, and what the first model found
@@ -70,7 +86,7 @@ function Steps({
   const line = (step: SideStep) =>
     "progress" in step
       ? step.progress
-      : `Asking ${modelName(step.handover.provider, step.handover.model)}…`;
+      : t`Asking ${modelName(step.handover.provider, step.handover.model)}…`;
   const partial = steps.flatMap((step) => ("partial" in step && step.partial ? step.partial : []));
   // Steps only ever join the end, so where each stands names it.
   const shown = steps.map((step, at) => ({ step, at })).slice(-STEPS_SHOWN);
@@ -79,7 +95,7 @@ function Steps({
     <>
       {partial.length > 0 && (
         <div className="side-note-partial">
-          <span className="side-note-by">So far</span>
+          <span className="side-note-by">{t`So far`}</span>
           <SafeMarkdown text={partial.at(-1) ?? ""} compact links={opensNone} />
         </div>
       )}
@@ -93,7 +109,7 @@ function Steps({
       </ul>
       <p className="side-note-wait" role="status">
         <Spinner size={16} />
-        {current ? line(current) : "Asking…"}
+        {current ? line(current) : t`Asking…`}
       </p>
     </>
   );
@@ -127,29 +143,34 @@ export function SideNote({
       <div className="side-note-head">
         <span className="side-note-title">
           {title}
-          <span className="side-note-private">Only you see this. dot doesn't.</span>
+          <span className="side-note-private">{t`Only you see this. dot doesn't.`}</span>
         </span>
-        <IconButton icon="x" size={24} label={`Close ${title.toLowerCase()}`} onClick={onDismiss} />
+        <IconButton
+          icon="x"
+          size={24}
+          label={t`Close ${title.toLowerCase()}`}
+          onClick={onDismiss}
+        />
       </div>
       {body}
     </section>
   );
   if (aside.kind === "usage")
     return head(
-      "Plan usage",
+      t`Plan usage`,
       plans.length && usage ? (
         <PlanUsageList reply={usage} providers={plans} />
       ) : (
         <>
           <p className="side-note-problem">
             {plans.length
-              ? "Usage appears once a plan has answered."
-              : "Usage limits are for the ChatGPT and Claude Code plans. What API keys cost is in Spending."}
+              ? t`Usage appears once a plan has answered.`
+              : t`Usage limits are for the ChatGPT and Claude Code plans. What API keys cost is in Spending.`}
           </p>
           {!plans.length && (
             <div className="side-note-actions">
               <Button size="sm" onClick={(event) => onSpending(event.currentTarget)}>
-                Open Spending
+                {t`Open Spending`}
               </Button>
             </div>
           )}
@@ -160,7 +181,7 @@ export function SideNote({
   const from = sourcesText(answer?.sources);
   const spent = spentLine(answer?.spend);
   return head(
-    "Side question",
+    t`Side question`,
     <>
       <p className="side-note-question">{aside.question}</p>
       {aside.phase === "asking" && (
@@ -168,7 +189,7 @@ export function SideNote({
           <Steps steps={aside.steps ?? []} modelName={modelName} />
           <div className="side-note-actions">
             <Button size="sm" onClick={onStop}>
-              Stop
+              {t`Stop`}
             </Button>
           </div>
         </>
@@ -180,24 +201,18 @@ export function SideNote({
           </div>
           {from && <p className="side-note-by">{from}</p>}
           {answer.ended && <p className="side-note-by">{ENDED[answer.ended]}</p>}
-          <p className="side-note-by">
-            {`Answered by ${modelName(answer.provider, answer.model)}`}
-            {answer.handedOver &&
-              `, after ${modelName(answer.handedOver.provider, answer.handedOver.model)} couldn't find it`}
-            {answer.failed &&
-              `, as ${modelName(answer.provider, answer.failed.model)} didn't: ${answer.failed.reason}`}
-          </p>
+          <p className="side-note-by">{answeredBy(answer, modelName)}</p>
           {spent && <p className="side-note-by">{spent}</p>}
         </>
       )}
       {aside.phase === "stopped" && (
         <>
           <p className="side-note-by" role="status">
-            Stopped.
+            {t`Stopped.`}
           </p>
           <div className="side-note-actions">
             <Button size="sm" onClick={onRetry}>
-              Ask again
+              {t`Ask again`}
             </Button>
           </div>
         </>
@@ -210,11 +225,11 @@ export function SideNote({
           <div className="side-note-actions">
             {aside.setup ? (
               <Button size="sm" onClick={(event) => onModels(event.currentTarget)}>
-                Choose a model
+                {t`Choose a model`}
               </Button>
             ) : (
               <Button size="sm" onClick={onRetry}>
-                Try again
+                {t`Try again`}
               </Button>
             )}
           </div>

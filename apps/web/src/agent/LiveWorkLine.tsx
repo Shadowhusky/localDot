@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import type { TaskRow } from "../session/status.ts";
 import type { ModelNames } from "../settings/model-names.ts";
 import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
@@ -190,8 +191,7 @@ export const LiveWorkLine = memo(function LiveWorkLine({
   );
   // Only a running task's clock ticks (RunningTime); a wait or an end shows the time its steps took.
   const elapsed = startMs !== null && lastEnd !== null ? Math.max(0, lastEnd - startMs) : null;
-  const took = (verb: string, joiner: string) =>
-    elapsed === null ? verb : `${verb} ${joiner} ${clock(elapsed)}`;
+  const time = elapsed === null ? null : clock(elapsed);
   const failed = steps.filter((step) => step.state === "failed").length;
   // The narration line shows only while dot works; at a wait or the end the summary says it all,
   // and the line keeps what dot last did, so it never speaks a wait's words when it opens again.
@@ -208,18 +208,26 @@ export const LiveWorkLine = memo(function LiveWorkLine({
       />
     );
   const summary = running
-    ? "Working"
+    ? t`Working`
     : waiting
       ? PAUSED.has(live?.row)
-        ? "Paused"
-        : "Waiting for you"
+        ? t`Paused`
+        : t`Waiting for you`
       : ended === "stopped"
-        ? took("Stopped", "after")
+        ? time === null
+          ? t`Stopped`
+          : t`Stopped after ${time}`
         : ended === "interrupted"
-          ? took("Interrupted", "after")
+          ? time === null
+            ? t`Interrupted`
+            : t`Interrupted after ${time}`
           : ended === "error"
-            ? took("Ended", "after")
-            : took("Worked", "for");
+            ? time === null
+              ? t`Ended`
+              : t`Ended after ${time}`
+            : time === null
+              ? t`Worked`
+              : t`Worked for ${time}`;
   const counting = running && startMs !== null;
   const face = (
     <>
@@ -247,7 +255,7 @@ export const LiveWorkLine = memo(function LiveWorkLine({
             {failed > 0 && (
               <>
                 {" · "}
-                <span className="thread-work-failed">{failed} failed</span>
+                <span className="thread-work-failed">{t`${failed} failed`}</span>
               </>
             )}
             {counting && <RunningTime from={startMs} nowMs={live?.nowMs} lead=" · " />}
@@ -337,14 +345,14 @@ export const StepsCaption = memo(function StepsCaption({
   const line = [
     at,
     ended === "stopped"
-      ? "Stopped"
+      ? t`Stopped`
       : ended === "interrupted"
-        ? "Interrupted"
+        ? t`Interrupted`
         : ended === "error"
-          ? "Ended"
+          ? t`Ended`
           : undefined,
     count(steps.length, "step", "steps"),
-    failed > 0 ? `${failed} failed` : undefined,
+    failed > 0 ? t`${failed} failed` : undefined,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -497,11 +505,11 @@ const WorkHistory = memo(function WorkHistory({
         ref={follow.ref}
         tabIndex={0}
         role="region"
-        aria-label="Work history"
+        aria-label={t`Work history`}
         onScroll={follow.onScroll}
         {...follow.gestures()}
       >
-        <ol ref={list} className="thread-work-list" aria-label="Steps">
+        <ol ref={list} className="thread-work-list" aria-label={t`Steps`}>
           <li role="presentation" aria-hidden="true" style={{ height: virtual.before }} />
           {virtual.indexes.map((index) => {
             const item = display[index];
@@ -534,7 +542,11 @@ const WorkHistory = memo(function WorkHistory({
                       className="activity-read-group"
                       leading={<StatusGlyph state="done" />}
                       title={group.label}
-                      meta={`${group.entries.length} read-only steps · ${open ? "Hide" : "Show"} details`}
+                      meta={
+                        open
+                          ? t`${group.entries.length} read-only steps · Hide details`
+                          : t`${group.entries.length} read-only steps · Show details`
+                      }
                       count={group.entries.length}
                       open={open}
                       onToggle={(trigger) => {

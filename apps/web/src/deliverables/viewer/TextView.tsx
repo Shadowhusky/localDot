@@ -1,7 +1,7 @@
 import { type TextFileReply, type TextFormat, textFormat } from "@localdot/protocol";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { OutputCopy } from "../../agent/OutputCopy.tsx";
-import { count } from "../../copy/format.ts";
+import { locale, t, tr } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { Switch } from "../../ui/Switch.tsx";
 import { type FileRef, loadText, onComputer } from "../api.ts";
@@ -32,10 +32,10 @@ export function useText(api: ApiClient, file: FileRef, from: "start" | "end", at
 
 // A file that simply isn't text gets its card and no words.
 const TEXT_PROBLEMS = {
-  missing: "This version is no longer available",
-  computer_off: "Turn on your computer to see this file",
-  busy: "Your computer is busy",
-  failed: "Couldn't load this file",
+  missing: tr("This version is no longer available"),
+  computer_off: tr("Turn on your computer to see this file"),
+  busy: tr("Your computer is busy"),
+  failed: tr("Couldn't load this file"),
 } as const;
 
 // Text as the file means it: Markdown formatted, JSON as a tree that folds, a log from its end, and
@@ -63,7 +63,7 @@ export function TextView({
     return (
       <>
         {bar}
-        <ViewerLoading label="Loading the text" />
+        <ViewerLoading label={t`Loading the text`} />
       </>
     );
   if (text === "failed" || text.kind === "none") {
@@ -75,7 +75,7 @@ export function TextView({
           name={name}
           title={
             reason === "missing" && onComputer(file)
-              ? "This file is no longer on the computer"
+              ? t`This file is no longer on the computer`
               : reason in TEXT_PROBLEMS
                 ? TEXT_PROBLEMS[reason as keyof typeof TEXT_PROBLEMS]
                 : undefined
@@ -97,7 +97,7 @@ export function TextBody({
   reply,
   choice,
   copy = true,
-  label = `Contents of ${name}`,
+  label = t`Contents of ${name}`,
 }: {
   name: string;
   format: TextFormat;
@@ -127,10 +127,17 @@ export function TextBody({
     const host = scroller.current?.querySelector(".viewer-code");
     if (format === "log" && host) host.scrollTop = host.scrollHeight;
   }, [format]);
-  const note = reply.truncated
-    ? `${reply.from === "end" ? "Last" : "First"} ${count(lines.length, "line", "lines")}`
-    : undefined;
-  const end = copy && <OutputCopy text={joined} label="Copy" />;
+  const number = lines.length.toLocaleString(locale());
+  const note = !reply.truncated
+    ? undefined
+    : reply.from === "end"
+      ? lines.length === 1
+        ? t`Last ${number} line`
+        : t`Last ${number} lines`
+      : lines.length === 1
+        ? t`First ${number} line`
+        : t`First ${number} lines`;
+  const end = copy && <OutputCopy text={joined} label={t`Copy`} />;
   if (format === "markdown")
     return (
       <MarkdownView key={name} name={name} text={joined} note={note} choice={choice} end={end} />
@@ -143,7 +150,7 @@ export function TextBody({
         {!tree && (
           <Switch
             className="viewer-wrap"
-            label="Wrap lines"
+            label={t`Wrap lines`}
             checked={wrap}
             onCheckedChange={setWrap}
           />

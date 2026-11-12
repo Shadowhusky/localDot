@@ -1,9 +1,10 @@
 import { ConversationSnapshot } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
 
-export const FINISH_FIRST = "Finish or stop the current task first.";
+export const FINISH_FIRST = t`Finish or stop the current task first.`;
 
 export interface Conversation {
   // The conversation's tasks, oldest first; the next message continues the latest.
@@ -96,7 +97,7 @@ export function useConversation(api: ApiClient): Conversation {
           "conversation",
           error instanceof ApiError && error.status === 409
             ? FINISH_FIRST
-            : "That didn't work. Check the connection and try again.",
+            : t`That didn't work. Check the connection and try again.`,
           "assertive",
         );
         return false;

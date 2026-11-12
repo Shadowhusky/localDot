@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../../i18n/index.ts";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
@@ -244,11 +245,11 @@ export function PictureView({
         {lead}
         <SegmentedControl
           size={28}
-          aria-label="Zoom"
+          aria-label={t`Zoom`}
           value={mode === "free" ? "" : mode}
           items={[
-            { value: "fit", label: "Fit" },
-            { value: "actual", label: "Actual size" },
+            { value: "fit", label: t`Fit` },
+            { value: "actual", label: t`Actual size` },
           ]}
           onValueChange={(value) => (value === "fit" ? fit() : zoomTo(1))}
         />
@@ -256,10 +257,10 @@ export function PictureView({
           <IconButton
             icon="minus"
             size={28}
-            label="Zoom out"
+            label={t`Zoom out`}
             disabledReason={
               !ready || (natural && scale <= minScale(natural, stage) + 0.001)
-                ? "Shown whole"
+                ? t`Shown whole`
                 : undefined
             }
             onClick={() => zoomTo(scale / STEP)}
@@ -270,9 +271,9 @@ export function PictureView({
           <IconButton
             icon="plus"
             size={28}
-            label="Zoom in"
+            label={t`Zoom in`}
             disabledReason={
-              !ready || scale >= MAX_SCALE - 0.001 ? "Zoomed in all the way" : undefined
+              !ready || scale >= MAX_SCALE - 0.001 ? t`Zoomed in all the way` : undefined
             }
             onClick={() => zoomTo(scale * STEP)}
           />
@@ -281,7 +282,7 @@ export function PictureView({
       {failed ? (
         <ViewerMessage
           name={name}
-          title="Couldn't show this picture"
+          title={t`Couldn't show this picture`}
           retry={() => setFailed(false)}
         />
       ) : (
@@ -326,7 +327,7 @@ export function PictureView({
               onError={() => setFailed(true)}
             />
           </div>
-          {!ready && <ViewerLoading label="Loading picture" />}
+          {!ready && <ViewerLoading label={t`Loading picture`} />}
           {caption && <p className="viewer-caption">{caption}</p>}
         </div>
       )}

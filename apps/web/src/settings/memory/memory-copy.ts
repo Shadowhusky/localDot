@@ -1,4 +1,5 @@
 import type { MemoryEntry, Person, RecentOutcome } from "@localdot/protocol";
+import { t, tr } from "../../i18n/index.ts";
 
 const NBSP = "\u00a0";
 
@@ -26,17 +27,17 @@ export function sourceLine(
   switch (item.source.kind) {
     case "task":
       return item.source.title
-        ? { text: `From ${item.source.title}`, day, sessionId: item.source.sessionId }
-        : { text: "From a deleted task", day };
+        ? { text: t`From ${item.source.title}`, day, sessionId: item.source.sessionId }
+        : { text: t`From a deleted task`, day };
     case "user":
-      return { text: "Added by you", day };
+      return { text: t`Added by you`, day };
     default:
-      return { text: "Source unknown", day: "" };
+      return { text: t`Source unknown`, day: "" };
   }
 }
 
 export function personLine(person: Person, now = new Date()): string {
-  return [person.app, person.handle, person.lastAt ? `last ${dayLabel(person.lastAt, now)}` : null]
+  return [person.app, person.handle, person.lastAt ? t`last ${dayLabel(person.lastAt, now)}` : null]
     .filter(Boolean)
     .join(" · ");
 }
@@ -50,9 +51,9 @@ export function initials(name: string): string {
 }
 
 export const OUTCOME: Record<RecentOutcome, string> = {
-  done: "Done",
-  stopped: "Stopped",
-  error: "Ended with an error",
-  interrupted: "Interrupted",
-  running: "Running",
+  done: tr("Done"),
+  stopped: tr("Stopped"),
+  error: tr("Ended with an error"),
+  interrupted: tr("Interrupted"),
+  running: tr("Running"),
 };

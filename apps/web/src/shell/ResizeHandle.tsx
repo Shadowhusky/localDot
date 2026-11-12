@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { reducedMotion } from "../agent/useFollowScroll.ts";
+import { t } from "../i18n/index.ts";
 import {
   clampWidth,
   dragWidth,
@@ -147,7 +148,7 @@ export function ResizeHandle({
       aria-valuenow={width}
       aria-valuemin={panel.min}
       aria-valuemax={max}
-      title="Drag to resize. Double-click to reset."
+      title={t`Drag to resize. Double-click to reset.`}
       className={clsx("rail-resize", className)}
       data-dragging={dragging || undefined}
       onFocus={() => setMax(limits().max)}

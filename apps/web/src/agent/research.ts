@@ -1,5 +1,6 @@
 import type { ResearchSourceData } from "@localdot/protocol";
 import { count } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { clock } from "./activity.ts";
 import type { AgentResearch } from "./model.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -17,7 +18,7 @@ export function sourceMeta(source: ResearchSourceData): string {
   return [
     sourceSite(source.url),
     source.passages ? count(source.passages, "passage", "passages") : "",
-    source.cited ? "Cited" : "",
+    source.cited ? t`Cited` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -28,13 +29,13 @@ export function sourceMeta(source: ResearchSourceData): string {
 export function researchMeta(research: AgentResearch, nowMs: number | undefined): string {
   const read = research.sources.length;
   const cited = research.sources.filter((source) => source.cited).length;
-  if (cited) return `${read} read · ${cited} cited`;
-  if (research.stopped) return `${count(read, "source", "sources")} · writing the report`;
+  if (cited) return t`${read} read · ${cited} cited`;
+  if (research.stopped) return `${count(read, "source", "sources")} · ${t`writing the report`}`;
   const time =
     nowMs === undefined
       ? ""
-      : ` · ${clock(Math.max(0, nowMs - research.startMs))} of ${clock(research.budget.minutes * 60_000)}`;
-  return `${read} of ${research.budget.sources}${time}`;
+      : ` · ${t`${clock(Math.max(0, nowMs - research.startMs))} of ${clock(research.budget.minutes * 60_000)}`}`;
+  return `${t`${read} of ${research.budget.sources}`}${time}`;
 }
 
 // How much of the budget is used: the larger share of sources and minutes, whole once stopped.
@@ -47,9 +48,9 @@ export function researchUsed(research: AgentResearch, nowMs: number | undefined)
 }
 
 export const STOP_WORDS = {
-  sources: "dot has its sources and is writing the report.",
-  time: "Time is up: dot is writing the report.",
-  user: "dot is wrapping up with what it has.",
+  sources: tr("dot has its sources and is writing the report."),
+  time: tr("Time is up: dot is writing the report."),
+  user: tr("dot is wrapping up with what it has."),
 } as const;
 
 const STRONG = [
@@ -91,7 +92,7 @@ export function researchWait(
     !agent.model.ended &&
     !agent.snapshot?.holder &&
     agent.snapshot?.status !== "idle";
-  return working ? "Research starts with your next task." : undefined;
+  return working ? t`Research starts with your next task.` : undefined;
 }
 
 type Listener = (question?: string) => void;

@@ -6,6 +6,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Pending } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { memoryUndoEligible } from "./activity.ts";
 import {
@@ -236,7 +237,7 @@ export function useTaskControls(props: Props) {
       kind,
       target,
       phase: "sending",
-      message: "Sending request…",
+      message: t`Sending request…`,
     });
     try {
       const acknowledgement = await request(record);
@@ -257,7 +258,7 @@ export function useTaskControls(props: Props) {
           kind,
           target,
           phase: "checking",
-          message: "Request acknowledged. Checking task ownership…",
+          message: t`Request acknowledged. Checking task ownership…`,
         });
       current.current.agent.reconcile();
       return true;
@@ -273,8 +274,8 @@ export function useTaskControls(props: Props) {
           ? { code: error.status }
           : {}),
         message: uncertain
-          ? "Delivery not confirmed. Check task state before trying again."
-          : "The request was refused. Check the current task.",
+          ? t`Delivery not confirmed. Check task state before trying again.`
+          : t`The request was refused. Check the current task.`,
       });
       current.current.agent.reconcile();
       return false;

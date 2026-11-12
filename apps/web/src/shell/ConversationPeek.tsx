@@ -1,5 +1,6 @@
 import { type RefObject, useRef } from "react";
 import { type ConversationRow, STATUS_LABEL, whenLabel } from "../agent/conversation-list.ts";
+import { t } from "../i18n/index.ts";
 import { TAG_NAMES, TagMark } from "../ui/ConversationTag.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { LayerPortal } from "../ui/LayerStack.tsx";
@@ -117,7 +118,7 @@ export function ConversationPeek({ peek, now, cardRef, onPlaced }: ConversationP
             {row.entry.live?.onScreen && (
               <span className="peek-screen">
                 <Icon name="monitor" size={12} />
-                On screen
+                {t`On screen`}
               </span>
             )}
           </div>
@@ -126,10 +127,10 @@ export function ConversationPeek({ peek, now, cardRef, onPlaced }: ConversationP
           {said && said !== row.title && <div className="peek-said">“{said}”</div>}
           <div className="peek-facts num">
             {[
-              tasks === 1 ? "1 task" : `${tasks} tasks`,
-              `Started ${startedAt(row.entry.startedAt)}`,
-              row.entry.tag && `${TAG_NAMES[row.entry.tag]} tag`,
-              row.entry.pinned && "Pinned",
+              tasks === 1 ? t`1 task` : t`${tasks} tasks`,
+              t`Started ${startedAt(row.entry.startedAt)}`,
+              row.entry.tag && t`${TAG_NAMES[row.entry.tag]} tag`,
+              row.entry.pinned && t`Pinned`,
             ]
               .filter(Boolean)
               .join(" · ")}

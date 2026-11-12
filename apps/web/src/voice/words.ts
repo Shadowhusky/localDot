@@ -1,7 +1,8 @@
+import { t } from "../i18n/index.ts";
 import type { VoiceFailure } from "./capture.ts";
 import type { VoiceRoute } from "./support.ts";
 
-export const LISTENING_LINE = "Listening…";
+export const LISTENING_LINE = t`Listening…`;
 
 // What to call the computer running localDot, as its own status says.
 export type ComputerWord = "Mac" | "computer";
@@ -9,13 +10,13 @@ export type ComputerWord = "Mac" | "computer";
 export function routeLabel(route: VoiceRoute, computer: ComputerWord = "Mac"): string {
   switch (route.kind) {
     case "device":
-      return "On this device";
+      return t`On this device`;
     case "mac":
-      return `On your ${computer}`;
+      return computer === "Mac" ? t`On your Mac` : t`On your computer`;
     case "online":
-      return "Online";
+      return t`Online`;
     case "none":
-      return route.why === "checking" ? "" : "Off";
+      return route.why === "checking" ? "" : t`Off`;
   }
 }
 
@@ -23,23 +24,25 @@ export function routeLabel(route: VoiceRoute, computer: ComputerWord = "Mac"): s
 export function routeDetail(route: VoiceRoute, computer: ComputerWord = "Mac"): string {
   switch (route.kind) {
     case "device":
-      return "Your browser turns speech into text without sending audio anywhere.";
+      return t`Your browser turns speech into text without sending audio anywhere.`;
     case "mac":
-      return `The speech model on your ${computer} turns it into text. Audio goes nowhere else.`;
+      return computer === "Mac"
+        ? t`The speech model on your Mac turns it into text. Audio goes nowhere else.`
+        : t`The speech model on your computer turns it into text. Audio goes nowhere else.`;
     case "online":
-      return "Your browser's online speech service hears what you say.";
+      return t`Your browser's online speech service hears what you say.`;
     case "none":
       switch (route.why) {
         case "checking":
-          return "Checking speech support…";
+          return t`Checking speech support…`;
         case "insecure":
-          return "Microphone access needs HTTPS. Open your secure remote link, or use localhost on the computer running localDot.";
+          return t`Microphone access needs HTTPS. Open your secure remote link, or use localhost on the computer running localDot.`;
         case "download":
-          return "This browser can do it on this device after a one-time download.";
+          return t`This browser can do it on this device after a one-time download.`;
         case "online-off":
-          return "This browser can only do it online. Allow online speech below to use it.";
+          return t`This browser can only do it online. Allow online speech below to use it.`;
         case "unsupported":
-          return "This browser can't turn speech into text.";
+          return t`This browser can't turn speech into text.`;
       }
   }
 }
@@ -48,28 +51,28 @@ export function routeDetail(route: VoiceRoute, computer: ComputerWord = "Mac"): 
 export function routeBlocked(route: VoiceRoute): string | undefined {
   if (route.kind !== "none" || route.why === "download") return undefined;
   if (route.why === "checking")
-    return "Checking speech support. Try the microphone again in a moment.";
+    return t`Checking speech support. Try the microphone again in a moment.`;
   if (route.why === "insecure") return routeDetail(route);
   return route.why === "online-off"
-    ? "To use voice here, allow your browser’s online speech service to receive your audio."
-    : "This browser can't turn speech into text.";
+    ? t`To use voice here, allow your browser’s online speech service to receive your audio.`
+    : t`This browser can't turn speech into text.`;
 }
 
 export function failureLine(failure: VoiceFailure): string {
   switch (failure) {
     case "denied":
-      return "Allow the microphone to talk to dot.";
+      return t`Allow the microphone to talk to dot.`;
     case "no-mic":
-      return "The microphone isn’t receiving audio. Try again.";
+      return t`The microphone isn’t receiving audio. Try again.`;
     case "no-speech":
-      return "Didn't catch that. Try again.";
+      return t`Didn't catch that. Try again.`;
     case "unavailable":
-      return "Speech to text isn't available here.";
+      return t`Speech to text isn't available here.`;
     case "network":
-      return "Couldn't reach the speech service.";
+      return t`Couldn't reach the speech service.`;
     case "busy":
-      return "Still writing down your last words.";
+      return t`Still writing down your last words.`;
     case "failed":
-      return "Couldn't turn that into text.";
+      return t`Couldn't turn that into text.`;
   }
 }

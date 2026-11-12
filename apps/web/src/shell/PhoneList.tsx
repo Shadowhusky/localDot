@@ -3,7 +3,6 @@ import {
   CONVERSATION_NAME_CHARS,
   type ConversationEntry,
   type ConversationTag,
-  NOTIFY_COPY,
   notifyRouteOf,
   RenameConversation,
 } from "@localdot/protocol";
@@ -33,6 +32,7 @@ import {
 import { searchConversations } from "../agent/conversation-search.ts";
 import { markdownToPlain } from "../agent/markdown.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { useGuest } from "../remote/guest.ts";
 import { Highlight } from "../replay/Highlight.tsx";
@@ -62,6 +62,7 @@ import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
 import "../ui/phone-layout.css";
 import "./rails.css";
+import { notifyCopy } from "../notify/notify-words.ts";
 
 // How far the list scrolls before something runs under the bar, then before the large title has gone.
 const UNDER_PX = 2;
@@ -99,19 +100,19 @@ export function rowLine(row: ConversationRow, item: AttentionItem | undefined): 
   switch (row.status) {
     case "needs-you": {
       const route = item && notifyRouteOf(item.reason);
-      const title = route ? NOTIFY_COPY[route.kind].title : "dot needs you";
-      return said ? `${title}. ${said}` : `${title}.`;
+      const title = route ? notifyCopy(route.kind).title : t`dot needs you`;
+      return said ? t`${title}. ${said}` : t`${title}.`;
     }
     case "waiting":
-      return "Waiting for the computer";
+      return t`Waiting for the computer`;
     case "paused":
-      return said ? `Paused. ${said}` : "Paused.";
+      return said ? t`Paused. ${said}` : t`Paused.`;
     case "failed":
-      return said ?? "This task failed.";
+      return said ?? t`This task failed.`;
     case "stopped":
-      return said ?? "You stopped this.";
+      return said ?? t`You stopped this.`;
     default:
-      return said ?? row.entry.said?.trim() ?? "Ready when you are.";
+      return said ?? row.entry.said?.trim() ?? t`Ready when you are.`;
   }
 }
 
@@ -120,7 +121,7 @@ function RowMark({ row, unread }: { row: ConversationRow; unread: boolean }) {
     return <SessionGlyph status={row.status} size={14} />;
   if (row.status === "failed") return <SessionGlyph status="failed" size={14} />;
   if (unread && row.status !== "needs-you")
-    return <span className="phone-unread" role="img" aria-label="Unread" />;
+    return <span className="phone-unread" role="img" aria-label={t`Unread`} />;
   return null;
 }
 
@@ -162,7 +163,7 @@ function RailItem({
       <Button
         variant="quiet"
         className="phone-rail-button"
-        aria-label={`${row.title}. ${STATUS_LABEL[row.status]}`}
+        aria-label={t`${row.title}. ${STATUS_LABEL[row.status]}`}
         aria-current={selected || undefined}
         disabledReason={disabledReason}
         onKeyDown={onMenuKey}
@@ -265,8 +266,8 @@ export function PhoneList({
       announce(
         "conversation",
         failure instanceof ApiError && failure.status === 409
-          ? "This conversation can't be archived while its task is under way."
-          : "That change couldn't be saved. Try again.",
+          ? t`This conversation can't be archived while its task is under way.`
+          : t`That change couldn't be saved. Try again.`,
         "assertive",
       ),
     );
@@ -317,12 +318,12 @@ export function PhoneList({
     if (guest) return {};
     const isPinned = !!row.entry.pinned;
     const pin: SwipeAction = {
-      label: isPinned ? "Unpin" : "Pin",
+      label: isPinned ? t`Unpin` : t`Pin`,
       icon: isPinned ? "pin-off" : "pin",
       onAction: () => void organize(row, { pinned: !isPinned }),
     };
     const more: SwipeAction = {
-      label: "More",
+      label: t`More`,
       icon: "more-horizontal",
       onAction: () => {
         const from = rowElement(row);
@@ -332,13 +333,13 @@ export function PhoneList({
     const file: SwipeAction =
       view === "archived"
         ? {
-            label: "Unarchive",
+            label: t`Unarchive`,
             icon: "archive-restore",
             leaves: true,
             onAction: () => void organize(row, { archived: false }),
           }
         : {
-            label: "Archive",
+            label: t`Archive`,
             icon: "archive",
             leaves: true,
             onAction: () => void organize(row, { archived: true }),
@@ -353,7 +354,7 @@ export function PhoneList({
     if (was.name.trim() === was.was) return;
     const parsed = RenameConversation.safeParse({ title: was.name.trim() || null });
     if (!parsed.success) {
-      setRenameError("Use one line of text for the name.");
+      setRenameError(t`Use one line of text for the name.`);
       return;
     }
     try {
@@ -361,7 +362,7 @@ export function PhoneList({
       setRenameError(null);
       recent.retry();
     } catch {
-      setRenameError("The new name couldn't be saved. Try again.");
+      setRenameError(t`The new name couldn't be saved. Try again.`);
     }
   };
   const bar = useRef<HTMLDivElement>(null);
@@ -375,52 +376,56 @@ export function PhoneList({
 
   let content: ReactNode;
   if (recent.loading)
-    content = <DotLoader className="conversations-loading" label="Loading your conversations" />;
+    content = <DotLoader className="conversations-loading" label={t`Loading your conversations`} />;
   else if (recent.failed)
     content = (
       <EmptyState
-        title="Conversations couldn't load"
+        title={t`Conversations couldn't load`}
         icon="circle-alert"
         actions={
           <Button size="sm" onClick={recent.retry}>
-            Try again
+            {t`Try again`}
           </Button>
         }
       />
     );
   else if (recent.entries.length === 0 && view === "archived")
-    content = <EmptyState title="Nothing archived" icon="archive" />;
+    content = <EmptyState title={t`Nothing archived`} icon="archive" />;
   else if (recent.entries.length === 0)
     content = (
       <EmptyState
-        title="No conversations yet"
+        title={t`No conversations yet`}
         icon="message-circle"
         actions={
           <Button variant="primary" disabledReason={newReason} onClick={onNew}>
-            New conversation
+            {t`New conversation`}
           </Button>
         }
       >
-        Each conversation with dot is kept here.
+        {t`Each conversation with dot is kept here.`}
       </EmptyState>
     );
   else if (rows.length === 0 && pinned.length === 0)
     content = matches.pending ? (
-      <DotLoader className="conversations-loading" label="Searching conversations" />
+      <DotLoader className="conversations-loading" label={t`Searching conversations`} />
     ) : found ? (
-      <EmptyState layout="start" icon="search" title={`No conversations match “${query.trim()}”`} />
+      <EmptyState
+        layout="start"
+        icon="search"
+        title={t`No conversations match “${query.trim()}”`}
+      />
     ) : (
       tagged && (
         <EmptyState
           layout="start"
           icon="tag"
-          title={`No conversations have the ${TAG_NAMES[tagged].toLowerCase()} tag`}
+          title={t`No conversations have the ${TAG_NAMES[tagged].toLowerCase()} tag`}
         />
       )
     );
   else
     content = (
-      <ul className="phone-rows" aria-label="Recent conversations">
+      <ul className="phone-rows" aria-label={t`Recent conversations`}>
         {rows.map((row) => {
           const id = row.entry.sessionId;
           const match = marked.get(id);
@@ -437,7 +442,7 @@ export function PhoneList({
               data-unread={unread || undefined}
               role={choosing ? "checkbox" : undefined}
               aria-checked={choosing ? chosen : undefined}
-              aria-label={`${row.title}. ${STATUS_LABEL[row.status]}. ${line}`}
+              aria-label={t`${row.title}. ${STATUS_LABEL[row.status]}. ${line}`}
               aria-current={id === current || undefined}
               disabledReason={choosing ? undefined : blocked(row)}
               onKeyDown={choosing ? undefined : menuKey(row)}
@@ -488,8 +493,8 @@ export function PhoneList({
                 <div className="phone-row-renaming">
                   <TextField
                     size="sm"
-                    aria-label={`New name for ${row.title}`}
-                    placeholder="Automatic name"
+                    aria-label={t`New name for ${row.title}`}
+                    placeholder={t`Automatic name`}
                     maxLength={CONVERSATION_NAME_CHARS}
                     autoComplete="off"
                     enterKeyHint="done"
@@ -534,7 +539,7 @@ export function PhoneList({
                   className="phone-row-actions"
                   icon="more-horizontal"
                   size={28}
-                  label={`Actions for ${row.title}`}
+                  label={t`Actions for ${row.title}`}
                   {...triggerProps("menu", action?.entry.sessionId === id && !peek)}
                   onClick={(event) => openMenu(row, event.currentTarget)}
                 />
@@ -549,7 +554,7 @@ export function PhoneList({
     <section
       ref={screen}
       className="phone-list-screen"
-      aria-label="Conversations"
+      aria-label={t`Conversations`}
       data-selecting={selection.selecting || undefined}
     >
       <div ref={bar} className="phone-bar phone-list-bar">
@@ -571,7 +576,7 @@ export function PhoneList({
                 round
                 icon="monitor"
                 className="phone-pill"
-                aria-label={`${computer.name}: this computer and app settings`}
+                aria-label={t`${computer.name}: this computer and app settings`}
                 {...triggerProps("menu", pillOpen)}
                 onClick={() => {
                   computer.onOpen?.();
@@ -587,14 +592,14 @@ export function PhoneList({
                 anchor={pill}
                 side="bottom"
                 align="start"
-                label="This computer and app settings"
+                label={t`This computer and app settings`}
               >
                 {computer.menu}
               </Menu>
             </>
           )}
           <div className="phone-list-inline-title" aria-hidden="true">
-            Conversations
+            {t`Conversations`}
           </div>
           <div className="phone-list-bar-end">
             {!guest && (selection.selecting || all.length > 0) && (
@@ -604,7 +609,7 @@ export function PhoneList({
                 className="phone-select"
                 onClick={() => (selection.selecting ? selection.stop() : selection.start())}
               >
-                {selection.selecting ? "Cancel" : "Select"}
+                {selection.selecting ? t`Cancel` : t`Select`}
               </Button>
             )}
             {!selection.selecting && onOverview && (
@@ -612,7 +617,7 @@ export function PhoneList({
                 size={36}
                 round
                 icon="layout-dashboard"
-                label="Overview"
+                label={t`Overview`}
                 className="phone-overview"
                 onClick={onOverview}
               />
@@ -623,7 +628,7 @@ export function PhoneList({
                 round
                 variant="filled"
                 icon="compose"
-                label="New conversation"
+                label={t`New conversation`}
                 disabledReason={newReason}
                 onClick={onNew}
               />
@@ -632,13 +637,13 @@ export function PhoneList({
         </div>
       </div>
       <div className="phone-list-scroll" onScroll={onScroll}>
-        <h1 className="phone-large-title">Conversations</h1>
+        <h1 className="phone-large-title">{t`Conversations`}</h1>
         <TextField
           className="phone-search"
           filled
           prefix={<Icon name="search" />}
-          aria-label="Search conversations"
-          placeholder="Search"
+          aria-label={t`Search conversations`}
+          placeholder={t`Search`}
           enterKeyHint="go"
           autoComplete="off"
           spellCheck={false}
@@ -654,7 +659,7 @@ export function PhoneList({
         )}
         {tags.length > 0 && (
           // biome-ignore lint/a11y/useSemanticElements: a row of toggles, not a form's fieldset.
-          <div className="conversations-tags" role="group" aria-label="Show only a colour tag">
+          <div className="conversations-tags" role="group" aria-label={t`Show only a colour tag`}>
             {tags.map((each) => (
               <Button
                 key={each}
@@ -672,7 +677,7 @@ export function PhoneList({
         )}
         <div ref={body} className="phone-list-body" aria-busy={recent.loading || matches.pending}>
           {pinned.length > 0 && (
-            <ul className="phone-rail" aria-label="Pinned">
+            <ul className="phone-rail" aria-label={t`Pinned`}>
               {pinned.map((row) => (
                 <RailItem
                   key={row.entry.sessionId}
@@ -700,13 +705,13 @@ export function PhoneList({
                   icon="chevron-left"
                   onClick={() => setView("recent")}
                 >
-                  Recent conversations
+                  {t`Recent conversations`}
                 </Button>
               ) : (
                 <>
                   {(!guest || guest.grant.replay) && (
                     <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
-                      See all in Replay
+                      {t`See all in Replay`}
                     </Button>
                   )}
                   {recent.archivedCount > 0 && (
@@ -716,7 +721,7 @@ export function PhoneList({
                       icon="archive"
                       onClick={() => setView("archived")}
                     >
-                      Archived ({recent.archivedCount})
+                      {t`Archived (${recent.archivedCount})`}
                     </Button>
                   )}
                 </>
@@ -771,7 +776,7 @@ export function PhoneList({
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
-            announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
+            announce("conversation", t`That change couldn't be saved. Try again.`, "assertive"),
           );
         }}
         onDelete={() => setDeleting(action && [action.entry])}
@@ -788,7 +793,7 @@ export function PhoneList({
             if (action) onOpen(action, null);
           }}
         >
-          Open conversation
+          {t`Open conversation`}
         </MenuItem>
       </ConversationMenu>
       <DeleteConversationDialog

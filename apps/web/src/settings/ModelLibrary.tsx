@@ -1,5 +1,6 @@
 import { providerById } from "@localdot/providers";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { t, tc, tr } from "../i18n/index.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -58,7 +59,16 @@ export interface ModelLibraryProps {
   plans: SetupControls["plans"] & { browse(): void };
 }
 
-const ROLE_NAMES: Record<ModelRole, string> = { main: "Default", fast: "Fast", local: "Local" };
+const ROLE_NAMES: Record<ModelRole, string> = {
+  main: tr("Default"),
+  fast: tr("Fast"),
+  local: tr("Local"),
+};
+const IN_USE: Record<ModelRole, string> = {
+  main: tr("In use as the default model"),
+  fast: tr("In use as the fast model"),
+  local: tr("In use as the local model"),
+};
 
 // Every model the user has, under its provider or endpoint. Each that is on can be chosen in a task,
 // and any can be the default or the fast one.
@@ -73,10 +83,10 @@ export function ModelLibrary(props: ModelLibraryProps) {
     <section className="settings-role" aria-labelledby={titleId}>
       <GroupHead
         id={titleId}
-        title="Your models"
+        title={t`Your models`}
         aside={
           <Button ref={adding} variant="quiet" size="sm" icon="plus" onClick={() => setOpen(true)}>
-            Add models
+            {t`Add models`}
           </Button>
         }
       />
@@ -100,7 +110,7 @@ export function ModelLibrary(props: ModelLibraryProps) {
         </div>
       ))}
       <GroupNote>
-        Models that are on can be chosen for any task. A new task starts on the default.
+        {t`Models that are on can be chosen for any task. A new task starts on the default.`}
       </GroupNote>
       <AddModels
         open={open}
@@ -138,9 +148,9 @@ function ModelRow({
   const [menu, setMenu] = useState(false);
   const fastReason =
     choice.provider === CHATGPT
-      ? "The ChatGPT plan can only be the main model"
+      ? t`The ChatGPT plan can only be the main model`
       : choice.provider === CLAUDE_CODE && main !== CLAUDE_CODE
-        ? "Only beside a Claude Code main model"
+        ? t`Only beside a Claude Code main model`
         : undefined;
   const format = isCustomFormat(choice.provider)
     ? CUSTOM_FORMATS.find((item) => item.value === choice.provider)?.label
@@ -159,38 +169,36 @@ function ModelRow({
           problem ?? [name === choice.model ? "" : choice.model, format].filter(Boolean).join(" · ")
         }
         checked={!choice.off}
-        {...(role
-          ? { disabledReason: `In use as the ${ROLE_NAMES[role].toLowerCase()} model` }
-          : {})}
+        {...(role ? { disabledReason: IN_USE[role] } : {})}
         onCheckedChange={onOn}
       />
       <IconButton
         ref={more}
         icon="more-horizontal"
         size={32}
-        label={`More for ${name}`}
+        label={t`More for ${name}`}
         {...triggerProps("menu", menu)}
         onClick={() => setMenu(true)}
       />
-      <Menu open={menu} onClose={() => setMenu(false)} anchor={more} label={`${name} actions`}>
+      <Menu open={menu} onClose={() => setMenu(false)} anchor={more} label={t`${name} actions`}>
         <MenuItem
-          disabledReason={role === "main" ? "This is the default" : problem}
+          disabledReason={role === "main" ? t`This is the default` : problem}
           onSelect={() => onRole("main")}
         >
-          Make the default
+          {t`Make the default`}
         </MenuItem>
         <MenuItem
-          disabledReason={role === "fast" ? "This is the fast model" : (problem ?? fastReason)}
+          disabledReason={role === "fast" ? t`This is the fast model` : (problem ?? fastReason)}
           onSelect={() => onRole("fast")}
         >
-          Make the fast model
+          {t`Make the fast model`}
         </MenuItem>
         <MenuItem
           icon="trash"
-          disabledReason={role ? "Choose another model for its role first" : undefined}
+          disabledReason={role ? t`Choose another model for its role first` : undefined}
           onSelect={() => void foldAway(goesWith(more.current)).then(onRemove)}
         >
-          Remove
+          {t`Remove`}
         </MenuItem>
       </Menu>
     </div>
@@ -301,13 +309,15 @@ function AddModels({
     `${model.id} ${model.name ?? ""}`.toLowerCase().includes(filter.trim().toLowerCase()),
   );
   const reason = !source
-    ? "Choose where they come from first"
+    ? t`Choose where they come from first`
     : source.setup
-      ? `Set up ${source.setup === "endpoint" ? "your endpoint" : source.label} first`
+      ? source.setup === "endpoint"
+        ? t`Set up your endpoint first`
+        : t`Set up ${source.label} first`
       : !ids.length
-        ? "Choose a model first"
+        ? t`Choose a model first`
         : unpriced && !price
-          ? "Give a price first"
+          ? t`Give a price first`
           : undefined;
   return (
     <Sheet
@@ -320,11 +330,11 @@ function AddModels({
         setFormat(null);
         onClose();
       }}
-      title="Add models"
-      description="From any provider or plan. One that isn't set up yet can be set up here."
+      title={t`Add models`}
+      description={t`From any provider or plan. One that isn't set up yet can be set up here.`}
       modal
       returnFocus={returnFocus}
-      closeLabel="Close"
+      closeLabel={t`Close`}
       detents={["large"]}
       className="settings-dot-sheet"
       footer={
@@ -338,18 +348,18 @@ function AddModels({
               reset();
             }}
           >
-            {ids.length > 1 ? `Add ${ids.length} models` : "Add model"}
+            {ids.length > 1 ? t`Add ${ids.length} models` : t`Add model`}
           </Button>
         </div>
       }
     >
       <div className="settings-dot-form">
-        <Field label="From">
+        <Field label={tc("source", "From")}>
           <Combobox
             value={source?.id ?? ""}
             groups={sourceGroups(sources)}
-            placeholder="Choose a provider"
-            searchPlaceholder="Search providers"
+            placeholder={t`Choose a provider`}
+            searchPlaceholder={t`Search providers`}
             onValueChange={(next) => {
               setSourceId(next);
               setAwaiting(null);
@@ -361,11 +371,11 @@ function AddModels({
         </Field>
         {!source && (
           <p className="settings-lede">
-            Choose an API provider, a plan you already have or an app on this Mac.
+            {t`Choose an API provider, a plan you already have or an app on this Mac.`}
           </p>
         )}
         {formats.length > 1 && (
-          <Field label="API format">
+          <Field label={t`API format`}>
             <Select value={format} items={formats} onValueChange={setFormat} />
           </Field>
         )}
@@ -380,17 +390,17 @@ function AddModels({
         )}
         {awaiting && !arrived && (
           <p className="settings-lede" role="status">
-            <Spinner size={16} /> Reading its models…
+            <Spinner size={16} /> {t`Reading its models…`}
           </p>
         )}
         {fresh && fresh === source?.id && (
           <p className="settings-lede" role="status">
-            {source.label} is set up. Choose the models to add.
+            {t`${source.label} is set up. Choose the models to add.`}
           </p>
         )}
         {listed.loading && (
           <p className="settings-lede" role="status">
-            <Spinner size={16} /> Reading the model list…
+            <Spinner size={16} /> {t`Reading the model list…`}
           </p>
         )}
         <Banner
@@ -404,7 +414,7 @@ function AddModels({
           <p className="settings-note">{LOCAL_HINTS[source.provider]}</p>
         )}
         {listed.models.length > 8 && (
-          <Field label="Search" className="settings-model-search">
+          <Field label={t`Search`} className="settings-model-search">
             <TextField
               value={filter}
               autoComplete="off"
@@ -414,7 +424,7 @@ function AddModels({
           </Field>
         )}
         {shown.length > 0 && (
-          <Group role="group" aria-label="Models">
+          <Group role="group" aria-label={t`Models`}>
             {shown.map((model) => {
               const added = have.has(`${model.id}\0${source?.key ?? ""}`);
               return (
@@ -424,7 +434,7 @@ function AddModels({
                   label={model.name ?? model.id}
                   description={model.name ? model.id : undefined}
                   checked={added || picked.has(model.id)}
-                  {...(added ? { disabledReason: "Already on your list" } : {})}
+                  {...(added ? { disabledReason: t`Already on your list` } : {})}
                   onCheckedChange={(checked) =>
                     setPicked((was) => {
                       const next = new Set(was);
@@ -439,21 +449,21 @@ function AddModels({
           </Group>
         )}
         {source?.typed && !source.setup && (
-          <Field label="Add by ID" error={idProblem ?? undefined}>
+          <Field label={t`Add by ID`} error={idProblem ?? undefined}>
             <TextField
               value={typed}
               maxLength={128}
               autoComplete="off"
               autoCapitalize="off"
               spellCheck={false}
-              placeholder="e.g. my-model-1"
+              placeholder={t`e.g. my-model-1`}
               onChange={(event) => setTyped(event.target.value)}
             />
           </Field>
         )}
         {unpriced && (
           <>
-            <Field label="Input price">
+            <Field label={t`Input price`}>
               <TextField
                 inputMode="decimal"
                 maxLength={64}
@@ -463,7 +473,7 @@ function AddModels({
                 onChange={(event) => setInput(event.target.value)}
               />
             </Field>
-            <Field label="Output price">
+            <Field label={t`Output price`}>
               <TextField
                 inputMode="decimal"
                 maxLength={64}
@@ -474,8 +484,7 @@ function AddModels({
               />
             </Field>
             <GroupNote>
-              US dollars per million tokens, used to set aside a task's spending. It isn't your
-              bill.
+              {t`US dollars per million tokens, used to set aside a task's spending. It isn't your bill.`}
             </GroupNote>
           </>
         )}
@@ -486,8 +495,8 @@ function AddModels({
 
 // What a local server needs before its models answer; nothing here can see whether it runs.
 const LOCAL_HINTS: Readonly<Record<string, string>> = {
-  lmstudio: "Start LM Studio's local server and load a model, then add it.",
-  ollama: "Keep Ollama running with the model pulled, then add it.",
+  lmstudio: tr("Start LM Studio's local server and load a model, then add it."),
+  ollama: tr("Keep Ollama running with the model pulled, then add it."),
 };
 
 // A source's models: its catalog, a plan's own list, or for a custom endpoint the list it keeps
@@ -522,7 +531,7 @@ function useListedModels(
           setRead({
             key,
             models: [],
-            problem: "This endpoint didn't give its model list. Add models by ID.",
+            problem: t`This endpoint didn't give its model list. Add models by ID.`,
           });
       },
     );

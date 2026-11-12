@@ -1,5 +1,6 @@
 import { type DotJob, type DotSummary, sealPassphrase } from "@localdot/protocol";
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -113,7 +114,7 @@ export function AddDotSheet({
       onAdded();
       return;
     }
-    setProblem(settled.error ?? `${added.current} wasn't added.`);
+    setProblem(settled.error ?? t`${added.current} wasn't added.`);
     setPhase("form");
   };
 
@@ -138,7 +139,7 @@ export function AddDotSheet({
       );
     } catch (error) {
       if (signal.aborted) return;
-      setProblem(dotProblem(error, `${added.current} wasn't added.`));
+      setProblem(dotProblem(error, t`${added.current} wasn't added.`));
       setPhase("form");
     }
   };
@@ -161,7 +162,7 @@ export function AddDotSheet({
       await follow(next, signal);
     } catch (error) {
       if (signal.aborted) return;
-      setProblem(dotProblem(error, "That passphrase wasn't taken. Try again."));
+      setProblem(dotProblem(error, t`That passphrase wasn't taken. Try again.`));
       setPhase("passphrase");
     }
   };
@@ -174,7 +175,7 @@ export function AddDotSheet({
     try {
       navigate((await dotSignIn(api, id)).url);
     } catch (error) {
-      setProblem(dotProblem(error, `${added.current} didn't open. Try again in a moment.`));
+      setProblem(dotProblem(error, t`${added.current} didn't open. Try again in a moment.`));
       setOpening(false);
     }
   };
@@ -189,34 +190,34 @@ export function AddDotSheet({
     phase === "form" ? (
       <div className="settings-dot-footer">
         <Button variant="quiet" onClick={onClose}>
-          Cancel
+          {t`Cancel`}
         </Button>
         <Button variant="primary" onClick={() => void submit()}>
-          Add dot
+          {t`Add dot`}
         </Button>
       </div>
     ) : phase === "passphrase" ? (
       <div className="settings-dot-footer">
         <Button variant="quiet" onClick={close}>
-          Cancel
+          {t`Cancel`}
         </Button>
         <Button variant="primary" onClick={() => void unlock()}>
-          Continue
+          {t`Continue`}
         </Button>
       </div>
     ) : phase === "done" ? (
       <div className="settings-dot-footer">
         <Button variant="quiet" onClick={onClose}>
-          Close
+          {t`Close`}
         </Button>
         <Button variant="primary" busy={opening} onClick={() => void openNew()}>
-          {`Open ${added.current}`}
+          {t`Open ${added.current}`}
         </Button>
       </div>
     ) : (
       <div className="settings-dot-footer">
         <Button variant="quiet" onClick={onClose}>
-          Close
+          {t`Close`}
         </Button>
       </div>
     );
@@ -225,12 +226,12 @@ export function AddDotSheet({
     <Sheet
       open={open}
       onClose={close}
-      title="Add a dot on this computer"
-      description="A dot of its own: its own address, keys and computer, on the same installation."
+      title={t`Add a dot on this computer`}
+      description={t`A dot of its own: its own address, keys and computer, on the same installation.`}
       modal
       dirty={(phase === "form" && name.trim() !== "") || (phase === "passphrase" && !!passphrase)}
       returnFocus={returnFocus}
-      closeLabel="Close"
+      closeLabel={t`Close`}
       detents={["large"]}
       className="settings-dot-sheet"
       footer={footer}
@@ -245,11 +246,11 @@ export function AddDotSheet({
       <div ref={scope} className="settings-dot-form">
         {phase === "form" && (
           <>
-            <Field label="Name" error={tried ? (nameProblem ?? undefined) : undefined}>
+            <Field label={t`Name`} error={tried ? (nameProblem ?? undefined) : undefined}>
               <TextField
                 value={name}
                 maxLength={40}
-                placeholder="Work"
+                placeholder={t`Work`}
                 autoComplete="off"
                 onChange={(event) => setName(event.target.value)}
                 onKeyDown={(event) => {
@@ -261,8 +262,8 @@ export function AddDotSheet({
               />
             </Field>
             <Field
-              label="Copy from"
-              description={copying ? undefined : "It starts with nothing from your other dots."}
+              label={t`Copy from`}
+              description={copying ? undefined : t`It starts with nothing from your other dots.`}
             >
               <Select
                 value={source}
@@ -270,16 +271,16 @@ export function AddDotSheet({
                 items={[
                   ...dots.map((dot) => ({
                     value: dot.id,
-                    label: dot.self ? `${dot.name} (this dot)` : dot.name,
+                    label: dot.self ? t`${dot.name} (this dot)` : dot.name,
                   })),
-                  { value: EMPTY, label: "Nothing — start empty" },
+                  { value: EMPTY, label: t`Nothing — start empty` },
                 ]}
               />
             </Field>
             {copying && (
               <Disclosure
-                summary="Advanced: what to copy"
-                meta={`${chosenCopy(copy).length} of ${COPY_CHOICES.length}`}
+                summary={t`Advanced: what to copy`}
+                meta={t`${chosenCopy(copy).length} of ${COPY_CHOICES.length}`}
               >
                 <div className="settings-dot-copy">
                   {COPY_CHOICES.map((choice) => (
@@ -296,25 +297,24 @@ export function AddDotSheet({
             )}
             <div className="settings-dot-notes">
               <p>
-                Never copied: its sign-in, remote access, phone notifications, ChatGPT sign-in, and
-                key audit and spending records.
+                {t`Never copied: its sign-in, remote access, phone notifications, ChatGPT sign-in, and key audit and spending records.`}
               </p>
-              <p>Claude Code's sign-in is shared by every dot on this computer.</p>
+              <p>{t`Claude Code's sign-in is shared by every dot on this computer.`}</p>
             </div>
           </>
         )}
         {phase === "working" && (
           <div className="settings-dot-progress" role="status">
-            <Progress label={`Adding ${added.current}`} />
-            <p>{job?.step ?? `Adding ${added.current}…`}</p>
+            <Progress label={t`Adding ${added.current}`} />
+            <p>{job?.step ?? t`Adding ${added.current}…`}</p>
           </div>
         )}
         {phase === "passphrase" && (
           <>
             <p className="settings-dot-lede">
-              {`${added.current} keeps its saved keys in a file only a passphrase opens. Choose its own passphrase; you'll need it after this computer restarts.`}
+              {t`${added.current} keeps its saved keys in a file only a passphrase opens. Choose its own passphrase; you'll need it after this computer restarts.`}
             </p>
-            <Field label="New passphrase">
+            <Field label={t`New passphrase`}>
               <TextField
                 type="password"
                 value={passphrase}
@@ -322,7 +322,10 @@ export function AddDotSheet({
                 onChange={(event) => setPassphrase(event.target.value)}
               />
             </Field>
-            <Field label="Type it again" error={passTried ? (passProblem ?? undefined) : undefined}>
+            <Field
+              label={t`Type it again`}
+              error={passTried ? (passProblem ?? undefined) : undefined}
+            >
               <TextField
                 type="password"
                 value={again}
@@ -340,7 +343,7 @@ export function AddDotSheet({
         )}
         {phase === "done" && (
           <p className="settings-dot-lede" role="status">
-            {`${added.current} is ready at its own address. Open it to sign in there.`}
+            {t`${added.current} is ready at its own address. Open it to sign in there.`}
           </p>
         )}
       </div>

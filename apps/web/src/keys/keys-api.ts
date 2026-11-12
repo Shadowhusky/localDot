@@ -11,6 +11,7 @@ import {
   sealSecret,
 } from "@localdot/protocol";
 import { z } from "zod";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { valueProblem } from "./binding.ts";
 
@@ -32,20 +33,21 @@ export interface KeydHealth {
 }
 
 export const UNLOCK = "localdot unlock";
-export const VAULT_LOCKED = "Saved keys are locked. Unlock them first.";
+export const VAULT_LOCKED = t`Saved keys are locked. Unlock them first.`;
 
 // Where saved keys live: the Keychain only for the signed Mac release; otherwise keyd's own vault
-// on the computer running localDot, which may not be the one showing this page.
+// on the computer running localDot, which may not be the one showing this page. Said as where a key
+// stays, to stand in a sentence such as "It stays {0}."
 export function keyHome(health: KeydHealth | null): string {
   switch (health?.vault?.backend) {
     case "keychain":
-      return "in your Mac's keychain";
+      return t`in your Mac's keychain`;
     case "secret-service":
-      return "in the keyring of the computer running localDot";
+      return t`in the keyring of the computer running localDot`;
     case "file":
-      return "encrypted on the computer running localDot";
+      return t`encrypted on the computer running localDot`;
     default:
-      return "on the computer running localDot";
+      return t`on the computer running localDot`;
   }
 }
 
@@ -100,7 +102,7 @@ export async function saveKey(
   // Snapshot the allowed fields before any await. The form may change while
   // sealing, and TypeScript alone cannot keep extra runtime fields off the wire.
   const checked = SecretBinding.safeParse(binding);
-  if (!checked.success) throw new KeyProblem("Check the key's name and where it can be used.");
+  if (!checked.success) throw new KeyProblem(t`Check the key's name and where it can be used.`);
   const problem = valueProblem(value, checked.data.kind, {
     ...(checked.data.kind === "llm" ? { provider: checked.data.provider } : {}),
     ...(checked.data.kind === "http" ? { format: checked.data.format } : {}),
@@ -111,9 +113,9 @@ export async function saveKey(
   const send = async () => {
     const health = await loadHealth(api);
     if (!health.online || !health.sealKey)
-      throw new KeyProblem("Key protection is off, so the key wasn't saved.");
+      throw new KeyProblem(t`Key protection is off, so the key wasn't saved.`);
     if (bound.kind === "secret" && !health.generalSecrets)
-      throw new KeyProblem("Update localDot key protection to save general keys.");
+      throw new KeyProblem(t`Update localDot key protection to save general keys.`);
     const sealed = await seal(health.sealKey, bound, value);
     const raw = await api.post<unknown>("/api/keys", {
       binding: bound,
@@ -139,7 +141,7 @@ export async function saveKey(
       (bound.kind === "llm" && parsed.data.key.provider !== bound.provider)
     )
       throw new KeyProblem(
-        "The saved key reply could not be verified. Reload Keys before retrying.",
+        t`The saved key reply could not be verified. Reload Keys before retrying.`,
       );
     return parsed.data;
   };
@@ -174,23 +176,26 @@ export async function unlockKeys(
   }
 }
 
-const UNLOCK_OFFLINE = "Key protection is off, so your keys can't be unlocked right now.";
+const UNLOCK_OFFLINE = t`Key protection is off, so your keys can't be unlocked right now.`;
 
 export function unlockProblem(err: unknown): string {
   if (err instanceof KeyProblem) return err.message;
   if (err instanceof ApiError) {
     const body = parse(err.message);
     if (body?.error === "wrong-passphrase")
-      return "That passphrase doesn't unlock your saved keys.";
+      return t`That passphrase doesn't unlock your saved keys.`;
     if (body?.error === "too-many-tries") {
       const minutes = Math.max(1, Math.ceil((body.retryAfter ?? 60) / 60));
-      return `Too many wrong passphrases. Try again in ${minutes === 1 ? "a minute" : `${minutes} minutes`}.`;
+      return minutes === 1
+        ? t`Too many wrong passphrases. Try again in a minute.`
+        : t`Too many wrong passphrases. Try again in ${minutes} minutes.`;
     }
-    if (body?.error === "owner-only") return "Only the owner of this localDot can unlock its keys.";
+    if (body?.error === "owner-only")
+      return t`Only the owner of this localDot can unlock its keys.`;
     if (err.status === 503) return UNLOCK_OFFLINE;
     if (body?.message) return sentence(body.message);
   }
-  return "Your keys couldn't be unlocked. Try again.";
+  return t`Your keys couldn't be unlocked. Try again.`;
 }
 
 export const deleteKey = (api: ApiClient, id: string) =>
@@ -203,9 +208,9 @@ export function problemText(err: unknown): string {
   if (err instanceof ApiError) {
     const body = parse(err.message);
     if (body?.message) return sentence(body.message);
-    if (err.status === 503) return "Key protection is off, so the key wasn't saved.";
+    if (err.status === 503) return t`Key protection is off, so the key wasn't saved.`;
   }
-  return "Something went wrong saving the key. Try again.";
+  return t`Something went wrong saving the key. Try again.`;
 }
 
 export const lockedVaultError = (err: unknown) =>
@@ -233,8 +238,8 @@ function parse(
 }
 
 function sentence(text: string): string {
-  const t = clipText(text, 512)
+  const clipped = clipText(text, 512)
     .trim()
     .replace(/^keys: /, "");
-  return `${t.charAt(0).toUpperCase()}${t.slice(1)}${/[.!?]$/.test(t) ? "" : "."}`;
+  return `${clipped.charAt(0).toUpperCase()}${clipped.slice(1)}${/[.!?]$/.test(clipped) ? "" : "."}`;
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import {
@@ -73,7 +74,7 @@ export function useAside(api: ApiClient, sessionId: string | null): AsideControl
           if (abort.signal.aborted) return;
           asking.current = null;
           setAside({ ...shown, phase: "answered", answer });
-          announce("aside", "Your side question has an answer.");
+          announce("aside", t`Your side question has an answer.`);
         },
         (error: unknown) => {
           if (abort.signal.aborted) return;
@@ -81,7 +82,7 @@ export function useAside(api: ApiClient, sessionId: string | null): AsideControl
           const failure =
             error instanceof SideQuestionFailure
               ? error
-              : new SideQuestionFailure("No model could answer. Try again.");
+              : new SideQuestionFailure(t`No model could answer. Try again.`);
           setAside({ ...shown, phase: "failed", problem: failure.message, setup: failure.setup });
         },
       );

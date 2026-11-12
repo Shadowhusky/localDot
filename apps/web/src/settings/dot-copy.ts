@@ -4,6 +4,7 @@ import {
   DEFAULT_COPY,
   type DotState,
 } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
 
 export interface CopyChoice {
   id: CopyCategory;
@@ -12,17 +13,20 @@ export interface CopyChoice {
 }
 
 const CHOICES: Record<CopyCategory, Omit<CopyChoice, "id">> = {
-  settings: { label: "Settings", note: "Models, autonomy, budgets, persona and accessory" },
-  keys: { label: "Keys", note: "Saved keys and passwords, passed from key service to key service" },
-  memory: { label: "Memory", note: "What dot knows about you" },
-  skills: { label: "Skills" },
-  connectors: { label: "Connectors" },
-  conversations: { label: "Conversations", note: "Can be very large" },
-  computer: {
-    label: "dot's computer",
-    note: "Its system files and home folder. Its computer must be stopped.",
+  settings: { label: tr("Settings"), note: tr("Models, autonomy, budgets, persona and accessory") },
+  keys: {
+    label: tr("Keys"),
+    note: tr("Saved keys and passwords, passed from key service to key service"),
   },
-  signins: { label: "Browser sign-ins", note: "Copied sign-ins can sign each other out" },
+  memory: { label: tr("Memory"), note: tr("What dot knows about you") },
+  skills: { label: tr("Skills") },
+  connectors: { label: tr("Connectors") },
+  conversations: { label: tr("Conversations"), note: tr("Can be very large") },
+  computer: {
+    label: tr("dot's computer"),
+    note: tr("Its system files and home folder. Its computer must be stopped."),
+  },
+  signins: { label: tr("Browser sign-ins"), note: tr("Copied sign-ins can sign each other out") },
 };
 
 export const COPY_CHOICES: readonly CopyChoice[] = COPY_CATEGORIES.map((id) => ({
@@ -50,22 +54,22 @@ export function toggled(
 export const MIN_PASSPHRASE = 12;
 
 export function passphraseProblem(passphrase: string, again: string): string | null {
-  if (passphrase.length < MIN_PASSPHRASE) return `Use at least ${MIN_PASSPHRASE} characters.`;
-  if (new TextEncoder().encode(passphrase).length > 1024) return "That passphrase is too long.";
-  if (passphrase !== again) return "The passphrases don't match.";
+  if (passphrase.length < MIN_PASSPHRASE) return t`Use at least ${MIN_PASSPHRASE} characters.`;
+  if (new TextEncoder().encode(passphrase).length > 1024) return t`That passphrase is too long.`;
+  if (passphrase !== again) return t`The passphrases don't match.`;
   return null;
 }
 
 export function dotNameProblem(name: string): string | null {
   const trimmed = name.trim();
-  if (!trimmed) return "Give the new dot a name.";
-  if (trimmed.length > 40) return "Use up to 40 characters.";
-  if (/[\p{Cc}<>]/u.test(trimmed)) return "Use letters, numbers and punctuation.";
+  if (!trimmed) return t`Give the new dot a name.`;
+  if (trimmed.length > 40) return t`Use up to 40 characters.`;
+  if (/[\p{Cc}<>]/u.test(trimmed)) return t`Use letters, numbers and punctuation.`;
   return null;
 }
 
 export const DOT_STATE_WORD: Record<DotState, string> = {
-  running: "Running",
-  stopped: "Stopped",
-  unknown: "Not answering",
+  running: tr("Running"),
+  stopped: tr("Stopped"),
+  unknown: tr("Not answering"),
 };

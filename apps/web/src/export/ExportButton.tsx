@@ -1,4 +1,5 @@
 import type { Ref } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { Progress } from "../ui/Progress.tsx";
@@ -30,7 +31,7 @@ export function ExportButton({
       className="replay-export"
       variant="quiet"
       icon="share"
-      aria-label="Export video"
+      aria-label={t`Export video`}
       data-ring={ring ? "" : undefined}
       {...triggerProps("dialog", open)}
       disabledReason={phase === "options" ? disabledReason : undefined}
@@ -40,7 +41,7 @@ export function ExportButton({
         <Progress
           variant="ring"
           size={16}
-          label="Exporting"
+          label={t`Exporting`}
           value={
             finished
               ? 1
@@ -53,7 +54,7 @@ export function ExportButton({
           max={finished ? 1 : total || 1}
         />
       </span>
-      <span className="replay-export-text">Export</span>
+      <span className="replay-export-text">{t`Export`}</span>
     </Button>
   );
 }

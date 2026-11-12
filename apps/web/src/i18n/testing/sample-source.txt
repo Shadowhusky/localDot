@@ -6,3 +6,6 @@ const e = format`not ${this}`; const f = obj.t`skip`;
 const g = t`Line one\nand \`two\``;
 // a comment about `at` and `t` is no message
 /* nor `t` here */
+const h = text.replace(/['`"]/g, "");
+const i = tc("button", "Reset");
+const j = <p><Kbd keys={["Escape"]} /> {t`close`}</p>;

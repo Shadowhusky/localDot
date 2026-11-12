@@ -1,5 +1,6 @@
 import { textFormat, type ViewerKind } from "@localdot/protocol";
 import { useState } from "react";
+import { tr } from "../../i18n/index.ts";
 import type { SegmentItem } from "../../ui/SegmentedControl.tsx";
 
 // The ways one kind of file can be shown, the first of them unless the viewer was last left on
@@ -15,13 +16,13 @@ export interface ViewChoice {
 type Bucket = "markdown" | "json" | "html" | "svg" | "table" | "sheet" | "text" | "diff";
 const KEY = "localdot.viewer-views.v1";
 const LABELS: Record<Bucket, Partial<Record<ViewName, string>>> = {
-  markdown: { rendered: "Rendered", source: "Source" },
-  json: { rendered: "Tree", source: "Text" },
-  html: { rendered: "Page", source: "Source" },
-  svg: { rendered: "Picture", source: "Source" },
-  table: { rendered: "Table", source: "Source" },
-  sheet: { rendered: "Table", pages: "Pages" },
-  text: { source: "File" },
+  markdown: { rendered: tr("Rendered"), source: tr("Source") },
+  json: { rendered: tr("Tree"), source: tr("Text") },
+  html: { rendered: tr("Page"), source: tr("Source") },
+  svg: { rendered: tr("Picture"), source: tr("Source") },
+  table: { rendered: tr("Table"), source: tr("Source") },
+  sheet: { rendered: tr("Table"), pages: tr("Pages") },
+  text: { source: tr("File") },
   diff: {},
 };
 
@@ -59,7 +60,7 @@ export function viewItems(
   const items = (["rendered", "source", "pages"] as const)
     .filter((value) => labels[value] && (value !== "pages" || options.pages))
     .map((value) => ({ value, label: labels[value] as string }));
-  return options.changes ? [...items, { value: "changes", label: "Changes" }] : items;
+  return options.changes ? [...items, { value: "changes", label: tr("Changes") }] : items;
 }
 
 // `initial` opens one file on a view without making it the kind's choice.

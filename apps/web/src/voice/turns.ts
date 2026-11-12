@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { VoiceError, type VoiceFailure } from "./capture.ts";
 import type { Hearing, HearingEvents } from "./hearing.ts";
 import { IDLE, MAX_LISTEN_MS, type VoiceEvent, type VoiceState, voiceStep } from "./machine.ts";
@@ -84,7 +85,7 @@ export class VoiceTurns {
     if (route.kind === "none") {
       if (route.why === "download") {
         this.host.download();
-        this.host.notice("Getting speech ready on this device…");
+        this.host.notice(t`Getting speech ready on this device…`);
       } else this.host.notice(routeBlocked(route) ?? null);
       this.send({ type: "done" });
       return;

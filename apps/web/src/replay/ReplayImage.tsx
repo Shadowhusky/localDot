@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { replayOrigin } from "./useReplay.ts";
@@ -132,7 +133,7 @@ export function ReplayImage({
       ref={picture}
       className="replay-image-empty"
       role="img"
-      aria-label={alt || "No screenshot"}
+      aria-label={alt || t`No screenshot`}
     />
   );
 }

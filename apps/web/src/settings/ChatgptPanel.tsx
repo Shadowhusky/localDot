@@ -2,6 +2,7 @@ import { CHATGPT_DEVICE_CODE_OFF } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { limitName } from "../agent/plan-usage.ts";
 import { resetTime } from "../agent/UsageFooter.tsx";
+import { t } from "../i18n/index.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -21,8 +22,8 @@ import type { ChatgptControls } from "./useChatgpt.ts";
 function checkedAt(value: number | undefined): string {
   const time = value === undefined ? undefined : new Date(value);
   return time && Number.isFinite(time.getTime())
-    ? `Checked ${time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-    : "Not checked yet";
+    ? t`Checked ${time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+    : t`Not checked yet`;
 }
 
 export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: string }) {
@@ -36,56 +37,62 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
   const signingIn = checked && status.state === "signing_in";
   const signedIn = checked && status.state === "signed_in";
   const refused = account.error === CHATGPT_DEVICE_CODE_OFF;
+  const copied = account.notice === t`Sign-in code copied.`;
   const waitReason = account.blocked
-    ? "Paused while this page is hidden"
+    ? t`Paused while this page is hidden`
     : !account.verified
-      ? "Checking the account first"
+      ? t`Checking the account first`
       : account.busy
-        ? "Wait for the current step to finish"
+        ? t`Wait for the current step to finish`
         : undefined;
   // The button that started a step shows it working; the others say why they wait.
   const press = (action: NonNullable<ChatgptControls["busy"]>) =>
     account.busy === action ? { busy: true } : { disabledReason: waitReason };
   const cancelReason =
-    account.blocked || account.busy?.startsWith("cancel_") ? "Cancelling…" : undefined;
+    account.blocked || account.busy?.startsWith("cancel_") ? t`Cancelling…` : undefined;
   return (
     <section id={id} className="settings-chatgpt" aria-labelledby="chatgpt-title">
       <header className="settings-card-head">
         <div>
           <h4 id="chatgpt-title" className="settings-card-title">
-            ChatGPT plan
+            {t`ChatGPT plan`}
           </h4>
           <p className="settings-card-note">
-            The main model runs on the ChatGPT account signed in on this dot. Each of your dots
-            signs in on its own.
+            {t`The main model runs on the ChatGPT account signed in on this dot. Each of your dots signs in on its own.`}
           </p>
         </div>
         <IconButton
           ref={more}
-          label="Account actions"
+          label={t`Account actions`}
           icon="more-horizontal"
           {...triggerProps("menu", menu)}
           onClick={() => setMenu(true)}
         />
-        <Menu open={menu} onClose={() => setMenu(false)} anchor={more} align="end" label="Account">
+        <Menu
+          open={menu}
+          onClose={() => setMenu(false)}
+          anchor={more}
+          align="end"
+          label={t`Account`}
+        >
           <MenuItem
             disabledReason={
               account.busy || account.checking || account.blocked
-                ? "Wait for the current step to finish"
+                ? t`Wait for the current step to finish`
                 : undefined
             }
             onSelect={() => void account.check()}
           >
-            Check account status
+            {t`Check account status`}
           </MenuItem>
           {signedIn && (
             <MenuItem disabledReason={waitReason} onSelect={() => setConfirm("refresh")}>
-              Refresh account
+              {t`Refresh account`}
             </MenuItem>
           )}
           {signedIn && (
             <MenuItem disabledReason={waitReason} onSelect={() => setConfirm("logout")}>
-              Sign out
+              {t`Sign out`}
             </MenuItem>
           )}
         </Menu>
@@ -93,17 +100,17 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
 
       {!status && (
         <p className="settings-note">
-          {account.checking ? "Checking ChatGPT support…" : "Account status is unknown."}
+          {account.checking ? t`Checking ChatGPT support…` : t`Account status is unknown.`}
         </p>
       )}
       {status?.available === false && (
         <p className="settings-note">
-          {status.reason ?? "ChatGPT support is unavailable on this computer."}
+          {status.reason ?? t`ChatGPT support is unavailable on this computer.`}
         </p>
       )}
 
       {status?.available && !signedIn && (
-        <ol className="settings-steps" aria-label="Setup">
+        <ol className="settings-steps" aria-label={t`Setup`}>
           {chatgptSteps(status, account.installWatching).map((step) => (
             <li key={step.id} className="settings-step" data-state={step.state}>
               <StatusGlyph state={step.state} className="settings-step-glyph" />
@@ -117,12 +124,12 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
       )}
       {(install?.state === "downloading" || install?.state === "verifying") && (
         <Progress
-          label="ChatGPT download progress"
+          label={t`ChatGPT download progress`}
           {...(install.state === "downloading" && install.totalBytes !== undefined
             ? {
                 value: install.receivedBytes,
                 max: install.totalBytes,
-                valueText: `${megabytes(install.receivedBytes)} of ${megabytes(install.totalBytes)}`,
+                valueText: t`${megabytes(install.receivedBytes)} of ${megabytes(install.totalBytes)}`,
               }
             : {})}
         />
@@ -130,7 +137,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
       {status?.available && install?.state === "not_installed" && !account.installWatching && (
         <div className="settings-actions">
           <Button variant="primary" {...press("install")} onClick={() => void account.install()}>
-            Install ChatGPT support
+            {t`Install ChatGPT support`}
           </Button>
         </div>
       )}
@@ -139,22 +146,22 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
         install.code !== "unsupported_platform" && (
           <div className="settings-actions">
             <Button {...press("install")} onClick={() => void account.install()}>
-              Try again
+              {t`Try again`}
             </Button>
           </div>
         )}
       {ready && status.sandbox === "failed" && (
         <div className="settings-actions">
           <Button variant="primary" {...press("check")} onClick={() => void account.checkSandbox()}>
-            Check again
+            {t`Check again`}
           </Button>
         </div>
       )}
       {/* Sign-in comes next: it waits in its place while the check runs. */}
       {ready && (status.sandbox === "checking" || status.sandbox === "unchecked") && (
         <div className="settings-actions">
-          <Button variant="primary" disabledReason="Wait for the safety check to finish">
-            Sign in with code
+          <Button variant="primary" disabledReason={t`Wait for the safety check to finish`}>
+            {t`Sign in with code`}
           </Button>
         </div>
       )}
@@ -165,7 +172,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
             disabledReason={cancelReason}
             onClick={() => void account.cancelInstall()}
           >
-            Cancel installation
+            {t`Cancel installation`}
           </Button>
         </div>
       )}
@@ -173,7 +180,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
       {checked && (status.state === "signed_out" || status.state === "expired") && (
         <>
           {status.state === "expired" && (
-            <p className="settings-note">Sign in again, then resume the paused task.</p>
+            <p className="settings-note">{t`Sign in again, then resume the paused task.`}</p>
           )}
           {status.state === "signed_out" && (
             // The same line in the same place when a code start is refused, so nothing moves; the
@@ -190,7 +197,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
           )}
           <div className="settings-actions">
             <Button variant="primary" {...press("login")} onClick={() => void account.login()}>
-              {status.state === "expired" ? "Sign in again" : "Sign in with code"}
+              {status.state === "expired" ? t`Sign in again` : t`Sign in with code`}
             </Button>
             {account.canCancelLogin && (
               <Button
@@ -198,7 +205,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
                 disabledReason={cancelReason}
                 onClick={() => void account.cancelLogin()}
               >
-                Cancel sign-in
+                {t`Cancel sign-in`}
               </Button>
             )}
           </div>
@@ -209,10 +216,10 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
       <div className="settings-signin" hidden={!signingIn}>
         <p className="settings-note">
           {account.expired
-            ? "The code ran out of time. Cancel, then sign in again."
-            : "Enter this code on the sign-in page. This panel waits for your account."}
+            ? t`The code ran out of time. Cancel, then sign in again.`
+            : t`Enter this code on the sign-in page. This panel waits for your account.`}
         </p>
-        <Field label="Sign-in code">
+        <Field label={t`Sign-in code`}>
           <TextField
             ref={account.code}
             code
@@ -221,29 +228,29 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
             spellCheck={false}
             suffix={
               <IconButton
-                label={account.notice === "Sign-in code copied." ? "Code copied" : "Copy code"}
-                icon={account.notice === "Sign-in code copied." ? "check" : "copy"}
+                label={copied ? t`Code copied` : t`Copy code`}
+                icon={copied ? "check" : "copy"}
                 size={28}
                 disabledReason={
-                  account.expired || !account.materialReady ? "No code to copy yet" : waitReason
+                  account.expired || !account.materialReady ? t`No code to copy yet` : waitReason
                 }
                 onClick={() => void account.copyCode()}
               />
             }
           />
         </Field>
-        <Field label="Sign-in page">
+        <Field label={t`Sign-in page`}>
           <TextField ref={account.link} readOnly autoComplete="off" spellCheck={false} />
         </Field>
         <div className="settings-actions">
           <Button
             variant="primary"
             disabledReason={
-              account.expired || !account.materialReady ? "The code isn't ready" : waitReason
+              account.expired || !account.materialReady ? t`The code isn't ready` : waitReason
             }
             onClick={account.openPage}
           >
-            Open sign-in page
+            {t`Open sign-in page`}
           </Button>
           {signingIn && account.canCancelLogin && (
             <Button
@@ -251,7 +258,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
               disabledReason={cancelReason}
               onClick={() => void account.cancelLogin()}
             >
-              Cancel sign-in
+              {t`Cancel sign-in`}
             </Button>
           )}
         </div>
@@ -261,10 +268,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
 
       <div
         className={
-          account.notice === "Sign-in code copied." &&
-          !account.error &&
-          !account.blocked &&
-          !account.busy?.startsWith("cancel_")
+          copied && !account.error && !account.blocked && !account.busy?.startsWith("cancel_")
             ? "ui-visually-hidden"
             : "settings-messages"
         }
@@ -277,21 +281,16 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
         )}
         {account.busy?.startsWith("cancel_") && (
           <p role="status" className="settings-note">
-            Cancelling and checking where things stand…
+            {t`Cancelling and checking where things stand…`}
           </p>
         )}
         {account.blocked && (
           <p role="status" className="settings-note">
-            Account checks wait while this page is hidden.
+            {t`Account checks wait while this page is hidden.`}
           </p>
         )}
         {account.notice && (
-          <p
-            role="status"
-            className={
-              account.notice === "Sign-in code copied." ? "ui-visually-hidden" : "settings-note"
-            }
-          >
+          <p role="status" className={copied ? "ui-visually-hidden" : "settings-note"}>
             {account.notice}
           </p>
         )}
@@ -301,10 +300,10 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
         open={confirm !== null}
         onClose={() => setConfirm(null)}
         anchor={more}
-        title={confirm === "logout" ? "Sign out of ChatGPT?" : "Refresh this account?"}
-        description="This pauses current ChatGPT work. When the account is ready, press Continue on the computer."
+        title={confirm === "logout" ? t`Sign out of ChatGPT?` : t`Refresh this account?`}
+        description={t`This pauses current ChatGPT work. When the account is ready, press Continue on the computer.`}
       >
-        <Button onClick={() => setConfirm(null)}>Keep account</Button>
+        <Button onClick={() => setConfirm(null)}>{t`Keep account`}</Button>
         <Button
           disabledReason={waitReason}
           onClick={() => {
@@ -313,7 +312,7 @@ export function ChatgptPanel({ account, id }: { account: ChatgptControls; id?: s
             void (action === "logout" ? account.logout() : account.refresh());
           }}
         >
-          {confirm === "logout" ? "Pause work and sign out" : "Pause work and refresh"}
+          {confirm === "logout" ? t`Pause work and sign out` : t`Pause work and refresh`}
         </Button>
       </Dialog>
     </section>
@@ -325,6 +324,7 @@ function SignedIn({ account }: { account: ChatgptControls }) {
   if (!status) return null;
   const email = status.account?.email;
   const plan = status.account?.plan;
+  const signedInAs = email ? t`Signed in as ${email} on this dot` : "";
   return (
     <div className="settings-account">
       <div className="settings-account-row">
@@ -335,11 +335,13 @@ function SignedIn({ account }: { account: ChatgptControls }) {
           <span className="settings-account-email">
             {email ? (
               <MiddleTruncate
-                text={`Signed in as ${email} on this dot`}
-                tail={tailOf(email) + " on this dot".length}
+                text={signedInAs}
+                tail={
+                  tailOf(email) + signedInAs.length - (signedInAs.lastIndexOf(email) + email.length)
+                }
               />
             ) : (
-              "Signed in on this dot"
+              t`Signed in on this dot`
             )}
           </span>
           <span className="settings-note">{checkedAt(status.checkedAt)}</span>
@@ -348,11 +350,11 @@ function SignedIn({ account }: { account: ChatgptControls }) {
       </div>
       {(["primary", "secondary"] as const).map((name) => {
         const window = status.usage?.windows.find((row) => row.window === name);
-        const fallback = name === "primary" ? "Short limit" : "Long limit";
+        const fallback = name === "primary" ? t`Short limit` : t`Long limit`;
         if (!window)
           return (
             <p key={name} className="settings-note">
-              {fallback}: not reported
+              {name === "primary" ? t`Short limit: not reported` : t`Long limit: not reported`}
             </p>
           );
         const reset = resetTime(window.resetsAt);
@@ -361,16 +363,16 @@ function SignedIn({ account }: { account: ChatgptControls }) {
             key={name}
             label={[limitName(window.windowMinutes, fallback), reset].filter(Boolean).join(" · ")}
             value={window.usedPercent}
-            valueText={`${Math.round(window.usedPercent)}% used`}
+            valueText={t`${Math.round(window.usedPercent)}% used`}
           />
         );
       })}
       <p className="settings-note">
         {status.usage
           ? status.usage.limitReached
-            ? "The plan's limit is reached. Wait for it to reset, then resume your task."
-            : "No limit reached at the last check."
-          : "The plan's limits aren't known yet."}
+            ? t`The plan's limit is reached. Wait for it to reset, then resume your task.`
+            : t`No limit reached at the last check.`
+          : t`The plan's limits aren't known yet.`}
       </p>
     </div>
   );

@@ -34,6 +34,7 @@ import {
 } from "../agent/conversation-list.ts";
 import { searchConversations } from "../agent/conversation-search.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
+import { t, tr } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
@@ -61,6 +62,15 @@ import { LiveDeck } from "./LiveDeck.tsx";
 import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
 import "./rails.css";
+
+const GROUP_NAMES: Record<ConversationGroup["label"], string> = {
+  Results: tr("Results"),
+  Pinned: tr("Pinned"),
+  Active: tr("Active"),
+  Today: tr("Today"),
+  Yesterday: tr("Yesterday"),
+  Earlier: tr("Earlier"),
+};
 
 export interface ConversationListProps {
   api: ApiClient;
@@ -120,7 +130,7 @@ export function ConversationList({
     if (name.trim() === was) return;
     const body = RenameConversation.safeParse({ title: name.trim() || null });
     if (!body.success) {
-      setRenameError("Use one line of text for the name.");
+      setRenameError(t`Use one line of text for the name.`);
       return;
     }
     try {
@@ -128,7 +138,7 @@ export function ConversationList({
       setRenameError(null);
       recent.retry();
     } catch {
-      setRenameError("The new name couldn't be saved. Try again.");
+      setRenameError(t`The new name couldn't be saved. Try again.`);
     }
   };
   // The archived conversations take the list's place until the user goes back.
@@ -263,8 +273,8 @@ export function ConversationList({
       announce(
         "conversation",
         failure instanceof ApiError && failure.status === 409
-          ? "This conversation can't be archived while its task is under way."
-          : "That change couldn't be saved. Try again.",
+          ? t`This conversation can't be archived while its task is under way.`
+          : t`That change couldn't be saved. Try again.`,
         "assertive",
       ),
     );
@@ -297,12 +307,12 @@ export function ConversationList({
   const swipes = (row: ConversationRow) => {
     const pinned = !!row.entry.pinned;
     const pin: SwipeAction = {
-      label: pinned ? "Unpin" : "Pin",
+      label: pinned ? t`Unpin` : t`Pin`,
       icon: pinned ? "pin-off" : "pin",
       onAction: () => void organize(row, { pinned: !pinned }),
     };
     const more: SwipeAction = {
-      label: "More",
+      label: t`More`,
       icon: "more-horizontal",
       onAction: () => {
         const from = document.getElementById(optionId(row));
@@ -313,13 +323,13 @@ export function ConversationList({
     const file: SwipeAction =
       view === "archived"
         ? {
-            label: "Unarchive",
+            label: t`Unarchive`,
             icon: "archive-restore",
             leaves: true,
             onAction: () => void organize(row, { archived: false }),
           }
         : {
-            label: "Archive",
+            label: t`Archive`,
             icon: "archive",
             leaves: true,
             onAction: () => void organize(row, { archived: true }),
@@ -360,8 +370,8 @@ export function ConversationList({
       <TextField
         size="sm"
         className="conversations-rename"
-        aria-label={`New name for ${row.title}`}
-        placeholder="Automatic name"
+        aria-label={t`New name for ${row.title}`}
+        placeholder={t`Automatic name`}
         maxLength={CONVERSATION_NAME_CHARS}
         autoComplete="off"
         enterKeyHint="done"
@@ -385,38 +395,42 @@ export function ConversationList({
 
   let content: ReactNode;
   if (recent.loading)
-    content = <DotLoader className="conversations-loading" label="Loading your conversations" />;
+    content = <DotLoader className="conversations-loading" label={t`Loading your conversations`} />;
   else if (recent.failed)
     content = (
       <EmptyState
-        title="Conversations couldn't load"
+        title={t`Conversations couldn't load`}
         icon="circle-alert"
         actions={
           <Button size="sm" onClick={recent.retry}>
-            Try again
+            {t`Try again`}
           </Button>
         }
       />
     );
   else if (recent.entries.length === 0 && view === "archived")
-    content = <EmptyState title="Nothing archived" icon="archive" />;
+    content = <EmptyState title={t`Nothing archived`} icon="archive" />;
   else if (recent.entries.length === 0)
     content = (
-      <EmptyState title="No conversations yet" icon="message-circle">
-        Each conversation with dot is kept here.
+      <EmptyState title={t`No conversations yet`} icon="message-circle">
+        {t`Each conversation with dot is kept here.`}
       </EmptyState>
     );
   else if (ordered.length === 0 && live.length === 0 && (found || tagged))
     content = matches.pending ? (
-      <DotLoader className="conversations-loading" label="Searching conversations" />
+      <DotLoader className="conversations-loading" label={t`Searching conversations`} />
     ) : found ? (
-      <EmptyState layout="start" icon="search" title={`No conversations match “${query.trim()}”`} />
+      <EmptyState
+        layout="start"
+        icon="search"
+        title={t`No conversations match “${query.trim()}”`}
+      />
     ) : (
       tagged && (
         <EmptyState
           layout="start"
           icon="tag"
-          title={`No conversations have the ${TAG_NAMES[tagged].toLowerCase()} tag`}
+          title={t`No conversations have the ${TAG_NAMES[tagged].toLowerCase()} tag`}
         />
       )
     );
@@ -427,7 +441,7 @@ export function ConversationList({
         ref={list}
         id={listId}
         role="grid"
-        aria-label="Recent conversations"
+        aria-label={t`Recent conversations`}
         aria-rowcount={ordered.length}
         className="conversations-list"
       >
@@ -446,7 +460,7 @@ export function ConversationList({
                 role="presentation"
                 className="conversations-day"
               >
-                {item.label}
+                {GROUP_NAMES[item.label]}
               </div>
             );
           const id = row.entry.sessionId;
@@ -498,7 +512,7 @@ export function ConversationList({
                     icon="more-horizontal"
                     size={28}
                     className="conversations-more"
-                    label={`Actions for ${row.title}`}
+                    label={t`Actions for ${row.title}`}
                     {...triggerProps("menu", action?.entry.sessionId === id)}
                     onClick={(event) =>
                       openMenu(row, event.currentTarget, event.currentTarget.closest("[role=row]"))
@@ -567,16 +581,16 @@ export function ConversationList({
     >
       {view === "archived" ? (
         <Button variant="quiet" size="sm" icon="chevron-left" onClick={() => setView("recent")}>
-          Recent conversations
+          {t`Recent conversations`}
         </Button>
       ) : (
         <>
           <Button variant="quiet" size="sm" icon="history" onClick={onReplay}>
-            See all in Replay
+            {t`See all in Replay`}
           </Button>
           {recent.archivedCount > 0 && (
             <Button variant="quiet" size="sm" icon="archive" onClick={() => setView("archived")}>
-              Archived ({recent.archivedCount})
+              {t`Archived (${recent.archivedCount})`}
             </Button>
           )}
         </>
@@ -597,13 +611,13 @@ export function ConversationList({
           className="conversations-search"
           prefix={<Icon name="search" />}
           role="combobox"
-          aria-label="Search conversations"
+          aria-label={t`Search conversations`}
           aria-expanded={ordered.length > 0}
           aria-controls={listId}
           aria-autocomplete="list"
           aria-haspopup="grid"
           aria-activedescendant={activeRow ? optionId(activeRow) : undefined}
-          placeholder="Search conversations"
+          placeholder={t`Search conversations`}
           enterKeyHint="go"
           autoComplete="off"
           spellCheck={false}
@@ -622,7 +636,7 @@ export function ConversationList({
             className="conversations-select"
             onClick={() => (selection.selecting ? selection.stop() : selection.start())}
           >
-            {selection.selecting ? "Cancel" : "Select"}
+            {selection.selecting ? t`Cancel` : t`Select`}
           </Button>
         )}
       </div>
@@ -640,7 +654,7 @@ export function ConversationList({
         </p>
       )}
       {tags.length > 0 && (
-        <div className="conversations-tags" role="group" aria-label="Show only a colour tag">
+        <div className="conversations-tags" role="group" aria-label={t`Show only a colour tag`}>
           {tags.map((each) => (
             <Button
               key={each}
@@ -708,7 +722,7 @@ export function ConversationList({
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
-            announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
+            announce("conversation", t`That change couldn't be saved. Try again.`, "assertive"),
           );
         }}
         onDelete={() => setDeleting(action && [action.entry])}
@@ -725,7 +739,7 @@ export function ConversationList({
             if (action) pick(action);
           }}
         >
-          Open conversation
+          {t`Open conversation`}
         </MenuItem>
       </ConversationMenu>
       <DeleteConversationDialog
@@ -764,7 +778,7 @@ export function ConversationsButton(props: Omit<ConversationListProps, "open">) 
         ref={button}
         icon="message-circle"
         size={32}
-        label="Conversations"
+        label={t`Conversations`}
         {...triggerProps("dialog", open)}
         onClick={() => setOpen((was) => !was)}
       />
@@ -774,7 +788,7 @@ export function ConversationsButton(props: Omit<ConversationListProps, "open">) 
         anchor={button}
         side="bottom"
         align="end"
-        label="Conversations"
+        label={t`Conversations`}
         size="lg"
       >
         <ConversationList

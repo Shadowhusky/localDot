@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { isApple, modsOf, routeKey, textEdit, textInputs } from "./manual-keys.ts";
 
 export type PointerMode = "click" | "double" | "right";
@@ -314,7 +315,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
         <textarea
           ref={field}
           className="manual-keyboard"
-          aria-label="Type on the computer"
+          aria-label={t`Type on the computer`}
           aria-description={keysTo}
           rows={1}
           readOnly={!live}
@@ -344,7 +345,7 @@ export const ManualSurface = forwardRef<ManualSurfaceHandle, ManualSurfaceProps>
             const text = event.clipboardData.getData("text/plain");
             if (!props.current.live || !text) return;
             if ([...text].length > PASTE_LIMIT) {
-              props.current.onRefused?.("Paste up to 4,000 characters at a time.");
+              props.current.onRefused?.(t`Paste up to 4,000 characters at a time.`);
               return;
             }
             reset();

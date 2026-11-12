@@ -2,6 +2,8 @@ import type { OverviewTile as TileFacts } from "@localdot/protocol";
 import { type ComponentType, type KeyboardEvent, memo, useCallback, useId } from "react";
 import { type ConversationRow, STATUS_LABEL, whenLabel } from "../agent/conversation-list.ts";
 import { markdownToPlain } from "../agent/markdown.ts";
+import { count } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { ConversationAvatar } from "../shell/ConversationAvatar.tsx";
 import { conversationLabel } from "../shell/SessionRail.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -15,21 +17,21 @@ import type { OverviewDensity, PictureWidth } from "./overview-model.ts";
 // The dot over each tile's picture, as large as the tile allows.
 const DOT_SIZE: Record<OverviewDensity, number> = { s: 28, m: 36, l: 44 };
 
-const WORD: Partial<Record<ConversationRow["status"], string>> = { waiting: "Waiting" };
+const WORD: Partial<Record<ConversationRow["status"], string>> = { waiting: tr("Waiting") };
 
 const NEEDS_WORD = {
-  approval: "Approve",
-  question: "Answer",
-  takeover: "Take over",
-  connection: "Allow",
-  fix: "Fix",
+  approval: tr("Approve"),
+  question: tr("Answer"),
+  takeover: tr("Take over"),
+  connection: tr("Allow"),
+  fix: tr("Fix"),
 } as const;
 
 const STATUS_LINE: Partial<Record<ConversationRow["status"], string>> = {
-  "needs-you": "Waiting for your answer",
-  waiting: "Waits for its turn on the computer",
-  idle: "Ready for your next message",
-  paused: "Paused until you resume it",
+  "needs-you": tr("Waiting for your answer"),
+  waiting: tr("Waits for its turn on the computer"),
+  idle: tr("Ready for your next message"),
+  paused: tr("Paused until you resume it"),
 };
 
 // What a tile says under its name: what dot needs, what it is doing, or how it ended.
@@ -51,12 +53,12 @@ export function tileProgress(
 ): { text: string; done?: number; total?: number } | undefined {
   const plan = facts?.plan;
   if (plan) {
-    const count = `${plan.done} of ${plan.total}`;
-    return { text: plan.current ? `${count} · ${plan.current}` : count, ...plan };
+    const through = t`${plan.done} of ${plan.total}`;
+    return { text: plan.current ? `${through} · ${plan.current}` : through, ...plan };
   }
   const steps = facts?.steps ?? 0;
   if (!steps) return undefined;
-  return { text: row.active ? `Step ${steps}` : `${steps} ${steps === 1 ? "step" : "steps"}` };
+  return { text: row.active ? t`Step ${steps}` : count(steps, "step", "steps") };
 }
 
 export interface TilePictureProps {
@@ -149,13 +151,13 @@ export const OverviewTile = memo(function OverviewTile({
               {onScreen && (
                 <span className="overview-chip" data-kind="on-screen">
                   <span className="overview-lamp" />
-                  {!small && "On screen"}
+                  {!small && t`On screen`}
                 </span>
               )}
               {screen && !small && (
                 <span className="overview-chip">
                   <Icon name={screen === "browser" ? "globe" : "monitor"} size={12} />
-                  {screen === "browser" ? "Browser" : "Desktop"}
+                  {screen === "browser" ? t`Browser` : t`Desktop`}
                 </span>
               )}
             </span>
@@ -188,7 +190,7 @@ export const OverviewTile = memo(function OverviewTile({
                   <span className="overview-progress-text num">{progress.text}</span>
                   {progress.total !== undefined && (
                     <Progress
-                      label="Plan"
+                      label={t`Plan`}
                       value={progress.done ?? 0}
                       max={progress.total}
                       className="overview-progress-bar"

@@ -1,5 +1,6 @@
 import type { NotifyEvent, NotifySettings, QuietHours } from "@localdot/protocol";
 import { useState } from "react";
+import { t } from "../i18n/index.ts";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
@@ -10,7 +11,7 @@ import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
-import { computerNoun, deviceCopy, deviceDetail, EVENT_ROWS } from "./notifications-copy.ts";
+import { deviceCopy, deviceDetail, EVENT_ROWS } from "./notifications-copy.ts";
 import type { NotificationsView } from "./useNotifications.ts";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -22,10 +23,10 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
     return view.failed ? (
       <Group>
         <GroupRow
-          label="Couldn't load notifications"
+          label={t`Couldn't load notifications`}
           trailing={
             <Button size="sm" onClick={view.retry}>
-              Try again
+              {t`Try again`}
             </Button>
           }
         />
@@ -38,18 +39,19 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
     save({ events: { ...s.events, [event]: { ...s.events[event], [which]: on } } });
   const copy = deviceCopy(view.device, view.banner);
   const banners = view.banner !== "none";
-  const noun = computerNoun(view.banner);
+  const mac = view.banner === "mac";
   return (
     <>
       <p className="settings-lede">
-        {banners
-          ? `dot nudges you when it needs you, finishes or fails: on the ${noun} running localDot whenever you aren't looking at localDot there, and on your phone.`
-          : "dot nudges you when it needs you, finishes or fails: on your phone, and in a tab you keep open."}
+        {!banners
+          ? t`dot nudges you when it needs you, finishes or fails: on your phone, and in a tab you keep open.`
+          : mac
+            ? t`dot nudges you when it needs you, finishes or fails: on the Mac running localDot whenever you aren't looking at localDot there, and on your phone.`
+            : t`dot nudges you when it needs you, finishes or fails: on the computer running localDot whenever you aren't looking at localDot there, and on your phone.`}
       </p>
       {!banners && (
-        <Banner icon="monitor" title="No banners on the computer running localDot">
-          It has no screen of its own. Turn on notifications on your phone to hear from dot
-          anywhere.
+        <Banner icon="monitor" title={t`No banners on the computer running localDot`}>
+          {t`It has no screen of its own. Turn on notifications on your phone to hear from dot anywhere.`}
         </Banner>
       )}
       <Group>
@@ -65,7 +67,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
                 busy={view.busy === "device"}
                 onClick={view.turnOn}
               >
-                Turn on
+                {t`Turn on`}
               </Button>
             ) : copy.action === "turn-off" ? (
               <Button
@@ -74,19 +76,19 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
                 busy={view.busy === "device"}
                 onClick={view.turnOff}
               >
-                Turn off
+                {t`Turn off`}
               </Button>
             ) : copy.action === "copy-link" ? (
               <Button size="sm" icon="copy" busy={view.busy === "link"} onClick={view.copyLink}>
-                Copy sign-in link
+                {t`Copy sign-in link`}
               </Button>
             ) : undefined
           }
         >
           {view.link && copy.action === "copy-link" && (
             <Field
-              label="Sign-in link"
-              description="Copy it by hand: touch and hold, then tap Copy. It works once, for one minute."
+              label={t`Sign-in link`}
+              description={t`Copy it by hand: touch and hold, then tap Copy. It works once, for one minute.`}
               className="settings-notify-link"
             >
               <TextField
@@ -104,21 +106,21 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
         {!banners && view.device.kind === "this-mac" && view.tab === "default" && (
           <GroupRow
             leading={<IconTile icon="bell" />}
-            label="Show them from this tab too"
-            detail="Then a click on one opens the task."
+            label={t`Show them from this tab too`}
+            detail={t`Then a click on one opens the task.`}
             trailing={
               <Button size="sm" busy={view.busy === "tab"} onClick={view.allowTab}>
-                Allow
+                {t`Allow`}
               </Button>
             }
           />
         )}
         <GroupRow
           leading={<IconTile icon="check-circle" />}
-          label="Send a test"
+          label={t`Send a test`}
           detail={
             view.busy === "test" ? (
-              "Sending a test…"
+              t`Sending a test…`
             ) : view.result ? (
               <span
                 className="settings-notify-result"
@@ -129,12 +131,12 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
                 {view.result.line}
               </span>
             ) : (
-              `Check notifications on ${view.name.replace(/^This /, "this ")}.`
+              view.testHint
             )
           }
           trailing={
             <Button size="sm" busy={view.busy === "test"} onClick={view.test}>
-              Send
+              {t`Send`}
             </Button>
           }
         />
@@ -142,11 +144,11 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
 
       <div>
         <GroupHead
-          title="Notify me about"
+          title={t`Notify me about`}
           aside={
             <span className="settings-notify-columns" aria-hidden="true">
-              {banners && <span>{view.banner === "mac" ? "Mac" : "Computer"}</span>}
-              <span>Phone</span>
+              {banners && <span>{mac ? "Mac" : t`Computer`}</span>}
+              <span>{t`Phone`}</span>
             </span>
           }
         />
@@ -160,13 +162,17 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
                 <>
                   {banners && (
                     <Switch
-                      label={<VisuallyHidden>{`${row.label} on this ${noun}`}</VisuallyHidden>}
+                      label={
+                        <VisuallyHidden>
+                          {mac ? t`${row.label} on this Mac` : t`${row.label} on this computer`}
+                        </VisuallyHidden>
+                      }
                       checked={s.events[row.event].mac}
                       onCheckedChange={(on) => channel(row.event, "mac", on)}
                     />
                   )}
                   <Switch
-                    label={<VisuallyHidden>{`${row.label} on phones`}</VisuallyHidden>}
+                    label={<VisuallyHidden>{t`${row.label} on phones`}</VisuallyHidden>}
                     checked={s.events[row.event].phone}
                     onCheckedChange={(on) => channel(row.event, "phone", on)}
                   />
@@ -181,8 +187,12 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
         <Group>
           <Switch
             className="ui-group-row"
-            label="Quiet hours"
-            description={`On your ${noun}'s clock. Done, Failed and routine results wait in localDot.`}
+            label={t`Quiet hours`}
+            description={
+              mac
+                ? t`On your Mac's clock. Done, Failed and routine results wait in localDot.`
+                : t`On your computer's clock. Done, Failed and routine results wait in localDot.`
+            }
             checked={s.quietHours.enabled}
             onCheckedChange={(enabled) => save({ quietHours: { ...s.quietHours, enabled } })}
           />
@@ -190,8 +200,8 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
             <QuietTimes value={s.quietHours} onChange={(quietHours) => save({ quietHours })} />
             <Switch
               className="ui-group-row"
-              label="Let “Needs you” through"
-              description="Questions and approvals still reach you."
+              label={t`Let “Needs you” through`}
+              description={t`Questions and approvals still reach you.`}
               checked={s.quietHours.allowNeedsYou}
               onCheckedChange={(allowNeedsYou) =>
                 save({ quietHours: { ...s.quietHours, allowNeedsYou } })
@@ -205,22 +215,24 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
         <Group>
           <Switch
             className="ui-group-row"
-            label="Show task text"
+            label={t`Show task text`}
             description={
-              banners
-                ? `Off: phones show only “dot needs you”. Your ${noun} always shows the task's title.`
-                : "Off: phones show only “dot needs you”."
+              !banners
+                ? t`Off: phones show only “dot needs you”.`
+                : mac
+                  ? t`Off: phones show only “dot needs you”. Your Mac always shows the task's title.`
+                  : t`Off: phones show only “dot needs you”. Your computer always shows the task's title.`
             }
             checked={s.showTaskText}
             onCheckedChange={(showTaskText) => save({ showTaskText })}
           />
         </Group>
-        <GroupNote>What dot writes never goes into a notification.</GroupNote>
+        <GroupNote>{t`What dot writes never goes into a notification.`}</GroupNote>
       </div>
 
       {view.devices.length > 0 && (
         <div>
-          <GroupHead title="Phones" />
+          <GroupHead title={t`Phones`} />
           <Group>
             {view.devices.map((device) => (
               <GroupRow
@@ -228,7 +240,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
                 leading={<IconTile icon="smartphone" />}
                 label={
                   view.device?.kind === "on" && view.device.id === device.id
-                    ? `${device.label} (this device)`
+                    ? t`${device.label} (this device)`
                     : device.label
                 }
                 detail={deviceDetail(device)}
@@ -236,11 +248,11 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
                   <Button
                     size="sm"
                     variant="quiet"
-                    aria-label={`Remove ${device.label}`}
+                    aria-label={t`Remove ${device.label}`}
                     busy={view.removing === device.id}
                     onClick={() => view.remove(device.id)}
                   >
-                    Remove
+                    {t`Remove`}
                   </Button>
                 }
               />
@@ -259,7 +271,7 @@ function QuietTimes({ value, onChange }: { value: QuietHours; onChange(next: Qui
     if (time === value[which]) return setError(null);
     const other = which === "start" ? value.end : value.start;
     if (!TIME.test(time) || time === other) {
-      setError({ which, text: time ? "Pick two different times." : "Pick a time." });
+      setError({ which, text: time ? t`Pick two different times.` : t`Pick a time.` });
       return;
     }
     setError(null);
@@ -268,7 +280,7 @@ function QuietTimes({ value, onChange }: { value: QuietHours; onChange(next: Qui
   return (["start", "end"] as const).map((which) => (
     <Field
       key={which}
-      label={which === "start" ? "From" : "To"}
+      label={which === "start" ? t`From` : t`To`}
       inline
       className="ui-group-row"
       error={error?.which === which ? error.text : undefined}

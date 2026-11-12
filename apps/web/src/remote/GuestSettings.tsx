@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { Group, GroupRow } from "../ui/Group.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 import { type Guest, guestModelName } from "./guest.ts";
@@ -20,39 +21,39 @@ export function GuestSettingsSheet({
     <Sheet
       open={open}
       onClose={onClose}
-      title="Chat settings"
-      description={`Shared with you as ${grant.label}. The owner manages this computer and its saved keys.`}
+      title={t`Chat settings`}
+      description={t`Shared with you as ${grant.label}. The owner manages this computer and its saved keys.`}
       detents={["fit"]}
       className="guest-settings-sheet"
     >
       <Group className="guest-settings">
         <GroupRow
-          label="Model"
-          detail={grant.chooseModel ? "Change it from the message box." : undefined}
+          label={t`Model`}
+          detail={grant.chooseModel ? t`Change it from the message box.` : undefined}
           trailing={guestModelName(grant, grant.model)}
         />
         <GroupRow
-          label="Tasks"
+          label={t`Tasks`}
           trailing={
             grant.maxTasks === null
-              ? `${grant.tasks} used`
-              : `${grant.tasks} of ${grant.maxTasks} used`
+              ? t`${grant.tasks} used`
+              : t`${grant.tasks} of ${grant.maxTasks} used`
           }
         />
         <GroupRow
-          label="Budget for each task"
-          detail="Tasks on a subscription plan follow the plan's allowance."
+          label={t`Budget for each task`}
+          detail={t`Tasks on a subscription plan follow the plan's allowance.`}
           trailing={money(grant.taskBudgetUSD)}
         />
         <GroupRow
-          label="Access ends"
+          label={t`Access ends`}
           trailing={
             grant.expiresAt
               ? new Date(grant.expiresAt).toLocaleString(undefined, {
                   dateStyle: "medium",
                   timeStyle: "short",
                 })
-              : "When the owner ends it"
+              : t`When the owner ends it`
           }
         />
       </Group>

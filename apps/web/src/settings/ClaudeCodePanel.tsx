@@ -1,3 +1,4 @@
+import { t, tr } from "../i18n/index.ts";
 import { CommandChip } from "../shell/CommandChip.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -13,13 +14,13 @@ import type { ClaudeCodeControls } from "./useClaudeCode.ts";
 const ACCOUNTS = [
   {
     value: "mac",
-    label: "Use the Claude account signed in on this Mac",
-    description: "The same account as Claude Code in Terminal.",
+    label: tr("Use the Claude account signed in on this Mac"),
+    description: tr("The same account as Claude Code in Terminal."),
   },
   {
     value: "dot",
-    label: "Use a separate Claude account for this dot",
-    description: "You sign in to it once for this dot. Your other dots don't use it.",
+    label: tr("Use a separate Claude account for this dot"),
+    description: tr("You sign in to it once for this dot. Your other dots don't use it."),
   },
 ] as const;
 
@@ -45,28 +46,28 @@ export function ClaudeCodePanel({
         <header className="settings-card-head">
           <div>
             <h4 id="claude-code-title" className="settings-card-title">
-              Claude Code (your plan)
+              {t`Claude Code (your plan)`}
             </h4>
             <p className="settings-card-note">
-              dot works through the Claude Code on this Mac, with your own plan.
+              {t`dot works through the Claude Code on this Mac, with your own plan.`}
             </p>
           </div>
         </header>
       )}
       {installed && (
         <RadioCards
-          aria-label="Claude account"
+          aria-label={t`Claude account`}
           value={status.separate ? "dot" : "mac"}
           onValueChange={(value) => {
             if (!claude.checking) void claude.chooseAccount(value === "dot");
           }}
           options={ACCOUNTS.map((option) => ({
             ...option,
-            ...(claude.checking ? { disabledReason: "Checking Claude Code…" } : {}),
+            ...(claude.checking ? { disabledReason: t`Checking Claude Code…` } : {}),
           }))}
         />
       )}
-      <ol className="settings-steps" aria-label="Setup">
+      <ol className="settings-steps" aria-label={t`Setup`}>
         {claudeCodeSteps(status, claude.checking).map((step) => (
           <li key={step.id} className="settings-step" data-state={step.state}>
             <StatusGlyph state={step.state} className="settings-step-glyph" />
@@ -86,8 +87,8 @@ export function ClaudeCodePanel({
       {ready && (
         <p className="settings-note">
           {status.separate
-            ? "Uses this dot's own Claude account and its plan's limits. localDot never sees your Claude sign-in."
-            : "Uses your plan's limits. localDot never sees your Claude sign-in."}
+            ? t`Uses this dot's own Claude account and its plan's limits. localDot never sees your Claude sign-in.`
+            : t`Uses your plan's limits. localDot never sees your Claude sign-in.`}
         </p>
       )}
       <div className="settings-actions">
@@ -96,7 +97,7 @@ export function ClaudeCodePanel({
           busy={claude.checking}
           onClick={() => void claude.check()}
         >
-          Check again
+          {t`Check again`}
         </Button>
       </div>
       {claude.error && (

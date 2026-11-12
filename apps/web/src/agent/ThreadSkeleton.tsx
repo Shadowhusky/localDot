@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 
 // Your messages at the right and dot's at the left, at the heights and widths messages take.
@@ -17,7 +18,7 @@ const BONES = [
 export function ThreadSkeleton() {
   return (
     <div className="thread-skeleton" role="status">
-      <VisuallyHidden>Loading the conversation</VisuallyHidden>
+      <VisuallyHidden>{t`Loading the conversation`}</VisuallyHidden>
       {BONES.map(([side, size, width]) => (
         <span
           key={width}

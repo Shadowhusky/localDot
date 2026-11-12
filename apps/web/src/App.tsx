@@ -104,6 +104,7 @@ import { hasExported } from "./export/export-estimate.ts";
 import { createHostExports } from "./export/host-exports.ts";
 import { createExportJob } from "./export/job.ts";
 import { useExportToast } from "./export/useExportToast.tsx";
+import { t } from "./i18n/index.ts";
 import { JEV_KEY } from "./keys/binding.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import { type KeyRecord, vaultLocked } from "./keys/keys-api.ts";
@@ -177,7 +178,7 @@ import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import type { ReportAbout, ReportControl } from "./settings/reports-api.ts";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { loadKeyModels } from "./settings/settings-api.ts";
-import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
+import { NAME_PROBLEM, needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { listenForSettingsLinks, type SettingsTip } from "./settings/settings-link.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
 import { useAppUpdate } from "./settings/useAppUpdate.ts";
@@ -288,6 +289,7 @@ import { useHandler } from "./ui/useHandler.ts";
 import { WorkView } from "./work/WorkView.tsx";
 import { workCard } from "./work/work-view.ts";
 import "./app.css";
+import { personaName } from "./dot/persona-words.ts";
 import { GuestSettingsSheet } from "./remote/GuestSettings.tsx";
 import {
   type Guest,
@@ -331,12 +333,12 @@ const LIST_DETENTS = ["medium", "large"] as const;
 // A chosen conversation that never comes on show once the daemon has taken the choice (another
 // task holds the computer) stops waiting.
 const SWITCH_MAX_MS = 3000;
-const ALREADY_NEW = "This is a new conversation";
-const NEW_TITLE = "New conversation";
+const ALREADY_NEW = t`This is a new conversation`;
+const NEW_TITLE = t`New conversation`;
 const NO_SESSIONS: readonly string[] = [];
-const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
-const CONFIRMING_LINE = "Checking that your last input reached the computer…";
-const SLOW_LINE = "This is taking longer than usual. Stop me if it looks stuck.";
+const PHONE_CONTROL_LINE = t`Tap to click, drag to scroll. Hand back when you're done.`;
+const CONFIRMING_LINE = t`Checking that your last input reached the computer…`;
+const SLOW_LINE = t`This is taking longer than usual. Stop me if it looks stuck.`;
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -475,8 +477,8 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 
 // How long a sent message shows dot thinking with no word from the task before the real status returns.
 const SENDING_HOLD_MS = 20_000;
-const FIXED_MODEL = "This link sets the model";
-const THINKING_LINE = "Thinking…";
+const FIXED_MODEL = t`This link sets the model`;
+const THINKING_LINE = t`Thinking…`;
 
 // A shared link opens the same app, with the link's limits in front of everything it asks for.
 function GuestTheatre({ api }: { api: ApiClient }) {
@@ -1032,12 +1034,12 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const barMore = useMemo(
     () =>
       !sheets && (
-        <RowMenu label="More" size={32}>
+        <RowMenu label={t`More`} size={32}>
           <MenuItem icon="search" kbd={["Mod", "K"]} onSelect={() => openPalette("actions")}>
-            Search actions
+            {t`Search actions`}
           </MenuItem>
           <MenuItem icon="repeat" onSelect={() => showRoutines.current()}>
-            Routines
+            {t`Routines`}
           </MenuItem>
           <MenuItem icon="layout-grid" onSelect={() => switchViewNow.current()}>
             {switchViewLabel(viewStyle.value)}
@@ -1045,10 +1047,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           <MenuSeparator />
           <MenuItem
             icon="stop"
-            disabledReason={stopAll.running ? "Stopping…" : undefined}
+            disabledReason={stopAll.running ? t`Stopping…` : undefined}
             onSelect={() => void stopAll.run()}
           >
-            Stop everything
+            {t`Stop everything`}
           </MenuItem>
         </RowMenu>
       ),
@@ -1143,7 +1145,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         : undefined,
     [api, askCell, guest],
   );
-  const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
+  const askReason = controls.canAnswer ? undefined : t`Check the current task before answering.`;
   // While dot waits on the answer, the stage keeps its ring on each field a secret goes into.
   const askMarks = useMemo<readonly FieldMark[] | undefined>(
     () =>
@@ -1243,7 +1245,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       .then((messages) => giveBack(id, messages))
       .catch(() => {
         showToast({
-          title: "Couldn't confirm Stop. Check the task and try again.",
+          title: t`Couldn't confirm Stop. Check the task and try again.`,
           tone: "danger",
         });
       })
@@ -1416,9 +1418,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   // The daemon refuses an Update in these cases too; the button says so before it is pressed.
   const updateWait =
     agent.snapshot?.holder === true || yours
-      ? "Hand back the computer first"
+      ? t`Hand back the computer first`
       : task && task.phase !== "finished"
-        ? "Wait for dot to finish"
+        ? t`Wait for dot to finish`
         : undefined;
   const appUpdate = useAppUpdate(api, hud.phase === "live" && !updateWait, () => {
     settings.show();
@@ -1486,7 +1488,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const stopped = stopNotice(controls.stopStatus);
   const stopNote = stopped ? { line: stopped.title, details: stopped.details } : undefined;
   const sheetStopControl = sheetStop && {
-    label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
+    label: sheetStop.kind === "stop" ? t`Shut down` : sheetStop.busy ? t`Stopping…` : t`Stop`,
     task: sheetStop.kind === "stop-task",
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
@@ -1629,7 +1631,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       });
   const chosenKey = mainApp
     ? (mainApp === "chatgpt" ? settings.chatgpt.canStart : settings.claudeCode.canStart)
-      ? "Signed in"
+      ? t`Signed in`
       : null
     : mainProvider && mainChoice?.key && keys.keys.some((key) => key.id === mainChoice.key)
       ? mainChoice.key
@@ -1642,8 +1644,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     model: mainChoice
       ? `${mainProvider?.name ?? (mainApp === "claude-code" ? "Claude Code" : "ChatGPT")} · ${modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model}`
       : null,
-    permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? "Your own choices") : null,
-    persona: settings.saved?.persona ? personaOf(settings.saved.persona).name : null,
+    permissions: savedAutonomy ? (presetOf(savedAutonomy)?.label ?? t`Your own choices`) : null,
+    persona: settings.saved?.persona ? personaName(personaOf(settings.saved.persona).id) : null,
     computer: !!cell || listed.length > 0,
   });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
@@ -1735,13 +1737,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     setModelSaving(null);
     if (!saved) {
       showToast({
-        title: `Couldn't switch to ${option.name}`,
-        description: "Try again.",
+        title: t`Couldn't switch to ${option.name}`,
+        description: t`Try again.`,
         tone: "danger",
       });
       return;
     }
-    announce("model", `dot uses ${option.name} from your next message.`);
+    announce("model", t`dot uses ${option.name} from your next message.`);
   });
   const currentModel = modelSaving?.id ?? (taskChoice ? optionId(taskChoice) : undefined);
   const modelMenu = useMemo(
@@ -1782,7 +1784,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           name={modelLabel}
           next={modelNext}
           disabledReason={
-            modelSaving ? "Saving…" : guest && !guest.grant.chooseModel ? FIXED_MODEL : undefined
+            modelSaving ? t`Saving…` : guest && !guest.grant.chooseModel ? FIXED_MODEL : undefined
           }
           onPeek={guest ? undefined : browseAccounts}
           onManage={guest ? undefined : showModels}
@@ -1793,7 +1795,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const permissionMode = settings.saved?.permissionMode ?? "custom";
   const choosePermissions = useHandler((mode: typeof permissionMode) => {
     void settings.choosePermissions(mode).then((saved) => {
-      if (!saved) showToast({ title: "Couldn't save permissions", tone: "danger" });
+      if (!saved) showToast({ title: t`Couldn't save permissions`, tone: "danger" });
     });
   });
   const permissionChip = useMemo(
@@ -1814,7 +1816,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         ? {
             kind: "stop" as const,
             run: taskStop,
-            disabledReason: stoppingRun ? "Stopping…" : undefined,
+            disabledReason: stoppingRun ? t`Stopping…` : undefined,
           }
         : undefined,
     [stoppable, taskStop, stoppingRun],
@@ -1823,11 +1825,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const views: SegmentItem[] = [
     {
       value: "chat",
-      label: "Chat",
+      label: t`Chat`,
       attention: shownView !== "chat" && !!agent.model.pendingAsk,
     },
     ...(phone ? [] : [{ value: "activity", label: PANEL_NAME }]),
-    ...(phone ? [] : [{ value: "routines", label: "Routines" }]),
+    ...(phone ? [] : [{ value: "routines", label: t`Routines` }]),
   ];
   showRoutines.current = () => {
     if (replayId) selectReplay(null);
@@ -2171,7 +2173,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   });
   const confirming = agent.snapshot?.manualControl === "unconfirmed";
   const handBack = useHandBack({ takeover, controls, drained: manual.drained });
-  const inputBlocked = manualLive ? undefined : "Wait for the computer to be ready";
+  const inputBlocked = manualLive ? undefined : t`Wait for the computer to be ready`;
   // A paused computer keeps its last picture, with no curtain, so in Chat a notice offers its Resume.
   const pausedNotice = stack && level < 2 && appStatus.computer === "frozen";
   const noticed = curtain.up || pausedNotice;
@@ -2367,7 +2369,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     phone: sheets,
     sessionId: agent.sessionId ?? null,
     stop: {
-      reason: stopAction?.disabledReason ?? (stopAction ? undefined : "Nothing is running"),
+      reason: stopAction?.disabledReason ?? (stopAction ? undefined : t`Nothing is running`),
       run: taskStop,
     },
     continue: safety.canResume
@@ -2375,17 +2377,17 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       : agent.interrupted && !controls.fenced
         ? {
             reason:
-              cell?.state === "ready" && !cell.paused ? undefined : "Turn on your computer first",
+              cell?.state === "ready" && !cell.paused ? undefined : t`Turn on your computer first`,
             run: () => void carryOn(),
           }
         : agent.model.state?.state === "idle" && agent.model.state.reason === STALL.actionLimit
           ? { run: () => void continueTask() }
           : controls.canResumeTask
             ? { run: () => void (modelDiffers && recoveryWait ? carryOn() : controls.resume()) }
-            : { reason: "Nothing is paused", run: nothing },
-    take: { reason: yours ? "You have the computer" : takeBlocked, run: take },
+            : { reason: t`Nothing is paused`, run: nothing },
+    take: { reason: yours ? t`You have the computer` : takeBlocked, run: take },
     handBack: {
-      reason: yours ? handBack.slot.reason : "dot has the computer",
+      reason: yours ? handBack.slot.reason : t`dot has the computer`,
       run: () => void handBack.run(),
     },
     research: researchWait(agent),
@@ -2404,7 +2406,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       },
     },
     replay: {
-      reason: hasRecordings ? undefined : "No recordings yet",
+      reason: hasRecordings ? undefined : t`No recordings yet`,
       run: () =>
         selectReplay(
           agent.sessionId && (agent.model.ended || task?.phase === "finished")
@@ -2413,20 +2415,20 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         ),
     },
     watch: {
-      reason: replayId ? undefined : "You're watching already",
+      reason: replayId ? undefined : t`You're watching already`,
       run: () => selectReplay(null),
     },
     overview: {
-      reason: overviewShown ? "The overview is on show already" : undefined,
+      reason: overviewShown ? t`The overview is on show already` : undefined,
       run: openOverview,
     },
     models: {
       groups: modelChoices,
       current: currentModel,
       reason: !mainChoice
-        ? "Choose a model in Settings first"
+        ? t`Choose a model in Settings first`
         : modelSaving
-          ? "Saving…"
+          ? t`Saving…`
           : undefined,
       choose: chooseModel,
     },
@@ -2438,21 +2440,22 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     refreshUsage: planUsage.refresh,
     report: (trigger, title) =>
       report.start(trigger, {
-        title: title ?? (agent.sessionId ? "This task" : "localDot"),
+        title: title ?? (agent.sessionId ? t`This task` : "localDot"),
         context: agent.sessionId
           ? { kind: "task", sessionId: agent.sessionId }
           : { kind: "general" },
       }),
     view: showView,
     files: {
-      reason: agent.model.results.length || agent.model.changes.length ? undefined : "No files yet",
+      reason:
+        agent.model.results.length || agent.model.changes.length ? undefined : t`No files yet`,
       run: () => {
         showView("activity");
         showActivityTab("files");
       },
     },
     previews: {
-      reason: agent.sessionId ? undefined : "Start a task first",
+      reason: agent.sessionId ? undefined : t`Start a task first`,
       run: () => {
         showView("activity");
         showActivityTab("previews");
@@ -2461,14 +2464,14 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     chatPanel: sheets ? undefined : { shown: chatVisible, toggle: toggleChat },
     fullScreen: {
       on: stack ? level === 2 : fullScreen.on,
-      reason: curtain.up || replayId ? "Turn on your computer first" : undefined,
+      reason: curtain.up || replayId ? t`Turn on your computer first` : undefined,
       run: stack ? openComputer : fullScreen.on ? fullScreen.exit : fullScreen.enter,
     },
     settings: (trigger, section) => goToSettings(trigger, section),
     appearance,
     viewStyle: { label: switchViewLabel(viewStyle.value), run: () => switchViewNow.current() },
     otherDots,
-    stopAll: { reason: stopAll.running ? "Stopping…" : undefined, run: () => void stopAll.run() },
+    stopAll: { reason: stopAll.running ? t`Stopping…` : undefined, run: () => void stopAll.run() },
     newRoutine: (trigger) => newRoutine(trigger ?? undefined),
     shortcuts: () => setPalette("shortcuts"),
   });
@@ -2635,7 +2638,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const phoneBand = (
     <NarratorBand
       // dot's question is on show in the thread, nothing in it hidden; the foot says whose move it is.
-      line={askDraft && narration === asked ? "Your call." : footLine}
+      line={askDraft && narration === asked ? t`Your call.` : footLine}
       speaker={bandSpeaker}
       forUser={hearing || sentThinking || !atWork(appStatus.row)}
       showDot={showDot.value}
@@ -2648,7 +2651,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       dot={
         settings.saved
           ? {
-              label: "Your dot",
+              label: t`Your dot`,
               open: dotMenu,
               onPress: (trigger) => {
                 dotAnchor.current = trigger;
@@ -2682,8 +2685,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     <>
       {takeover && takeover.by !== "user" && (
         <div className="thread-handoff" role="status">
-          <strong>{yours ? "Your turn" : "dot needs your help"}</strong>
-          <p>{takeover.note || "Complete the step on the computer, then choose Hand back."}</p>
+          <strong>{yours ? t`Your turn` : t`dot needs your help`}</strong>
+          <p>{takeover.note || t`Complete the step on the computer, then choose Hand back.`}</p>
           {stack && !yours && (
             <Button
               variant="primary"
@@ -2692,7 +2695,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               disabledReason={takeState.reason}
               onClick={take}
             >
-              Take control
+              {t`Take control`}
             </Button>
           )}
         </div>
@@ -2727,11 +2730,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const usedUp =
     !!guest && guest.grant.maxTasks !== null && guest.grant.tasks >= guest.grant.maxTasks;
   const linkReason = ownerWait
-    ? "Waiting for the owner"
+    ? t`Waiting for the owner`
     : !mine && taskWorking
-      ? "Another task is running"
+      ? t`Another task is running`
       : startsTask && usedUp
-        ? "This link has used all its tasks"
+        ? t`This link has used all its tasks`
         : undefined;
   const composerLink = useMemo(
     () => (guest ? { own: mine, reason: linkReason } : undefined),
@@ -2748,8 +2751,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       {approvalView && !guest && <div className="phone-decision">{approvalView}</div>}
       {ownerWait && (
         <div className="thread-handoff" role="status">
-          <strong>Waiting for the owner</strong>
-          <p>This task needs the computer owner’s input or approval. It has not finished.</p>
+          <strong>{t`Waiting for the owner`}</strong>
+          <p>{t`This task needs the computer owner’s input or approval. It has not finished.`}</p>
         </div>
       )}
     </>
@@ -2773,8 +2776,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       model={
         mainChoice
           ? {
-              label: `${modelNext ? "Next message" : "Model"}: ${modelLabel}`,
-              reason: modelSaving ? "Saving…" : undefined,
+              label: modelNext ? t`Next message: ${modelLabel}` : t`Model: ${modelLabel}`,
+              reason: modelSaving ? t`Saving…` : undefined,
               open: openPhoneModels,
             }
           : undefined
@@ -2889,7 +2892,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 dot={
                   settings.saved
                     ? {
-                        label: `Change your dot, now ${personaOf(taskDot ?? settings.saved.persona).name}`,
+                        label: t`Change your dot, now ${personaName(personaOf(taskDot ?? settings.saved.persona).id)}`,
                         open: choosingDot,
                         onPress: (trigger) => {
                           dotAnchor.current = trigger;
@@ -3105,7 +3108,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             onOpen={localDots.refresh}
             items={[
               {
-                label: "Search actions",
+                label: t`Search actions`,
                 icon: "search",
                 run: () => openPalette("actions"),
               },
@@ -3120,18 +3123,18 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   ]
                 : []),
               {
-                label: "New conversation",
+                label: t`New conversation`,
                 icon: "compose",
                 disabledReason: newConversation.reason,
                 run: newConversation.run,
               },
               {
-                label: "Conversations",
+                label: t`Conversations`,
                 icon: "message-circle",
                 run: () => setConversationsOpen(true),
               },
               {
-                label: "Research a question",
+                label: t`Research a question`,
                 icon: "globe",
                 disabledReason: researchWait(agent),
                 run: requestResearch,
@@ -3139,7 +3142,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               ...(taskWorking && !agent.snapshot?.holder
                 ? [
                     {
-                      label: "Send after this task",
+                      label: t`Send after this task`,
                       icon: "arrow-down" as const,
                       run: sendAfter,
                     },
@@ -3148,9 +3151,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               ...(mainChoice
                 ? [
                     {
-                      label: `${modelNext ? "Next message" : "Model"}: ${modelLabel}`,
+                      label: modelNext ? t`Next message: ${modelLabel}` : t`Model: ${modelLabel}`,
                       icon: "cpu" as const,
-                      disabledReason: modelSaving ? "Saving…" : undefined,
+                      disabledReason: modelSaving ? t`Saving…` : undefined,
                       run: (trigger: HTMLButtonElement) => {
                         settings.browseAccounts();
                         phoneModelsAnchor.current = trigger;
@@ -3160,28 +3163,28 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   ]
                 : []),
               {
-                label: "Overview",
+                label: t`Overview`,
                 icon: "layout-dashboard",
                 startsGroup: true,
                 run: openOverview,
               },
               {
-                label: "Replay",
+                label: t`Replay`,
                 icon: "history",
-                disabledReason: hasRecordings ? undefined : "No recordings yet",
+                disabledReason: hasRecordings ? undefined : t`No recordings yet`,
                 run: () => selectReplay(LIBRARY),
               },
               {
-                label: "Routines",
+                label: t`Routines`,
                 icon: "repeat",
                 run: () => setRoutinesOpen(true),
               },
               {
-                label: "Settings",
+                label: t`Settings`,
                 icon: "settings",
                 run: (trigger) => showSettings(trigger),
               },
-              { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+              { label: t`Keys`, icon: "key-round", run: (trigger) => showKeys(trigger) },
               {
                 label: switchViewLabel(viewStyle.value),
                 icon: "layout-grid",
@@ -3191,36 +3194,36 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 ? localDots.dots.filter((dot) => !dot.self)
                 : []
               ).map((dot, index) => ({
-                label: `Switch to ${dot.name}`,
+                label: t`Switch to ${dot.name}`,
                 icon: "monitor" as const,
                 startsGroup: index === 0,
                 run: () => switchToDot(localDots, dot),
               })),
               ...otherLocalDots.list.map((link, index) => ({
-                label: `Switch to ${link.name}`,
+                label: t`Switch to ${link.name}`,
                 icon: "monitor" as const,
                 startsGroup: index === 0,
                 run: () => otherLocalDots.open(link.url),
               })),
               {
-                label: mobileScreen.minimized ? "Show screen" : "Minimize screen",
+                label: mobileScreen.minimized ? t`Show screen` : t`Minimize screen`,
                 icon: mobileScreen.minimized ? "monitor" : "chevron-up",
                 run: () => mobileScreen.setMinimized(!mobileScreen.minimized),
               },
               {
-                label: "Full screen",
+                label: t`Full screen`,
                 icon: "expand",
-                disabledReason: curtain.up || replayId ? "Turn on your computer first" : undefined,
+                disabledReason: curtain.up || replayId ? t`Turn on your computer first` : undefined,
                 run: () => {
                   mobileScreen.setMinimized(false);
                   fullScreen.enter();
                 },
               },
               {
-                label: "Stop everything",
+                label: t`Stop everything`,
                 icon: "stop",
                 startsGroup: true,
-                disabledReason: stopAll.running ? "Stopping…" : undefined,
+                disabledReason: stopAll.running ? t`Stopping…` : undefined,
                 run: () => void stopAll.run(),
               },
             ]}
@@ -3333,7 +3336,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                     run: controls.resume,
                     reason: controls.canResumeTask
                       ? undefined
-                      : "The task can't continue right now.",
+                      : t`The task can't continue right now.`,
                   },
                   computer: {
                     action: computerAction,
@@ -3355,8 +3358,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 computer={
                   computerAction && computerAction.kind !== "stop"
                     ? {
-                        label: computerAction.kind === "resume" ? "Resume" : "Turn on",
-                        reason: computerAction.enabled ? undefined : "Wait a moment",
+                        label: computerAction.kind === "resume" ? t`Resume` : t`Turn on`,
+                        reason: computerAction.enabled ? undefined : t`Wait a moment`,
                         run: () => onComputer[computerAction.kind](),
                       }
                     : undefined
@@ -3371,7 +3374,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   }
                 }}
                 onResumeSelected={modelDiffers && recoveryWait ? carryOn : undefined}
-                resumeBlocked={modelSaving ? "Saving the selected model…" : undefined}
+                resumeBlocked={modelSaving ? t`Saving the selected model…` : undefined}
                 onReport={report.start}
               />
             )}
@@ -3398,11 +3401,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         viewedConversation ? (
           <div className="thread-recovery-actions">
             <Button variant="quiet" onClick={() => setViewedConversation(null)}>
-              Back to current conversation
+              {t`Back to current conversation`}
             </Button>
             {!yours && (
               <Button onClick={() => void choose(viewedConversation.id)}>
-                Continue this conversation
+                {t`Continue this conversation`}
               </Button>
             )}
           </div>
@@ -3424,7 +3427,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             onTaskStarted={startedTask}
             link={composerLink}
             layout={sheets ? "pill" : "card"}
-            placeholder={stack && level === 2 ? "Steer dot" : undefined}
+            placeholder={stack && level === 2 ? t`Steer dot` : undefined}
             waitingOn={dotWait}
             secretField={secretField}
             modelChanged={modelChanged}
@@ -3473,11 +3476,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           onOverview={openOverview}
           onDeleted={conversationList.onDeleted}
           computer={{
-            name: settings.saved?.name || "This computer",
+            name: settings.saved?.name || t`This computer`,
             onOpen: localDots.refresh,
             menu: (
               <ComputerMenuItems
-                name={settings.saved?.name || "This computer"}
+                name={settings.saved?.name || t`This computer`}
                 others={otherDots}
                 onManage={() => goToSettings(null, "dot")}
                 onRoutines={() => setRoutinesOpen(true)}
@@ -3509,12 +3512,12 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           back={
             split
               ? {
-                  label: "Show or hide the list",
+                  label: t`Show or hide the list`,
                   icon: "panel-left",
                   onPress: () => setListHidden((was) => !was),
                 }
               : {
-                  label: "Back to conversations",
+                  label: t`Back to conversations`,
                   icon: "chevron-left",
                   attention: [...needsYou].some((id) => id !== currentTask),
                   onPress: nav.back,
@@ -3529,7 +3532,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         />
       }
       thread={
-        <aside className="phone-thread" aria-label="Conversation">
+        <aside className="phone-thread" aria-label={t`Conversation`}>
           <ErrorBoundary>{chatThread}</ErrorBoundary>
           <ModelMenu
             {...modelMenu}
@@ -3579,10 +3582,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 <Button
                   icon="stop"
                   busy={stopTask.busy}
-                  disabledReason={stopTask.enabled ? undefined : "Wait a moment"}
+                  disabledReason={stopTask.enabled ? undefined : t`Wait a moment`}
                   onClick={taskStop}
                 >
-                  Stop
+                  {t`Stop`}
                 </Button>
               )
             ) : yours ? (
@@ -3644,8 +3647,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             onOpen={openSession}
           />
           {tuck.coach && (
-            <CoachMark anchor={moreButton} title="dot is tucked away" onDone={tuck.coachDone}>
-              Bring it back any time from this menu.
+            <CoachMark anchor={moreButton} title={t`dot is tucked away`} onDone={tuck.coachDone}>
+              {t`Bring it back any time from this menu.`}
             </CoachMark>
           )}
           <Menu
@@ -3654,7 +3657,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             anchor={dotAnchor}
             side="top"
             align="start"
-            label="Your dot"
+            label={t`Your dot`}
           >
             <MenuItem
               icon="smile"
@@ -3663,10 +3666,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 else setChoosingDot(true);
               }}
             >
-              Change dot
+              {t`Change dot`}
             </MenuItem>
             <MenuItem icon="eye-off" onSelect={tuck.hide}>
-              Hide dot
+              {t`Hide dot`}
             </MenuItem>
           </Menu>
           <LookChooser
@@ -3674,7 +3677,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             anchor={dotAnchor}
             onChange={(entry, look) => {
               void organizeConversation(api, entry.sessionId, { look }).catch(() =>
-                showToast({ title: "That change couldn't be saved", tone: "danger" }),
+                showToast({ title: t`That change couldn't be saved`, tone: "danger" }),
               );
             }}
             onClose={() => setDressing(null)}
@@ -3695,7 +3698,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                         readConversationsAgain(api);
                         session.check();
                       },
-                      () => showToast({ title: "The new name couldn't be saved", tone: "danger" }),
+                      () => showToast({ title: t`The new name couldn't be saved`, tone: "danger" }),
                     );
                   }
                 : undefined
@@ -3707,9 +3710,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               ...(canReplay
                 ? [
                     {
-                      label: "Replay",
+                      label: t`Replay`,
                       icon: "history" as const,
-                      disabledReason: hasRecordings ? undefined : "No recordings yet",
+                      disabledReason: hasRecordings ? undefined : t`No recordings yet`,
                       run: () => selectReplay(replayTarget),
                     },
                   ]
@@ -3717,7 +3720,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               ...(guest?.grant.settings
                 ? [
                     {
-                      label: "Chat settings",
+                      label: t`Chat settings`,
                       icon: "settings" as const,
                       run: () => setGuestSettings(true),
                     },
@@ -3726,10 +3729,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               ...(mainChoice
                 ? [
                     {
-                      label: "Model",
+                      label: t`Model`,
                       icon: "cpu" as const,
                       note: modelLabel,
-                      disabledReason: modelSaving ? "Saving…" : undefined,
+                      disabledReason: modelSaving ? t`Saving…` : undefined,
                       run: openPhoneModels,
                     },
                   ]
@@ -3774,16 +3777,16 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             brand={brand}
             title={
               replayId === LIBRARY
-                ? "Replay"
+                ? t`Replay`
                 : replayId
                   ? (shownRecording?.title ?? RECORDED_TASK)
                   : overviewShown
-                    ? "Overview"
+                    ? t`Overview`
                     : (watchTitle ?? listedTitle)
             }
             note={
               shownRecording?.note ??
-              (!replayId && agent.model.origin?.kind === "routine" ? "Routine" : undefined)
+              (!replayId && agent.model.origin?.kind === "routine" ? t`Routine` : undefined)
             }
             mode={replayId ? "replay" : "watch"}
             watchAttention={
@@ -3835,7 +3838,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 <ResizeHandle
                   panel={SESSIONS_WIDTH}
                   property="--sessions-w"
-                  label="Conversations width"
+                  label={t`Conversations width`}
                   side="right"
                   beside={chatVisible ? CHAT_WIDTH : 0}
                   first
@@ -3845,14 +3848,14 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               {mobileScreen.minimized && (
                 <div className="mobile-screen-restore">
                   <Button icon="monitor" onClick={() => mobileScreen.setMinimized(false)}>
-                    Show screen
+                    {t`Show screen`}
                   </Button>
                 </div>
               )}
               <main
                 ref={mobileScreen.ref}
                 className="stage-col"
-                aria-label="Computer"
+                aria-label={t`Computer`}
                 inert={mobileScreen.minimized}
               >
                 {stageFrame}
@@ -3861,13 +3864,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 <ResizeHandle
                   panel={CHAT_WIDTH}
                   property="--rail-w"
-                  label="Conversation width"
+                  label={t`Conversation width`}
                   beside={railShown ? (railExpanded ? SESSIONS_WIDTH : SESSIONS_FOLDED) : 0}
                   className="rail-resize-chat"
                 />
               )}
               <RailPanel
-                label="Conversation"
+                label={t`Conversation`}
                 className="rail-chat"
                 hidden={!chatVisible}
                 views={views}
@@ -3903,7 +3906,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         </div>
         {overviewMounted && (
           <ErrorBoundary className="overview-failed">
-            <main className="overview-col" aria-label="Overview" hidden={!overviewShown}>
+            <main className="overview-col" aria-label={t`Overview`} hidden={!overviewShown}>
               <Overview
                 api={api}
                 rows={overviewRows}
@@ -3916,10 +3919,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                       <IconButton
                         icon="chevron-left"
                         size={36}
-                        label={stack ? "Conversations" : "Back"}
+                        label={stack ? t`Conversations` : t`Back`}
                         onClick={closeOverview}
                       />
-                      <h1 className="overview-heading-title">Overview</h1>
+                      <h1 className="overview-heading-title">{t`Overview`}</h1>
                     </div>
                   ) : undefined
                 }
@@ -3936,14 +3939,14 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               onSelect={selectReplay}
               backLabel={
                 !window.history.state?.fromWatch
-                  ? "Replay"
+                  ? t`Replay`
                   : stack && level === 0
-                    ? "Conversations"
-                    : "Conversation"
+                    ? t`Conversations`
+                    : t`Conversation`
               }
               onLibrary={() => selectReplay(window.history.state?.fromWatch ? null : LIBRARY)}
               onGoLive={() => selectReplay(null)}
-              liveLabel={!stack ? "Watch" : level === 0 ? "Conversations" : "Conversation"}
+              liveLabel={!stack ? t`Watch` : level === 0 ? t`Conversations` : t`Conversation`}
               modelName={names.name}
               onDeleted={(id) => {
                 deletedRecordings.current.add(id);
@@ -3988,7 +3991,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               look={{
                 name: settings.draft?.name ?? settings.saved?.name ?? "",
                 accessory: settings.draft ? settings.draft.accessory : settings.saved?.accessory,
-                problem: settings.validation?.find((line) => line.startsWith("Name this localDot")),
+                problem: settings.validation?.find((line) => line === NAME_PROBLEM),
                 onName: (name) => settings.changeLook({ name }),
                 onAccessory: (accessory) => settings.changeLook({ accessory }),
                 others: settings.draft?.localDots ?? settings.saved?.localDots ?? [],
@@ -4200,8 +4203,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           <Sheet
             open={routinesOpen}
             onClose={() => setRoutinesOpen(false)}
-            title="Routines"
-            doneLabel="Done"
+            title={t`Routines`}
+            doneLabel={t`Done`}
             detents={ACTIVITY_DETENTS}
             className="routines-sheet"
           >
@@ -4250,8 +4253,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           <Sheet
             open={conversationsOpen}
             onClose={() => setConversationsOpen(false)}
-            title="Conversations"
-            doneLabel="Done"
+            title={t`Conversations`}
+            doneLabel={t`Done`}
             detents={LIST_DETENTS}
             flush
             className="conversations-sheet"
@@ -4277,7 +4280,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             onClose={() => setActivityOpen(false)}
             title={PANEL_NAME}
             className="activity-dialog"
-            doneLabel="Done"
+            doneLabel={t`Done`}
             flush
             detents={ACTIVITY_DETENTS}
           >
@@ -4301,7 +4304,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 computerAction && computerAction.kind !== "stop"
                   ? {
                       run: () => onComputer[computerAction.kind](),
-                      reason: computerAction.enabled ? undefined : "Wait a moment",
+                      reason: computerAction.enabled ? undefined : t`Wait a moment`,
                     }
                   : null
               }

@@ -1,4 +1,5 @@
 import { type SyntheticEvent, useState } from "react";
+import { t } from "../../i18n/index.ts";
 import { ViewerMessage } from "./states.tsx";
 
 // A format this browser can't play, which trying again won't change, or a load that failed. A player
@@ -63,7 +64,7 @@ export function MediaView({
   const [failed, setFailed] = useState<"format" | "load" | null>(null);
   if (failed)
     return failed === "load" ? (
-      <ViewerMessage name={name} title="Couldn't load this file" retry={retry} />
+      <ViewerMessage name={name} title={t`Couldn't load this file`} retry={retry} />
     ) : (
       <ViewerMessage name={name} />
     );

@@ -1,6 +1,7 @@
 import { type FormEvent, useRef, useState } from "react";
 import { KNOWN_SIGN_INS, type SignInSite } from "../../../../packages/protocol/src/accounts.ts";
 import type { BrowserStatus } from "../../../../packages/protocol/src/browser-control.ts";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -30,7 +31,7 @@ function SignInToSite({ signIn, off }: { signIn: SignInView; off: boolean }) {
   const failed = useRef<string | null>(null);
   if (signIn.failure) failed.current = signIn.failure;
   const busy = signIn.pending !== null;
-  const unavailable = off ? "Turn on your computer first" : undefined;
+  const unavailable = off ? t`Turn on your computer first` : undefined;
   const start = (value: string) => {
     void signIn.start(value).then((opened) => {
       if (opened) setSite("");
@@ -44,14 +45,14 @@ function SignInToSite({ signIn, off }: { signIn: SignInView; off: boolean }) {
     <Group>
       <GroupRow
         className="settings-signin"
-        label="Sign in to a site"
-        detail="Opens in the web browser, where you sign in yourself."
+        label={t`Sign in to a site`}
+        detail={t`Opens in the web browser, where you sign in yourself.`}
       >
         <div className="settings-signin-body">
           <form className="settings-signin-form" onSubmit={submit}>
             <TextField
               size="sm"
-              aria-label="Site"
+              aria-label={t`Site`}
               prefix={<Icon name="globe" size={16} />}
               placeholder="google.com"
               inputMode="url"
@@ -67,10 +68,10 @@ function SignInToSite({ signIn, off }: { signIn: SignInView; off: boolean }) {
               }}
             />
             <Button type="submit" busy={busy} disabledReason={unavailable}>
-              Sign in
+              {t`Sign in`}
             </Button>
           </form>
-          <fieldset className="settings-signin-sites" aria-label="Common sites">
+          <fieldset className="settings-signin-sites" aria-label={t`Common sites`}>
             {COMMON_SITES.map((known) => (
               <Chip
                 key={known.site}
@@ -108,15 +109,15 @@ function browserLine(status: BrowserStatus | null | undefined): string {
         ? explained(status.problem)
         : "";
     case "starting":
-      return "dot's web browser is starting. This takes a few seconds.";
+      return t`dot's web browser is starting. This takes a few seconds.`;
     case "restarting":
-      return "dot's web browser is restarting. Your sign-ins are kept.";
-    case "failed":
-      return status.retryAt
-        ? `${status.problem ?? "dot's web browser couldn't start."} localDot keeps trying.`
-        : explained(status.problem ?? "dot's web browser couldn't start.");
+      return t`dot's web browser is restarting. Your sign-ins are kept.`;
+    case "failed": {
+      const problem = status.problem ?? t`dot's web browser couldn't start.`;
+      return status.retryAt ? t`${problem} localDot keeps trying.` : explained(problem);
+    }
     case "stopped":
-      return "dot's web browser is stopped.";
+      return t`dot's web browser is stopped.`;
     case "ready":
       return status.problem &&
         status.problemAt &&
@@ -149,40 +150,38 @@ export function AccountsSection({
   return (
     <div className="settings-accounts">
       <p className="settings-lede">
-        dot's web browser keeps your sign-ins between tasks. A site listed here has saved data,
-        though its sign-in may have expired. Saved logins are kept separately, in Keys, and apps in
-        Connectors work without signing in to the website.
+        {t`dot's web browser keeps your sign-ins between tasks. A site listed here has saved data, though its sign-in may have expired. Saved logins are kept separately, in Keys, and apps in Connectors work without signing in to the website.`}
       </p>
       {engine && <BrowserEngineSettings view={engine} />}
       {signIn && <SignInToSite signIn={signIn} off={phase === "off"} />}
       {phase === "off" ? (
         <Group>
-          <EmptyState icon="monitor" title="Your computer is off">
-            Turn it on to see your sign-ins.
+          <EmptyState icon="monitor" title={t`Your computer is off`}>
+            {t`Turn it on to see your sign-ins.`}
           </EmptyState>
         </Group>
       ) : phase === "error" ? (
         <Group>
           <GroupRow
-            label="Couldn't load your sign-ins"
+            label={t`Couldn't load your sign-ins`}
             trailing={
               <Button variant="quiet" size="sm" onClick={accounts.reload}>
-                Try again
+                {t`Try again`}
               </Button>
             }
           />
         </Group>
       ) : phase === "ready" && sites.length === 0 ? (
         <Group>
-          <EmptyState icon="globe" title="No sign-ins yet">
-            When you or dot sign in to a site in the web browser, it shows up here.
+          <EmptyState icon="globe" title={t`No sign-ins yet`}>
+            {t`When you or dot sign in to a site in the web browser, it shows up here.`}
           </EmptyState>
         </Group>
       ) : (
         <Group>
           <ul
             className="settings-accounts-list"
-            aria-label="Sites with sign-ins"
+            aria-label={t`Sites with sign-ins`}
             aria-busy={phase !== "ready" || undefined}
           >
             {(phase === "ready" ? sites : Array.from({ length: PLACEHOLDER_ROWS }, () => null)).map(
@@ -215,13 +214,13 @@ export function AccountsSection({
                           busy={pending === entry.site}
                           disabledReason={
                             pending && pending !== entry.site
-                              ? "Wait for the last change"
+                              ? t`Wait for the last change`
                               : undefined
                           }
-                          aria-label={`Sign out of ${entry.site}`}
+                          aria-label={t`Sign out of ${entry.site}`}
                           onClick={() => accounts.signOut(entry.site)}
                         >
-                          Sign out
+                          {t`Sign out`}
                         </Button>
                       ) : (
                         <span className="settings-accounts-slot" aria-hidden="true" />
@@ -240,7 +239,7 @@ export function AccountsSection({
             browser?.failure ??
             (browserLine(browser?.status) ||
               (phase === "starting"
-                ? "dot's web browser is starting. This takes a few seconds."
+                ? t`dot's web browser is starting. This takes a few seconds.`
                 : ""))}
         </p>
         {browser && (
@@ -252,14 +251,14 @@ export function AccountsSection({
             }
             disabledReason={
               phase === "off" || browser.status?.reason === "computer-stopped"
-                ? "Turn on your computer first"
+                ? t`Turn on your computer first`
                 : browserState === "off"
-                  ? "It starts by itself once it can"
+                  ? t`It starts by itself once it can`
                   : undefined
             }
             onClick={browser.restart}
           >
-            Restart web browser
+            {t`Restart web browser`}
           </Button>
         )}
         {report && browserState === "failed" && (
@@ -270,11 +269,11 @@ export function AccountsSection({
               const problem = browser?.status?.problem;
               report.start(event.currentTarget, {
                 context: { kind: "browser", ...(problem ? { reason: problem } : {}) },
-                title: problem ?? "dot's web browser couldn't start.",
+                title: problem ?? t`dot's web browser couldn't start.`,
               });
             }}
           >
-            Report this problem
+            {t`Report this problem`}
           </Button>
         )}
         <Button
@@ -284,25 +283,25 @@ export function AccountsSection({
           busy={pending === "*"}
           disabledReason={
             pending && pending !== "*"
-              ? "Wait for the last change"
+              ? t`Wait for the last change`
               : phase === "ready" && sites.length === 0
-                ? "There's nothing to sign out of"
+                ? t`There's nothing to sign out of`
                 : undefined
           }
           onClick={() => setConfirming(true)}
         >
-          Sign out of all sites…
+          {t`Sign out of all sites…`}
         </Button>
       </div>
       <Dialog
         open={confirming}
         onClose={() => setConfirming(false)}
         anchor={clearTrigger}
-        title="Sign out of every site?"
-        description="dot's web browser restarts and forgets every sign-in and everything sites saved in it. A task using it now loses its open pages. You can't undo this."
+        title={t`Sign out of every site?`}
+        description={t`dot's web browser restarts and forgets every sign-in and everything sites saved in it. A task using it now loses its open pages. You can't undo this.`}
       >
         <Button variant="quiet" onClick={() => setConfirming(false)}>
-          Cancel
+          {t`Cancel`}
         </Button>
         <Button
           variant="destructive"
@@ -311,7 +310,7 @@ export function AccountsSection({
             void accounts.clearAll();
           }}
         >
-          Sign out of all
+          {t`Sign out of all`}
         </Button>
       </Dialog>
     </div>

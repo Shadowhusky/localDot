@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../i18n/index.ts";
 import { OutsideField } from "./Field.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { pushLayer } from "./LayerStack.tsx";
@@ -369,7 +370,7 @@ export function PickerPopup({
           </h2>
           <IconButton
             className="ui-picker-sheet-close"
-            label="Close"
+            label={t`Close`}
             icon="x"
             size={32}
             onClick={() => dismiss.current()}

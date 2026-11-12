@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useId, useMemo, useRef, useState } from "react";
-import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { useSessionNow } from "../session/useNowMs.ts";
 import { Button } from "../ui/Button.tsx";
@@ -57,24 +57,27 @@ export function ResearchSources({
         if (abort.signal.aborted) return;
         setProblem(
           error instanceof ControlFailure && error.status === 409
-            ? "dot has finished reading."
-            : "That didn't reach dot. Try again.",
+            ? t`dot has finished reading.`
+            : t`That didn't reach dot. Try again.`,
         );
       })
       .finally(() => {
         if (request.current === abort) setSending(false);
       });
   };
+  const { sources: most, minutes } = research.budget;
   const note =
     problem ??
     (research.stopped
       ? STOP_WORDS[research.stopped]
-      : `dot stops reading at ${research.budget.sources} sources or ${count(research.budget.minutes, "minute", "minutes")}.`);
+      : minutes === 1
+        ? t`dot stops reading at ${most} sources or ${minutes} minute.`
+        : t`dot stops reading at ${most} sources or ${minutes} minutes.`);
   return (
     <section className="activity-section research" aria-labelledby={`${id}-head`}>
       <div className="activity-section-head">
         <h3 id={`${id}-head`} className="ui-visually-hidden">
-          Sources
+          {t`Sources`}
         </h3>
         <span className="activity-section-meta num">{researchMeta(research, at)}</span>
       </div>
@@ -84,7 +87,7 @@ export function ResearchSources({
         style={{ "--_used": researchUsed(research, at) } as CSSProperties}
       />
       {sources.length ? (
-        <ol ref={list} className="research-sources" aria-label="Sources dot read">
+        <ol ref={list} className="research-sources" aria-label={t`Sources dot read`}>
           <li aria-hidden="true" style={{ height: windowed.before }} />
           {windowed.indexes.map((index) => {
             const source = shown[index];
@@ -125,7 +128,7 @@ export function ResearchSources({
           <li aria-hidden="true" style={{ height: windowed.after }} />
         </ol>
       ) : (
-        <p className="activity-empty">Sources appear here as dot reads them.</p>
+        <p className="activity-empty">{t`Sources appear here as dot reads them.`}</p>
       )}
       {sources.length > SHOWN + 1 && (
         <Button
@@ -135,7 +138,7 @@ export function ResearchSources({
           aria-expanded={all}
           onClick={() => setAll((open) => !open)}
         >
-          {all ? "Show fewer" : `Show all ${sources.length}`}
+          {all ? t`Show fewer` : t`Show all ${sources.length}`}
         </Button>
       )}
       {working && (
@@ -145,11 +148,11 @@ export function ResearchSources({
           </p>
           {research.stopped ? (
             <Button variant="secondary" size="sm" busy={sending} onClick={() => change("more")}>
-              Keep going
+              {t`Keep going`}
             </Button>
           ) : (
             <Button variant="quiet" size="sm" busy={sending} onClick={() => change("wrap_up")}>
-              Wrap up now
+              {t`Wrap up now`}
             </Button>
           )}
         </div>

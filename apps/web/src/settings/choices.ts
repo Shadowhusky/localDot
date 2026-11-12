@@ -12,6 +12,7 @@ import {
   speedTiers,
   usableAs,
 } from "@localdot/providers";
+import { t, tr } from "../i18n/index.ts";
 import type { KeyRecord } from "../keys/keys-api.ts";
 
 export type ModelRole = "main" | "fast" | "local";
@@ -64,9 +65,19 @@ export const PROVIDER_GROUPS: readonly ProviderGroup[] = [
   "Not available here",
   "Later releases",
 ];
+const GROUP_NAMES: Readonly<Record<ProviderGroup, string>> = {
+  "API providers": tr("API providers"),
+  "Compatible providers": tr("Compatible providers"),
+  Plans: tr("Plans"),
+  "Local servers": tr("Local servers"),
+  "Not available here": tr("Not available here"),
+  "Later releases": tr("Later releases"),
+};
+// A group as a list's heading shows it.
+export const groupName = (group: ProviderGroup) => GROUP_NAMES[group];
 // What people read for a provider: the registry's name, or a plan's own app.
 export function providerName(id: string): string {
-  if (id === "chatgpt") return "ChatGPT plan";
+  if (id === "chatgpt") return t`ChatGPT plan`;
   if (id === "claude-code") return "Claude Code";
   return providerById(id)?.name ?? id;
 }
@@ -142,23 +153,23 @@ export function customModelAllowed(provider: ProviderSpec): boolean {
 export function modelIdProblem(id: string): string | null {
   return /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/.test(id)
     ? null
-    : "Use a model ID of 1–128 letters, numbers or supported separators.";
+    : t`Use a model ID of 1–128 letters, numbers or supported separators.`;
 }
 export const SPEED_NAMES: Readonly<Record<PremiumSpeed, string>> = {
-  fast: "Fast",
-  ultrafast: "Ultrafast",
+  fast: tr("Fast"),
+  ultrafast: tr("Ultrafast"),
 };
 // The premium speed a choice asks for, if any; Standard and the provider's default are one.
 export const premiumSpeed = (options?: ModelOptions): PremiumSpeed | undefined =>
   options?.speed === "fast" || options?.speed === "ultrafast" ? options.speed : undefined;
 // What a premium speed costs: its price per token over Standard, or what a plan draws on.
 export function speedCost(choice: AgentRoleChoice, speed: PremiumSpeed): string {
-  if (choice.provider === "chatgpt") return "Uses more of your plan";
-  if (choice.provider === "claude-code") return "Uses usage credits";
+  if (choice.provider === "chatgpt") return t`Uses more of your plan`;
+  if (choice.provider === "claude-code") return t`Uses usage credits`;
   const price = speedTiers(choice.provider, choice.model, choice.speedTiers).find(
     (tier) => tier.speed === speed,
   )?.price;
-  return price ? `${price}× the price` : "Costs more";
+  return price ? t`${price}× the price` : t`Costs more`;
 }
 // The controls a choice offers: a plan account's own for its model, else the provider's.
 export function controlsOf(

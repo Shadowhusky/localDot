@@ -12,6 +12,7 @@ import {
   SCHEDULE_LIMITS,
   type ScheduleUnit,
 } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
 
 export interface ScheduleFormState {
   // Stays with the schedule as others come and go, for the list's keys.
@@ -61,22 +62,22 @@ export interface FormErrors {
 }
 
 export const UNITS: readonly { value: ScheduleUnit; one: string; many: string }[] = [
-  { value: "minute", one: "minute", many: "minutes" },
-  { value: "hour", one: "hour", many: "hours" },
-  { value: "day", one: "day", many: "days" },
-  { value: "week", one: "week", many: "weeks" },
-  { value: "month", one: "month", many: "months" },
+  { value: "minute", one: tr("minute"), many: tr("minutes") },
+  { value: "hour", one: tr("hour"), many: tr("hours") },
+  { value: "day", one: tr("day"), many: tr("days") },
+  { value: "week", one: tr("week"), many: tr("weeks") },
+  { value: "month", one: tr("month"), many: tr("months") },
 ];
 export const WINDOWS = ["15", "30", "60", "120", "240"] as const;
 // Monday first, the way a week reads.
 export const WEEK: readonly { day: number; short: string; long: string }[] = [
-  { day: 1, short: "Mon", long: "Monday" },
-  { day: 2, short: "Tue", long: "Tuesday" },
-  { day: 3, short: "Wed", long: "Wednesday" },
-  { day: 4, short: "Thu", long: "Thursday" },
-  { day: 5, short: "Fri", long: "Friday" },
-  { day: 6, short: "Sat", long: "Saturday" },
-  { day: 0, short: "Sun", long: "Sunday" },
+  { day: 1, short: tr("Mon"), long: tr("Monday") },
+  { day: 2, short: tr("Tue"), long: tr("Tuesday") },
+  { day: 3, short: tr("Wed"), long: tr("Wednesday") },
+  { day: 4, short: tr("Thu"), long: tr("Thursday") },
+  { day: 5, short: tr("Fri"), long: tr("Friday") },
+  { day: 6, short: tr("Sat"), long: tr("Saturday") },
+  { day: 0, short: tr("Sun"), long: tr("Sunday") },
 ];
 const WHOLE_WEEK = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS = [1, 2, 3, 4, 5];
@@ -201,7 +202,7 @@ const monthOrder = (days: readonly number[]) =>
   [...days].sort((a, b) => (a === LAST_DAY ? 32 : a) - (b === LAST_DAY ? 32 : b));
 function timesOf(times: readonly string[], errors: { times?: string }): string[] | undefined {
   if (!times.length || times.some((time) => !CLOCK.test(time))) {
-    errors.times = "Pick a time.";
+    errors.times = t`Pick a time.`;
     return undefined;
   }
   return [...new Set(times)].sort();
@@ -211,12 +212,12 @@ function ruleOf(form: ScheduleFormState, errors: ScheduleErrors): RoutineSchedul
   const { min, max } = SCHEDULE_LIMITS.every[form.unit];
   const every = Number(form.every);
   if (!Number.isInteger(every) || every < min || every > max)
-    errors.every = `Use a number from ${min} to ${max}.`;
+    errors.every = t`Use a number from ${min} to ${max}.`;
   const whole = form.weekdays.length === WHOLE_WEEK.length;
   const weekdays = whole && form.unit !== "week" ? {} : { weekdays: ascending(form.weekdays) };
-  if (form.unit !== "month" && !form.weekdays.length) errors.days = "Pick at least one day.";
+  if (form.unit !== "month" && !form.weekdays.length) errors.days = t`Pick at least one day.`;
   if (form.unit === "minute" || form.unit === "hour") {
-    if (form.from && form.to && form.from >= form.to) errors.span = "End after it starts.";
+    if (form.from && form.to && form.from >= form.to) errors.span = t`End after it starts.`;
     return Object.keys(errors).length
       ? undefined
       : {
@@ -229,7 +230,7 @@ function ruleOf(form: ScheduleFormState, errors: ScheduleErrors): RoutineSchedul
   }
   const times = timesOf(form.times, errors);
   if (form.unit === "month") {
-    if (!form.monthDays.length) errors.days = "Pick at least one day.";
+    if (!form.monthDays.length) errors.days = t`Pick at least one day.`;
     return Object.keys(errors).length || !times
       ? undefined
       : { every, unit: "month", monthDays: monthOrder(form.monthDays), times };
@@ -241,7 +242,7 @@ function ruleOf(form: ScheduleFormState, errors: ScheduleErrors): RoutineSchedul
 
 function timingOf(form: RoutineFormState, errors: FormErrors): RoutineTiming | undefined {
   if (form.once) {
-    if (!DATE.test(form.date)) errors.date = "Pick a date.";
+    if (!DATE.test(form.date)) errors.date = t`Pick a date.`;
     const times = timesOf(form.onceTimes, errors);
     return times && !errors.date
       ? {
@@ -252,10 +253,10 @@ function timingOf(form: RoutineFormState, errors: FormErrors): RoutineTiming | u
         }
       : undefined;
   }
-  if (!DATE.test(form.start)) errors.start = "Pick the first day.";
-  if (form.ends && !DATE.test(form.until)) errors.until = "Pick the last day.";
+  if (!DATE.test(form.start)) errors.start = t`Pick the first day.`;
+  if (form.ends && !DATE.test(form.until)) errors.until = t`Pick the last day.`;
   else if (form.ends && form.until < form.start)
-    errors.until = "The last day can't be before the first.";
+    errors.until = t`The last day can't be before the first.`;
   const schedules: RoutineSchedule[] = [];
   for (const schedule of form.schedules) {
     const problems: ScheduleErrors = {};
@@ -302,18 +303,18 @@ export function draftFromForm(
   const errors: FormErrors = {};
   const name = form.name.trim();
   const instruction = form.instruction.trim();
-  if (!name) errors.name = "Give the routine a name.";
-  else if (name.length > 80) errors.name = "Keep the name under 80 characters.";
-  else if (/[\r\n]/.test(name)) errors.name = "Keep the name on one line.";
-  if (!instruction) errors.instruction = "Say what dot should do.";
+  if (!name) errors.name = t`Give the routine a name.`;
+  else if (name.length > 80) errors.name = t`Keep the name under 80 characters.`;
+  else if (/[\r\n]/.test(name)) errors.name = t`Keep the name on one line.`;
+  if (!instruction) errors.instruction = t`Say what dot should do.`;
   const timing = timingOf(form, errors);
   if (clock && timing && !same(timing, clock.saved) && nextDue(timing, clock.now) === null) {
-    if (form.once) errors.times = "That time has passed. Pick a later one.";
-    else errors.until = "No runs are left on those dates. Pick a later last day.";
+    if (form.once) errors.times = t`That time has passed. Pick a later one.`;
+    else errors.until = t`No runs are left on those dates. Pick a later last day.`;
   }
   const budget = Number(form.budget);
   if (form.limited && !(form.budget && Number.isFinite(budget) && budget >= 0.01 && budget <= 100))
-    errors.budget = "Set an amount from $0.01 to $100.";
+    errors.budget = t`Set an amount from $0.01 to $100.`;
   if (Object.keys(errors).length || !timing) return { ok: false, errors };
   const draft = {
     name,
@@ -329,6 +330,6 @@ export function draftFromForm(
     budgetUSD: form.limited ? Math.round(budget * 100) / 100 : null,
   };
   const parsed = RoutineDraft.safeParse(draft);
-  if (!parsed.success) return { ok: false, errors: { name: "This routine isn't complete yet." } };
+  if (!parsed.success) return { ok: false, errors: { name: t`This routine isn't complete yet.` } };
   return { ok: true, draft: parsed.data };
 }

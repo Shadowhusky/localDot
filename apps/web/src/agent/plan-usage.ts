@@ -4,7 +4,7 @@ import {
   PlanUsageReply,
   type PlanUsageWindow,
 } from "@localdot/protocol";
-import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { NEAR_LIMIT } from "../ui/Meter.tsx";
 
@@ -22,8 +22,8 @@ export async function loadPlanUsage(
 }
 
 export function limitName(minutes: number | undefined, fallback: string): string {
-  if (minutes === 10_080) return "Weekly limit";
-  if (minutes !== undefined && minutes % 60 === 0) return `${minutes / 60}-hour limit`;
+  if (minutes === 10_080) return t`Weekly limit`;
+  if (minutes !== undefined && minutes % 60 === 0) return t`${minutes / 60}-hour limit`;
   return fallback;
 }
 
@@ -58,7 +58,7 @@ export function planView(plan: PlanUsage, now: number): PlanView {
       window: window.window,
       name: limitName(
         window.windowMinutes,
-        window.window === "primary" ? "Short limit" : "Long limit",
+        window.window === "primary" ? t`Short limit` : t`Long limit`,
       ),
       usedPercent: window.usedPercent,
       ...(resetsAt === undefined ? {} : { resetsAt }),
@@ -96,12 +96,14 @@ export const shownPercent = (used: number) => (used >= 100 ? 100 : Math.floor(us
 // "in 2 h 14 min", "in 4 days 3 h".
 export function untilText(at: number, now: number): string {
   const minutes = Math.round((at - now) / 60_000);
-  if (minutes <= 1) return "in under a minute";
-  if (minutes < 60) return `in ${minutes} min`;
+  if (minutes <= 1) return t`in under a minute`;
+  if (minutes < 60) return t`in ${minutes} min`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `in ${hours} h${minutes % 60 ? ` ${minutes % 60} min` : ""}`;
+  if (hours < 24) return minutes % 60 ? t`in ${hours} h ${minutes % 60} min` : t`in ${hours} h`;
   const days = Math.floor(hours / 24);
-  return `in ${count(days, "day", "days")}${hours % 24 ? ` ${hours % 24} h` : ""}`;
+  const rest = hours % 24;
+  if (days === 1) return rest ? t`in ${days} day ${rest} h` : t`in ${days} day`;
+  return rest ? t`in ${days} days ${rest} h` : t`in ${days} days`;
 }
 
 // "3:40 PM" today, "Fri 3:40 PM" within the week, else "Oct 30, 3:40 PM".
@@ -117,8 +119,8 @@ export function exactTime(at: number, now: number): string {
 // "12 min ago", "3 h ago", "Oct 20".
 export function agoText(at: number, now: number): string {
   const minutes = Math.max(0, Math.floor((now - at) / 60_000));
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return t`${minutes} min ago`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return t`${hours} h ago`;
   return new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
 }

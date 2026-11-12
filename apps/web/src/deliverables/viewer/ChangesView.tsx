@@ -2,6 +2,7 @@
 import type { FileVersion } from "@localdot/protocol";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { count } from "../../copy/format.ts";
+import { t, tr } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { useMediaQuery } from "../../ui/media.ts";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -24,10 +25,10 @@ interface Section {
   lines: DiffLine[];
   truncated: boolean;
 }
-const OPS = { create: "Created", modify: "Changed", delete: "Deleted" } as const;
+const OPS = { create: tr("Created"), modify: tr("Changed"), delete: tr("Deleted") } as const;
 const LAYOUTS = [
-  { value: "unified", label: "Unified" },
-  { value: "split", label: "Side by side" },
+  { value: "unified", label: tr("Unified") },
+  { value: "split", label: tr("Side by side") },
 ];
 // Side by side needs room for two columns of code.
 const WIDE = "(min-width: 1100px)";
@@ -124,7 +125,7 @@ export function ChangesView({
         wide && (
           <SegmentedControl
             size={28}
-            aria-label="Layout"
+            aria-label={t`Layout`}
             value={layout.value}
             items={LAYOUTS}
             onValueChange={layout.choose}
@@ -139,7 +140,7 @@ export function ChangesView({
     return (
       <>
         {bar}
-        <ViewerLoading label="Comparing" />
+        <ViewerLoading label={t`Comparing`} />
       </>
     );
   if (sections === "failed" || sections.length === 0)
@@ -149,7 +150,7 @@ export function ChangesView({
         <ViewerMessage
           name={name}
           title={
-            sections === "failed" ? "Couldn't compare the versions" : "No text changes to show"
+            sections === "failed" ? t`Couldn't compare the versions` : t`No text changes to show`
           }
         />
       </>
@@ -159,7 +160,7 @@ export function ChangesView({
       {bar}
       <div className="viewer-stage viewer-changes">
         {/* biome-ignore lint/a11y/noNoninteractiveTabindex: The changes scroll inside their well, so keyboard users can focus them. */}
-        <section className="viewer-diff-scroll" tabIndex={0} aria-label={`Changes to ${name}`}>
+        <section className="viewer-diff-scroll" tabIndex={0} aria-label={t`Changes to ${name}`}>
           {sections.map((section, i) => (
             <section key={i} className="viewer-diff-section" aria-label={section.title}>
               {sections.length > 1 && <h3 className="viewer-diff-title">{section.title}</h3>}
@@ -169,7 +170,7 @@ export function ChangesView({
                 <UnifiedDiff name={name} lines={section.lines} />
               )}
               {section.truncated && (
-                <p className="viewer-diff-note">Shortened to the part the activity kept.</p>
+                <p className="viewer-diff-note">{t`Shortened to the part the activity kept.`}</p>
               )}
             </section>
           ))}
@@ -191,7 +192,7 @@ function useTokens(name: string, lines: readonly DiffLine[]): Span[][] {
 }
 
 const MARKS = { add: "+", remove: "−", same: " " } as const;
-const SPOKEN = { add: "Added: ", remove: "Removed: " } as const;
+const SPOKEN = { add: tr("Added: "), remove: tr("Removed: ") } as const;
 function LineText({ line, spans }: { line: DiffLine; spans: Span[] | undefined }) {
   return (
     <span className="viewer-diff-text">

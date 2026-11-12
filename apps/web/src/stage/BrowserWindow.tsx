@@ -11,6 +11,7 @@ import type {
   BrowserEngineName,
   BrowserEngineStatus,
 } from "../../../../packages/protocol/src/browser-engine.ts";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { showToast } from "../ui/Toast.tsx";
 import { useTooltip } from "../ui/Tooltip.tsx";
@@ -20,8 +21,7 @@ import { browserWindow } from "./composite.ts";
 import type { StageFront } from "./useStageFront.ts";
 
 // What the one desktop can't do, as the web browser's window is kept apart from it.
-export const APART_NOTE =
-  "The web browser runs apart from the desktop: copied text and drags don't cross between them.";
+export const APART_NOTE = t`The web browser runs apart from the desktop: copied text and drags don't cross between them.`;
 
 // Said once a page, the first time the user's own hands cross from one side to the other.
 let told = false;
@@ -41,14 +41,14 @@ export function runningEngine(status: BrowserEngineStatus | null): BrowserEngine
 export function browserName(engine: BrowserEngineName | undefined): string {
   if (engine === "chrome") return "Google Chrome";
   if (engine === "chromium") return "Chromium";
-  return "Web browser";
+  return t`Web browser`;
 }
 
 export function dockItemLabel(front: StageFront): string {
-  if (front.screen === "browser") return "Minimise the web browser";
+  if (front.screen === "browser") return t`Minimise the web browser`;
   return front.dot === "browser"
-    ? "Show the web browser, where dot is working"
-    : "Show the web browser";
+    ? t`Show the web browser, where dot is working`
+    : t`Show the web browser`;
 }
 
 // How long the dock stays up once the pointer has left it, as the desktop's own does, and after a
@@ -138,7 +138,7 @@ export function BrowserWindow({
           <div
             className="browser-titlebar"
             role="group"
-            aria-label={`${name} window`}
+            aria-label={t`${name} window`}
             onMouseDown={keepKeys}
             onDoubleClick={stay}
           >
@@ -147,7 +147,7 @@ export function BrowserWindow({
                 className="browser-minimise"
                 variant="quiet"
                 size="sm"
-                aria-label="Minimise the web browser"
+                aria-label={t`Minimise the web browser`}
                 onMouseDown={keepKeys}
                 onClick={() => front.pick("desktop")}
               >

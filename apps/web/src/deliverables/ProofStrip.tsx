@@ -1,6 +1,7 @@
 import type { ResultProof } from "@localdot/protocol";
 import { markdownToPlain } from "../agent/markdown.ts";
 import { clock } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { RowMenu } from "../routines/RowMenu.tsx";
@@ -12,7 +13,7 @@ import type { ProofState } from "./useProof.ts";
 
 const EXPORTABLE = new Set(["recording", "complete", "recovered"]);
 // What the row says before the proof is known, or when there is none.
-const UNPROVEN = { label: "Replay this task", title: "Replay" } as const;
+const UNPROVEN = { label: tr("Replay this task"), title: tr("Replay") } as const;
 
 export function proofOf(proof: ProofState, resultId: string): ResultProof | undefined {
   return proof.state === "ready"
@@ -22,7 +23,7 @@ export function proofOf(proof: ProofState, resultId: string): ResultProof | unde
 
 function ProofRow(props: PlayRowProps) {
   return (
-    <section className="proof" aria-label="Proof">
+    <section className="proof" aria-label={t`Proof`}>
       <PlayRow {...props} />
     </section>
   );
@@ -57,21 +58,21 @@ export function ProofStrip({
   const length = clock((entry.endMs - entry.startMs) / 1000);
   return (
     <ProofRow
-      label={`Watch replay (${length})`}
-      title={`Replay · ${length}`}
+      label={t`Watch replay (${length})`}
+      title={t`Replay · ${length}`}
       poster={end && <ReplayImage api={api} sessionId={sessionId} frameId={end.frameId} />}
       detail={
         checked && (
-          <span className="proof-checked" title={`Checked: ${checked}`}>
+          <span className="proof-checked" title={t`Checked: ${checked}`}>
             <Icon name="check-circle" size={14} className="proof-checked-icon" />
-            <span className="proof-checked-text">Checked: {checked}</span>
+            <span className="proof-checked-text">{t`Checked: ${checked}`}</span>
           </span>
         )
       }
       onPlay={() => openReplay(sessionId, { tMs: entry.startMs })}
       actions={
         exportable && (
-          <RowMenu label="More for this replay">
+          <RowMenu label={t`More for this replay`}>
             <MenuItem
               icon="share"
               onSelect={() =>
@@ -81,7 +82,7 @@ export function ProofStrip({
                 })
               }
             >
-              Export proof video
+              {t`Export proof video`}
             </MenuItem>
           </RowMenu>
         )

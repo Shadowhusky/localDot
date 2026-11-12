@@ -1,30 +1,35 @@
 import { useEffect } from "react";
+import { t } from "../i18n/index.ts";
 import { announce, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import type { AwayCause, ScreenName, StageConnection } from "./connection.ts";
 
-const SCREEN_NAME: Record<ScreenName, string> = { desktop: "desktop", browser: "web browser" };
-
 export function awayWords(cause: AwayCause, screen: ScreenName) {
   switch (cause) {
     case "switch":
-      return {
-        brief: `Switching to the ${SCREEN_NAME[screen]}…`,
-        title: `Still switching to the ${SCREEN_NAME[screen]}`,
-        detail: "Its picture is taking longer than usual.",
-      };
+      return screen === "browser"
+        ? {
+            brief: t`Switching to the web browser…`,
+            title: t`Still switching to the web browser`,
+            detail: t`Its picture is taking longer than usual.`,
+          }
+        : {
+            brief: t`Switching to the desktop…`,
+            title: t`Still switching to the desktop`,
+            detail: t`Its picture is taking longer than usual.`,
+          };
     case "browser":
       return {
-        brief: "The web browser is restarting…",
-        title: "The web browser is still restarting",
-        detail: "Your sign-ins are kept. The picture returns once it's back.",
+        brief: t`The web browser is restarting…`,
+        title: t`The web browser is still restarting`,
+        detail: t`Your sign-ins are kept. The picture returns once it's back.`,
       };
     case "stream":
       return {
-        brief: "Reconnecting…",
-        title: "Still reconnecting",
-        detail: "Your computer keeps running. This is its last picture.",
+        brief: t`Reconnecting…`,
+        title: t`Still reconnecting`,
+        detail: t`Your computer keeps running. This is its last picture.`,
       };
   }
 }
@@ -37,9 +42,9 @@ export function RelaunchNotice() {
       <div className="stage-away-card">
         <Spinner size={14} className="stage-away-spinner" />
         <div className="stage-away-text">
-          <p className="stage-away-title">Restarting the browser for your sign-in…</p>
+          <p className="stage-away-title">{t`Restarting the browser for your sign-in…`}</p>
           <p className="stage-away-detail">
-            dot's connection is off while you sign in. Your tabs come back in a moment.
+            {t`dot's connection is off while you sign in. Your tabs come back in a moment.`}
           </p>
         </div>
       </div>
@@ -51,7 +56,7 @@ export function RelaunchNotice() {
 // desktop by itself (a task ended, a new conversation began) and dot has not moved.
 export function screenMoveNote(to: ScreenName, dotChose: boolean): string | null {
   if (!dotChose) return null;
-  return to === "browser" ? "dot is working in the web browser" : "dot is back on the desktop";
+  return to === "browser" ? t`dot is working in the web browser` : t`dot is back on the desktop`;
 }
 
 // Over the last picture while it is away: nothing for a blip (only a dip while dot changes
@@ -67,7 +72,7 @@ export function StageNotice({
   const away = connection.phase === "away" ? connection : null;
   const words = away && awayWords(away.cause, away.screen);
   const long = away?.level === "long";
-  const spoken = long && words ? `${words.title}. ${words.detail}` : null;
+  const spoken = long && words ? t`${words.title}. ${words.detail}` : null;
   useEffect(() => {
     if (!spoken) return;
     announce("stage", spoken);
@@ -85,7 +90,7 @@ export function StageNotice({
           </div>
           {long && onRetry && away.cause !== "browser" && (
             <Button size="sm" onClick={onRetry}>
-              Try again
+              {t`Try again`}
             </Button>
           )}
         </div>

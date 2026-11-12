@@ -5,6 +5,7 @@ import type {
   SpeechTierId,
   SpeechTierView,
 } from "../../../../packages/protocol/src/speech-install.ts";
+import { t, tr } from "../i18n/index.ts";
 import { modelLanguage } from "./language.ts";
 
 const MB = 1024 ** 2;
@@ -26,16 +27,16 @@ export function tierForLanguage(status: SpeechInstallStatus, language: string): 
 }
 
 export const INSTALL_STAGES: readonly { stage: SpeechInstallStage; name: string }[] = [
-  { stage: "checking", name: "Check free space" },
-  { stage: "program", name: "Download the speech program" },
-  { stage: "model", name: "Download the speech model" },
-  { stage: "unpacking", name: "Check and unpack the files" },
-  { stage: "testing", name: "Try it once" },
+  { stage: "checking", name: tr("Check free space") },
+  { stage: "program", name: tr("Download the speech program") },
+  { stage: "model", name: tr("Download the speech model") },
+  { stage: "unpacking", name: tr("Check and unpack the files") },
+  { stage: "testing", name: tr("Try it once") },
 ];
 
 export function jobDetail(job: SpeechInstallJob): string | undefined {
   if (job.stage !== "program" && job.stage !== "model") return undefined;
-  return `${sizeWords(job.doneBytes)} of ${sizeWords(job.totalBytes)}`;
+  return t`${sizeWords(job.doneBytes)} of ${sizeWords(job.totalBytes)}`;
 }
 
 export const jobShare = (job: SpeechInstallJob) =>
@@ -49,8 +50,8 @@ export function speechSummary(status: SpeechInstallStatus | null): string {
     const name = tiers.find((tier) => tier.id === job.tier)?.name ?? job.tier;
     return `${name}, ${jobShare(job)}%`;
   }
-  if (job?.state === "failed") return "Couldn't finish";
-  if (installed) return installed.damaged ? "Needs reinstalling" : installed.name;
-  if (handInstalled) return "Your own Whisper";
-  return "Not set up";
+  if (job?.state === "failed") return t`Couldn't finish`;
+  if (installed) return installed.damaged ? t`Needs reinstalling` : installed.name;
+  if (handInstalled) return t`Your own Whisper`;
+  return t`Not set up`;
 }

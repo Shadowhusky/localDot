@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SignInSite } from "../../../../packages/protocol/src/accounts.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { clearSignIns, listSignIns, signOutOf } from "./accounts-api.ts";
 
@@ -86,14 +87,14 @@ export function useAccounts(api: ApiClient, cellId: string | null, visible: bool
             setSites(left);
             if (left.some((entry) => entry.site === site))
               setFailure(
-                `Some of ${site}'s sign-in is still saved. Sign out of all sites to remove everything.`,
+                t`Some of ${site}'s sign-in is still saved. Sign out of all sites to remove everything.`,
               );
           },
           (error: unknown) => {
             setFailure(
               error instanceof ApiError && error.status === 404
                 ? null
-                : `Couldn't sign out of ${site}. Try again.`,
+                : t`Couldn't sign out of ${site}. Try again.`,
             );
             if (error instanceof ApiError && error.status === 404)
               setSites((current) => current.filter((entry) => entry.site !== site));
@@ -112,7 +113,7 @@ export function useAccounts(api: ApiClient, cellId: string | null, visible: bool
       setSites([]);
       return true;
     } catch {
-      setFailure("Couldn't sign out of every site. Try again.");
+      setFailure(t`Couldn't sign out of every site. Try again.`);
       return false;
     } finally {
       setPending(null);

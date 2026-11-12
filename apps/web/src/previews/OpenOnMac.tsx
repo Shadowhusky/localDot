@@ -1,5 +1,6 @@
 import type { PreviewItem, PreviewRequest } from "@localdot/protocol";
 import { type FormEvent, type RefObject, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -99,17 +100,16 @@ export function LocalAddress({
       anchor={anchor}
       side="bottom"
       align="end"
-      title="Open at a localhost address"
+      title={t`Open at a localhost address`}
       className="preview-mac"
     >
       <p className="preview-notice-text">
-        Some apps only work at their own localhost address, such as one whose sign-in sends you back
-        there. This opens the app at that address on this Mac.
+        {t`Some apps only work at their own localhost address, such as one whose sign-in sends you back there. This opens the app at that address on this Mac.`}
       </p>
       <form className="preview-mac-form" onSubmit={submit} noValidate>
         <Field
-          label="Address on this Mac"
-          error={tried && !chosen ? "Use a port from 1024 to 65535." : undefined}
+          label={t`Address on this Mac`}
+          error={tried && !chosen ? t`Use a port from 1024 to 65535.` : undefined}
         >
           <TextField
             prefix="localhost:"
@@ -123,7 +123,7 @@ export function LocalAddress({
         </Field>
         <div className="preview-notice-actions">
           <Button type="submit" size="sm" variant="primary">
-            {chosen ? `Open at localhost:${chosen}` : "Open"}
+            {chosen ? t`Open at localhost:${chosen}` : t`Open`}
           </Button>
         </div>
       </form>
@@ -160,7 +160,7 @@ export function PreviewActions({
       <IconButton
         ref={more}
         icon="more-horizontal"
-        label={`More for ${address}`}
+        label={t`More for ${address}`}
         aria-busy={previews.pending.has(`copy ${requestKey(request)}`) || undefined}
         {...triggerProps("menu", menu)}
         onClick={() => setMenu((was) => !was)}
@@ -171,14 +171,14 @@ export function PreviewActions({
         anchor={more}
         side="bottom"
         align="end"
-        label={`More for ${address}`}
+        label={t`More for ${address}`}
       >
         <MenuItem icon="copy" onSelect={() => more.current && previews.copy(request, more.current)}>
-          Copy link
+          {t`Copy link`}
         </MenuItem>
         {!touch && (
           <MenuItem icon="monitor" onSelect={() => setLocal(true)}>
-            Open at a localhost address…
+            {t`Open at a localhost address…`}
           </MenuItem>
         )}
       </Menu>
@@ -195,11 +195,11 @@ export function PreviewActions({
       <Button
         ref={opener}
         size="sm"
-        aria-label={`Open preview of ${address}`}
+        aria-label={t`Open preview of ${address}`}
         busy={previews.pending.has(requestKey(request))}
         onClick={(event) => previews.open(request, event.currentTarget)}
       >
-        Open
+        {t`Open`}
       </Button>
     </>
   );

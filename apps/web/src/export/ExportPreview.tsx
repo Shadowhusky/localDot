@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Range } from "../ui/Range.tsx";
 import { pictureHeight } from "./dot-band.ts";
@@ -65,9 +66,9 @@ export function ExportPreview({
     return player.current;
   };
   const reason = !active
-    ? "Finish adjusting the range"
+    ? t`Finish adjusting the range`
     : !plan
-      ? "Nothing was recorded in this range"
+      ? t`Nothing was recorded in this range`
       : undefined;
   const duration = (plan?.durationS ?? 0) * 1000;
   return (
@@ -93,7 +94,9 @@ export function ExportPreview({
         <IconButton
           size={36}
           round
-          label={state.playing ? "Pause preview" : state.error ? "Retry preview" : "Play preview"}
+          label={
+            state.playing ? t`Pause preview` : state.error ? t`Retry preview` : t`Play preview`
+          }
           icon={state.playing ? "pause" : "play"}
           disabledReason={reason}
           onClick={() => {
@@ -103,8 +106,8 @@ export function ExportPreview({
         />
         <Range
           className="export-preview-seek"
-          label="Preview position"
-          aria-valuetext={`${trimTimeLabel(state.positionMs)} of ${trimTimeLabel(duration)}`}
+          label={t`Preview position`}
+          aria-valuetext={t`${trimTimeLabel(state.positionMs)} of ${trimTimeLabel(duration)}`}
           min={0}
           max={duration}
           step={plan ? 1000 / plan.fps : 1}
@@ -116,14 +119,14 @@ export function ExportPreview({
           className="export-preview-clock num"
           role="timer"
           aria-live="off"
-          aria-label="Preview time"
+          aria-label={t`Preview time`}
         >
           {trimTimeLabel(state.positionMs)} / {trimTimeLabel(duration)}
         </span>
       </div>
       {(state.loading || state.error) && (
         <p className="export-preview-note" role="status">
-          {state.error ? "The preview couldn’t load. Try again." : "Loading preview…"}
+          {state.error ? t`The preview couldn’t load. Try again.` : t`Loading preview…`}
         </p>
       )}
     </>

@@ -10,6 +10,7 @@ import {
 } from "@localdot/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ControlFailure } from "./control-api.ts";
 import type { AgentFeed } from "./model.ts";
@@ -274,8 +275,8 @@ export function useSafety(props: SafetyProps) {
       op.phase = "uncertain";
       setError(
         e instanceof ControlFailure && !e.uncertain
-          ? "Request refused. Check current task status before trying again."
-          : "Delivery is unconfirmed. Check current task status before trying again.",
+          ? t`Request refused. Check current task status before trying again.`
+          : t`Delivery is unconfirmed. Check current task status before trying again.`,
       );
       current.current.agent.reconcile();
       return false;
@@ -466,7 +467,7 @@ export function useSafety(props: SafetyProps) {
             try {
               sessionStorage.removeItem(storageKey(id));
             } catch {}
-          } else setError("The fresh computer is still being verified. Check its status again.");
+          } else setError(t`The fresh computer is still being verified. Check its status again.`);
         }
         if (value.phase === "blocked") {
           // Only an authoritative terminal GET releases this identity. Another attempt is explicit.
@@ -504,8 +505,8 @@ export function useSafety(props: SafetyProps) {
           setError(
             failure instanceof ControlFailure && failure.status === 404
               ? (replacementRefusal.current ??
-                  "The replacement hasn't started. Try Replace computer again.")
-              : "Couldn't check the replacement. You can retry the same request.",
+                  t`The replacement hasn't started. Try Replace computer again.`)
+              : t`Couldn't check the replacement. You can retry the same request.`,
           );
         }
       } finally {
@@ -633,7 +634,7 @@ export function useSafety(props: SafetyProps) {
       if (mounted.current)
         setError(
           replacementRefusal.current ??
-            "Replacement completion is unconfirmed. Checking the saved request; the old computer stays unavailable.",
+            t`Replacement completion is unconfirmed. Checking the saved request; the old computer stays unavailable.`,
         );
       setReplacementRetry(!!replacementRequest.current);
       replacementAttempt.current = null;

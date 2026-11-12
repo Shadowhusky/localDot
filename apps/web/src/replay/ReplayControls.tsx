@@ -1,5 +1,6 @@
 import { REPLAY_SPEEDS } from "@localdot/stage";
 import type { ReactNode } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -14,7 +15,7 @@ const SPEEDS = REPLAY_SPEEDS.map((speed) => ({
   value: String(speed),
   label: `${speed === 0.5 ? "½" : speed}×`,
 }));
-export const LOADING = "The recording is still loading";
+export const LOADING = t`The recording is still loading`;
 const SKIP_MS = 10_000;
 
 // The transport (design-v2 §10.23): a glass bar hung over the foot of the recording, with the
@@ -47,7 +48,7 @@ export function ReplayControls({
     <div
       className="replay-transport"
       role="group"
-      aria-label="Playback controls"
+      aria-label={t`Playback controls`}
       data-compact={compact ? "" : undefined}
     >
       {!compact && (
@@ -55,7 +56,7 @@ export function ReplayControls({
           variant="glass"
           round
           size={size}
-          label="Back 10 seconds"
+          label={t`Back 10 seconds`}
           icon="back-10"
           kbd={["J"]}
           disabledReason={loading}
@@ -66,7 +67,7 @@ export function ReplayControls({
         variant="glass"
         round
         size={size}
-        label={replay.playing ? "Pause replay" : "Play replay"}
+        label={replay.playing ? t`Pause replay` : t`Play replay`}
         icon={replay.playing ? "pause" : "play"}
         kbd={[" "]}
         disabledReason={loading}
@@ -77,14 +78,14 @@ export function ReplayControls({
           variant="glass"
           round
           size={size}
-          label="Forward 10 seconds"
+          label={t`Forward 10 seconds`}
           icon="forward-10"
           kbd={["L"]}
           disabledReason={loading}
           onClick={() => replay.run({ kind: "jump", ms: SKIP_MS })}
         />
       )}
-      <output className="replay-time num" aria-label="Replay time">
+      <output className="replay-time num" aria-label={t`Replay time`}>
         {timeLabel(replay.tMs)}
       </output>
       {replay.sessionId && <Scrubber api={api} sessionId={replay.sessionId} replay={replay} />}
@@ -97,7 +98,7 @@ export function ReplayControls({
           <Select
             className="replay-speed"
             appearance="inline"
-            aria-label="Playback speed"
+            aria-label={t`Playback speed`}
             value={String(replay.speed)}
             items={SPEEDS}
             onValueChange={(value) => {
@@ -112,17 +113,17 @@ export function ReplayControls({
             aria-pressed={replay.skipIdle}
             onClick={() => replay.setSkipIdle(!replay.skipIdle)}
           >
-            <span className="replay-toggle-label">Skip idle</span>
+            <span className="replay-toggle-label">{t`Skip idle`}</span>
           </Button>
           <Button
             variant="quiet"
             size="sm"
             className="replay-toggle"
             aria-pressed={replay.compare !== null}
-            disabledReason={replay.model.steps.length ? undefined : "No steps to compare yet"}
+            disabledReason={replay.model.steps.length ? undefined : t`No steps to compare yet`}
             onClick={() => replay.run({ kind: "compare" })}
           >
-            <span className="replay-toggle-label">Compare</span>
+            <span className="replay-toggle-label">{t`Compare`}</span>
           </Button>
           {noVideo && <NoVideo held={cardShown} />}
           {exportControl}
@@ -138,7 +139,7 @@ export function ReplayControls({
 function NoVideo({ held }: { held: boolean }) {
   return (
     <span className="replay-no-video" data-held={held || undefined}>
-      <Badge>No video</Badge>
+      <Badge>{t`No video`}</Badge>
     </span>
   );
 }

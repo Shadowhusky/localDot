@@ -1,5 +1,6 @@
 import { JEV_HOST, JEV_MODEL, PurposeCheckStatus } from "@localdot/protocol";
 import { useEffect, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
@@ -31,26 +32,38 @@ export function purposeJudge(jevKey: boolean, choices: SettingsDraft["choices"])
   return roleActive("fast", choices) ? "fast" : "none";
 }
 
-const WHY = "Stops dot sending what it read somewhere unrelated.";
-
 export function purposeDescription({
   on,
   judge,
   plan,
   fullAccess,
 }: Pick<PurposeCheckControl, "on" | "judge" | "plan" | "fullAccess">): string {
-  if (!on) return WHY;
+  if (!on) return t`Stops dot sending what it read somewhere unrelated.`;
   if (fullAccess)
-    return "Bypassed in Full access. Choose Auto or Custom permissions to use this check.";
-  if (judge === "jev") return `${WHY} Uses Jev when a judgment is needed.`;
-  if (judge === "fast") return `${WHY} Checked by your fast model.`;
-  const needs =
-    plan === CLAUDE_CODE
-      ? " or a fast model on Claude Code"
-      : plan
-        ? " with the ChatGPT plan"
-        : " or a fast model";
-  return `${WHY} Needs a Jev key${needs}.`;
+    return t`Bypassed in Full access. Choose Auto or Custom permissions to use this check.`;
+  if (judge === "jev")
+    return t`Stops dot sending what it read somewhere unrelated. Uses Jev when a judgment is needed.`;
+  if (judge === "fast")
+    return t`Stops dot sending what it read somewhere unrelated. Checked by your fast model.`;
+  if (plan === CLAUDE_CODE)
+    return t`Stops dot sending what it read somewhere unrelated. Needs a Jev key or a fast model on Claude Code.`;
+  if (plan)
+    return t`Stops dot sending what it read somewhere unrelated. Needs a Jev key with the ChatGPT plan.`;
+  return t`Stops dot sending what it read somewhere unrelated. Needs a Jev key or a fast model.`;
+}
+
+function lastOutcome(last: NonNullable<PurposeCheckStatus["last"]>): string {
+  const at = new Date(last.at).toLocaleTimeString();
+  if (last.ok) {
+    const model = last.model ?? JEV_MODEL;
+    return last.kind === "test"
+      ? t`Test succeeded at ${at}. ${model} · ${last.latencyMs} ms`
+      : t`Task check succeeded at ${at}. ${model} · ${last.latencyMs} ms`;
+  }
+  const problem = String(last.problem);
+  return last.kind === "test"
+    ? t`Test failed at ${at}. ${problem}`
+    : t`Task check failed at ${at}. ${problem}`;
 }
 
 export function PurposeCheck({ control }: { control: PurposeCheckControl }) {
@@ -74,7 +87,7 @@ export function PurposeCheck({ control }: { control: PurposeCheckControl }) {
         })
         .catch(() => {
           if (!abort.signal.aborted)
-            setError("Could not load Jev status. Try again after updating localDot.");
+            setError(t`Could not load Jev status. Try again after updating localDot.`);
         });
     void refresh();
     const timer = setInterval(() => {
@@ -92,7 +105,7 @@ export function PurposeCheck({ control }: { control: PurposeCheckControl }) {
     try {
       setStatus(PurposeCheckStatus.parse(await api.post("/api/agent/purpose-check/test")));
     } catch {
-      setError("Could not test Jev. Check the connection to localDot and try again.");
+      setError(t`Could not test Jev. Check the connection to localDot and try again.`);
     } finally {
       setBusy(false);
     }
@@ -101,15 +114,15 @@ export function PurposeCheck({ control }: { control: PurposeCheckControl }) {
   const outcome =
     error ??
     (status?.mode === "unavailable"
-      ? "The key layer is offline."
+      ? t`The key layer is offline.`
       : last
-        ? `${last.kind === "test" ? "Test" : "Task check"} ${last.ok ? "succeeded" : "failed"} at ${new Date(last.at).toLocaleTimeString()}. ${last.ok ? `${last.model ?? JEV_MODEL} · ${last.latencyMs} ms` : last.problem}`
-        : "No Jev result recorded since localDot started. A saved key has not necessarily been tested.");
+        ? lastOutcome(last)
+        : t`No Jev result recorded since localDot started. A saved key has not necessarily been tested.`);
   return (
     <Group>
       <Switch
         className="ui-group-row"
-        label="Purpose check"
+        label={t`Purpose check`}
         description={purposeDescription(control)}
         checked={on}
         onCheckedChange={control.change}
@@ -119,50 +132,50 @@ export function PurposeCheck({ control }: { control: PurposeCheckControl }) {
           <GroupRow
             label="Jev"
             detail={`${JEV_MODEL} · ${JEV_HOST}`}
-            trailing={!on ? "Off" : fullAccess ? "Bypassed" : "Selected"}
+            trailing={!on ? t`Off` : fullAccess ? t`Bypassed` : t`Selected`}
           />
-          <GroupRow label="API key" detail={keyId ?? "Saved in Keys"} onSelect={manageJevKey} />
+          <GroupRow label={t`API key`} detail={keyId ?? t`Saved in Keys`} onSelect={manageJevKey} />
           <GroupRow
-            label="Connection"
+            label={t`Connection`}
             detail={<span role="status">{outcome}</span>}
             trailing={
               api && (
                 <Button
                   size="sm"
-                  disabledReason={busy ? "Testing Jev…" : undefined}
+                  disabledReason={busy ? t`Testing Jev…` : undefined}
                   onClick={() => void test()}
                 >
-                  {busy ? "Testing…" : "Test Jev"}
+                  {busy ? t`Testing…` : t`Test Jev`}
                 </Button>
               )
             }
           />
           <GroupRow
-            label="When Jev runs"
-            detail="Checks uncertain destinations after private data is read, and routine approvals in Auto mode. Local rules and cached decisions need no API call. Full access bypasses both."
+            label={t`When Jev runs`}
+            detail={t`Checks uncertain destinations after private data is read, and routine approvals in Auto mode. Local rules and cached decisions need no API call. Full access bypasses both.`}
           />
           <GroupRow
-            label="Requests since restart"
+            label={t`Requests since restart`}
             detail={
               status
-                ? `${status.calls} attempted · ${status.succeeded} succeeded · ${status.failed} failed`
-                : "Loading…"
+                ? t`${status.calls} attempted · ${status.succeeded} succeeded · ${status.failed} failed`
+                : t`Loading…`
             }
           />
           <GroupRow
-            label="Connection test"
-            detail="Sends a short public-documentation example using this key. No conversation or computer content is sent. Provider usage charges may apply."
+            label={t`Connection test`}
+            detail={t`Sends a short public-documentation example using this key. No conversation or computer content is sent. Provider usage charges may apply.`}
           />
         </>
       )}
       {addJevKey && (
         <Collapse open={on && judge !== "jev"}>
           <GroupRow
-            label="Add a Jev key"
+            label={t`Add a Jev key`}
             detail={
               judge === "fast"
-                ? "Jev, from typesafe.ai, checks faster than your fast model. Its key goes in Keys."
-                : "Jev, from typesafe.ai, does the checking. Its key goes in Keys."
+                ? t`Jev, from typesafe.ai, checks faster than your fast model. Its key goes in Keys.`
+                : t`Jev, from typesafe.ai, does the checking. Its key goes in Keys.`
             }
             onSelect={addJevKey}
           />

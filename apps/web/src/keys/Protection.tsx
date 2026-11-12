@@ -1,3 +1,4 @@
+import { t, tc } from "../i18n/index.ts";
 import { CommandChip } from "../shell/CommandChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
@@ -20,56 +21,58 @@ interface Status {
   fix?: { lead: string; command: string };
 }
 
-const CHECKING: Pick<Status, "state" | "tone"> = { state: "Checking…", tone: "wait" };
-const UNKNOWN: Pick<Status, "state" | "tone"> = { state: "Unknown", tone: "wait" };
+const CHECKING: Pick<Status, "state" | "tone"> = { state: t`Checking…`, tone: "wait" };
+const UNKNOWN: Pick<Status, "state" | "tone"> = { state: t`Unknown`, tone: "wait" };
+const KEY_ISOLATION = t`Key isolation`;
+const AUDIT_LOG = t`Audit log`;
+const NETWORK_PROTECTION = t`Network protection`;
+const SAVED_KEYS = t`Saved keys`;
 
 export function protectionOf(health: KeydHealth | null): Status[] {
   const online = health?.online === true;
   const isolation: Status = !health
-    ? { name: "Key isolation", ...CHECKING }
+    ? { name: KEY_ISOLATION, ...CHECKING }
     : online
-      ? { name: "Key isolation", state: "On", tone: "ok" }
+      ? { name: KEY_ISOLATION, state: t`On`, tone: "ok" }
       : {
-          name: "Key isolation",
-          state: "Off",
+          name: KEY_ISOLATION,
+          state: t`Off`,
           tone: "bad",
-          problem: "Keys can't be saved or used until it's back on.",
+          problem: t`Keys can't be saved or used until it's back on.`,
         };
   const audit: Status = !health
-    ? { name: "Audit log", ...CHECKING }
+    ? { name: AUDIT_LOG, ...CHECKING }
     : !online
-      ? { name: "Audit log", ...UNKNOWN }
+      ? { name: AUDIT_LOG, ...UNKNOWN }
       : health.audit?.ok === false
         ? {
-            name: "Audit log",
-            state: "Paused — keys held",
+            name: AUDIT_LOG,
+            state: t`Paused — keys held`,
             tone: "bad",
-            problem: "localDot can't record when keys are used, so it holds every key back.",
+            problem: t`localDot can't record when keys are used, so it holds every key back.`,
             details: health.audit.error,
           }
-        : { name: "Audit log", state: "Recording", tone: "ok" };
+        : { name: AUDIT_LOG, state: tc("status", "Recording"), tone: "ok" };
   const guard = health?.hairpin;
   const network: Status = !health
-    ? { name: "Network protection", ...CHECKING }
+    ? { name: NETWORK_PROTECTION, ...CHECKING }
     : !online
-      ? { name: "Network protection", ...UNKNOWN }
+      ? { name: NETWORK_PROTECTION, ...UNKNOWN }
       : guard?.state === "active"
-        ? { name: "Network protection", state: "On", tone: "ok" }
+        ? { name: NETWORK_PROTECTION, state: t`On`, tone: "ok" }
         : guard?.state === "off"
           ? {
-              name: "Network protection",
-              state: "Off",
+              name: NETWORK_PROTECTION,
+              state: t`Off`,
               tone: "bad",
-              problem:
-                "Your computer could reach your router through this network's public address.",
+              problem: t`Your computer could reach your router through this network's public address.`,
               details: guard.error,
             }
           : {
-              name: "Network protection",
-              state: "Checking",
+              name: NETWORK_PROTECTION,
+              state: t`Checking`,
               tone: "bad",
-              problem:
-                "It's still finding this network's public address. Until then, your computer could reach your router through it.",
+              problem: t`It's still finding this network's public address. Until then, your computer could reach your router through it.`,
               details: guard?.error,
             };
   return health?.online && health.vault
@@ -80,46 +83,46 @@ export function protectionOf(health: KeydHealth | null): Status[] {
 // Off macOS only: keyd's vault may wait for its passphrase, which the form above this list takes,
 // or localdot unlock on the computer itself.
 function savedKeys(health: KeydHealth): Status {
-  const name = "Saved keys";
-  const fix = { lead: "Or, on the computer running localDot, run:", command: UNLOCK };
+  const name = SAVED_KEYS;
+  const fix = { lead: t`Or, on the computer running localDot, run:`, command: UNLOCK };
   if (vaultLocked(health))
     return health.vault?.state === "setup"
       ? {
           name,
-          state: "Needs a passphrase",
+          state: t`Needs a passphrase`,
           tone: "bad",
-          problem: "Choose a passphrase for saved keys above before you add one.",
+          problem: t`Choose a passphrase for saved keys above before you add one.`,
           fix,
         }
       : {
           name,
-          state: "Locked",
+          state: t`Locked`,
           tone: "bad",
-          problem: "Saved keys are locked. Unlock them above with your passphrase.",
+          problem: t`Saved keys are locked. Unlock them above with your passphrase.`,
           fix,
         };
   const vault = health.vault;
   const state =
     vault?.backend === "secret-service"
-      ? "In your keyring"
+      ? t`In your keyring`
       : vault?.backend === "memory"
-        ? "Until restart"
+        ? t`Until restart`
         : vault?.key === "passphrase"
-          ? "Unlocked"
-          : "Encrypted";
+          ? t`Unlocked`
+          : t`Encrypted`;
   return { name, state, tone: "ok" };
 }
 
 function Glyph({ tone }: { tone: Exclude<Tone, "ok"> }) {
-  if (tone === "bad") return <Badge kind="dot" tone="attention" label="Needs attention" />;
+  if (tone === "bad") return <Badge kind="dot" tone="attention" label={t`Needs attention`} />;
   return <span className="keys-status-ring" aria-hidden="true" />;
 }
 
 const TILE: Record<string, IconName> = {
-  "Key isolation": "lock",
-  "Audit log": "file-text",
-  "Network protection": "shield",
-  "Saved keys": "key-round",
+  [KEY_ISOLATION]: "lock",
+  [AUDIT_LOG]: "file-text",
+  [NETWORK_PROTECTION]: "shield",
+  [SAVED_KEYS]: "key-round",
 };
 
 // What keeps keys safe, one row each, so a problem says what it means and how to fix it.
@@ -143,11 +146,11 @@ export function Protection({ health }: { health: KeydHealth | null }) {
                 <div className="keys-status-help">
                   <p>{status.problem}</p>
                   <div className="keys-status-fix">
-                    <span>{status.fix?.lead ?? "To fix it, run this in Terminal:"}</span>
+                    <span>{status.fix?.lead ?? t`To fix it, run this in Terminal:`}</span>
                     <CommandChip text={status.fix?.command ?? DOCTOR} />
                   </div>
                   {status.details && (
-                    <Disclosure summary="Details" className="keys-status-details">
+                    <Disclosure summary={t`Details`} className="keys-status-details">
                       <p className="keys-raw">{status.details}</p>
                     </Disclosure>
                   )}

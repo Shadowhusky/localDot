@@ -1,8 +1,14 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { SubscriptionModel } from "../settings/choices.ts";
 import { loadProviderIndex, loadSettings, saveSettings } from "../settings/settings-api.ts";
-import { formOf, type SettingsDraft, validateForm } from "../settings/settings-form.ts";
+import {
+  formOf,
+  type SettingsDraft,
+  validateForm,
+  withoutRole,
+} from "../settings/settings-form.ts";
 
 // One setup choice saved over what is saved now, checked as Settings checks it. Returns the first
 // problem in plain words, or null once it is saved.
@@ -22,12 +28,12 @@ export async function saveSetup(
     await saveSettings(api, document);
     return null;
   } catch {
-    return "This couldn't be saved. Check that localDot is running, then try again.";
+    return t`This couldn't be saved. Check that localDot is running, then try again.`;
   }
 }
 
 // Settings prefixes each problem with its role; setup only ever asks about one.
 function problemText(problem: string | undefined): string {
-  const text = (problem ?? "Check the choices and try again.").replace(/^(Main|Fast): /, "");
+  const text = withoutRole(problem ?? t`Check the choices and try again.`);
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }

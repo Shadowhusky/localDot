@@ -21,6 +21,7 @@ import { markdownToPlain } from "../agent/markdown.ts";
 import { type AgentModel, heldByUser } from "../agent/model.ts";
 import type { ComputerPhase, HudActionKind, HudState } from "../cells/hud-state.ts";
 import type { DotState } from "../dot/engine/states.ts";
+import { t, tr } from "../i18n/index.ts";
 
 type TakeoverReason = RequestTakeoverInput["reason"];
 
@@ -200,60 +201,64 @@ function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): stri
 }
 
 // A task whose log stops short of its end: localDot went away under it.
-const INTERRUPTED_CAPTION = "I was cut off before I finished. Shall I continue?";
+const INTERRUPTED_CAPTION = t`I was cut off before I finished. Shall I continue?`;
 
 // What a task paused on, other than its own Pause or a question, says on the HUD.
 const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> = {
   [STALL.budget]: {
     row: "limit",
-    label: "Spending limit reached",
-    caption: "I stopped at the spending limit you set.",
+    label: tr("Spending limit reached"),
+    caption: tr("I stopped at the spending limit you set."),
   },
   [STALL.modelBusy]: {
     row: "retrying",
-    label: "Model busy · retrying",
-    caption: "The model is busy. I'll try again in a moment.",
+    label: tr("Model busy · retrying"),
+    caption: tr("The model is busy. I'll try again in a moment."),
   },
   [STALL.modelUnavailable]: {
     row: "recovery",
-    label: "Model not answering",
-    caption: "The model isn't answering. The chat has the way on.",
+    label: tr("Model not answering"),
+    caption: tr("The model isn't answering. The chat has the way on."),
   },
   [STALL.providerLimit]: {
     row: "limit",
-    label: "Provider limit reached",
-    caption: "Your provider is out of credit or included usage. The chat has the way on.",
+    label: tr("Provider limit reached"),
+    caption: tr("Your provider is out of credit or included usage. The chat has the way on."),
   },
   [STALL.modelRefused]: {
     row: "recovery",
-    label: "Provider request failed",
-    caption: "The provider could not process my request. The chat has the way on.",
+    label: tr("Provider request failed"),
+    caption: tr("The provider could not process my request. The chat has the way on."),
   },
-  [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
+  [STALL.keyd]: {
+    row: "recovery",
+    label: tr("Keys are offline"),
+    caption: tr("I can't reach your keys."),
+  },
   [STALL.keyReenter]: {
     row: "recovery",
-    label: "A key needs re-entering",
-    caption: "A key needs entering again. The chat says which one.",
+    label: tr("A key needs re-entering"),
+    caption: tr("A key needs entering again. The chat says which one."),
   },
   [STALL.keyRebound]: {
     row: "recovery",
-    label: "Key changed elsewhere",
-    caption: "A key was changed outside localDot. The chat says which one.",
+    label: tr("Key changed elsewhere"),
+    caption: tr("A key was changed outside localDot. The chat says which one."),
   },
   [STALL.keysLocked]: {
     row: "recovery",
-    label: "Saved keys are locked",
-    caption: "My saved keys are locked. Unlock them in the chat and I'll carry on.",
+    label: tr("Saved keys are locked"),
+    caption: tr("My saved keys are locked. Unlock them in the chat and I'll carry on."),
   },
   [STALL.runtime]: {
     row: "recovery",
-    label: "Docker isn't running",
-    caption: "Docker isn't running. Start it in the chat and I'll carry on.",
+    label: tr("Docker isn't running"),
+    caption: tr("Docker isn't running. Start it in the chat and I'll carry on."),
   },
   [STALL.fixedElsewhere]: {
     row: "recovery",
-    label: "Waiting for you",
-    caption: "That's fixed now. Continue, or send a message, and I'll carry on.",
+    label: tr("Waiting for you"),
+    caption: tr("That's fixed now. Continue, or send a message, and I'll carry on."),
   },
 };
 
@@ -266,12 +271,12 @@ const REQUEST: Partial<Record<TaskRow, string>> = {
 };
 // What dot says while the user has the computer, by why it is theirs.
 const YOUR_TURN: Record<TakeoverReason | "user", string> = {
-  user: "I'll wait here until you hand back.",
-  login: "Your turn. I'll wait here and pick up after you sign in.",
-  "2fa": "Your turn. I'll wait here and pick up after you enter the code.",
-  captcha: "Your turn. I'll wait here and pick up after you finish the check.",
-  payment: "Your turn. I'll wait here and pick up after you enter the payment details.",
-  other: "Your turn. I'll wait here until you hand back.",
+  user: tr("I'll wait here until you hand back."),
+  login: tr("Your turn. I'll wait here and pick up after you sign in."),
+  "2fa": tr("Your turn. I'll wait here and pick up after you enter the code."),
+  captcha: tr("Your turn. I'll wait here and pick up after you finish the check."),
+  payment: tr("Your turn. I'll wait here and pick up after you enter the payment details."),
+  other: tr("Your turn. I'll wait here until you hand back."),
 };
 function waitedFrom(model: SessionModel, row: TaskRow, nowMs: number): number | null {
   const type = REQUEST[row];
@@ -297,10 +302,10 @@ export function timerSeconds(
 }
 
 // Captions that only name dot's state. The band never says them: dot's pose and the island do.
-const THINKING = "Thinking…";
-const CHECKING = "Checking the screen.";
-const WORKING_ON = "Working…";
-const STARTING_OUT = "Starting…";
+const THINKING = t`Thinking…`;
+const CHECKING = t`Checking the screen.`;
+const WORKING_ON = t`Working…`;
+const STARTING_OUT = t`Starting…`;
 export const STATE_CAPTIONS: ReadonlySet<string> = new Set([
   THINKING,
   CHECKING,
@@ -365,83 +370,89 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   const reason = facts ? facts.reason : at ? replayReason(model, at, nowMs) : null;
   const blocked = facts?.outcome === "blocked" || reason === "blocked";
   const unfinished = () =>
-    finished("failed", "Couldn’t finish", "I couldn’t finish. The chat says what blocked me.");
+    finished("failed", t`Couldn’t finish`, t`I couldn’t finish. The chat says what blocked me.`);
 
   if (model.ended && model.ended.t <= nowMs) {
     if (blocked && (model.ended.reason === "done" || model.ended.reason === "stopped"))
       return unfinished();
-    if (model.ended.reason === "done") return finished("done", "Done", "Done.");
-    if (model.ended.reason === "stopped") return finished("stopped", "Task stopped", "Stopped.");
+    if (model.ended.reason === "done") return finished("done", t`Done`, t`Done.`);
+    if (model.ended.reason === "stopped") return finished("stopped", t`Task stopped`, t`Stopped.`);
     if (model.ended.reason === "interrupted")
-      return finished("interrupted", "Task interrupted", INTERRUPTED_CAPTION);
-    return finished("failed", "Task failed", "The task failed.");
+      return finished("interrupted", t`Task interrupted`, INTERRUPTED_CAPTION);
+    return finished("failed", t`Task failed`, t`The task failed.`);
   }
-  if (facts?.yours) return waiting("control", "You're in control", YOUR_TURN[facts.yours]);
+  if (facts?.yours) return waiting("control", t`You're in control`, YOUR_TURN[facts.yours]);
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
-  if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.", true);
+  if (facts?.approval) return waiting("approval", t`Needs your OK`, t`Waiting for your OK.`, true);
   if (facts?.connection)
-    return waiting("approval", "Needs your OK", "Waiting for your OK to connect.", true);
+    return waiting("approval", t`Needs your OK`, t`Waiting for your OK to connect.`, true);
   if (facts?.question != null)
     return waiting(
       "question",
-      "Needs your answer",
-      facts.question || "Waiting for your answer.",
+      t`Needs your answer`,
+      facts.question || t`Waiting for your answer.`,
       true,
     );
   if (facts?.takeover != null)
-    return waiting("takeover", "Your turn", facts.takeover || "Your turn to use the computer.");
+    return waiting("takeover", t`Your turn`, facts.takeover || t`Your turn to use the computer.`);
   if (facts?.pause === "pausing" || state === "pausing")
-    return running("pausing", "Pausing after this step", "Pausing after this step.");
-  if (facts?.pause === "resuming") return running("resuming", "Resuming…", "Resuming…");
+    return running("pausing", t`Pausing after this step`, t`Pausing after this step.`);
+  if (facts?.pause === "resuming") return running("resuming", t`Resuming…`, t`Resuming…`);
   if (facts?.pause === "uncertain")
     return waiting(
       "paused",
-      "Pause not confirmed",
-      "Couldn't confirm the pause. Use Stop to be sure.",
+      t`Pause not confirmed`,
+      t`Couldn't confirm the pause. Use Stop to be sure.`,
     );
-  if (facts?.pause) return waiting("paused", "Paused", "Paused.");
+  if (facts?.pause) return waiting("paused", t`Paused`, t`Paused.`);
 
   // A busy or unreachable model is tried again by itself, and the wait counts down.
   if (facts?.retry) {
     const leftS = Math.ceil((facts.retry.atMs - nowMs) / 1000);
-    const why = facts.retry.unreachable ? "Can't reach the model" : "Model busy";
+    const label = facts.retry.unreachable
+      ? t`Can't reach the model · retrying`
+      : t`Model busy · retrying`;
     return {
       ...running(
         "retrying",
-        leftS > 0 ? `${why} · retrying` : "Retrying…",
+        leftS > 0 ? label : t`Retrying…`,
         facts.retry.unreachable
-          ? "I can't reach the model. I'll try again in a moment."
-          : "The model is busy. I'll try again in a moment.",
+          ? t`I can't reach the model. I'll try again in a moment.`
+          : t`The model is busy. I'll try again in a moment.`,
       ),
       elapsedS: null,
       countdownS: leftS > 0 ? leftS : null,
       timer: leftS > 0 ? { to: facts.retry.atMs } : null,
     };
   }
-  if (state === "waiting_user") return waiting("waiting", "Waiting for you", "Waiting for you.");
+  if (state === "waiting_user") return waiting("waiting", t`Waiting for you`, t`Waiting for you.`);
   if (state === "paused") {
     const stall = STALLED[reason ?? ""];
     return stall
       ? waiting(stall.row, stall.label, stall.caption)
-      : waiting("recovery", "Paused", "I've paused. The chat says how to go on.");
+      : waiting("recovery", t`Paused`, t`I've paused. The chat says how to go on.`);
   }
   if (state === "error")
     return /restarting/.test(reason ?? "")
-      ? running("working", "Starting again…", "Starting again where I left off.")
+      ? running("working", t`Starting again…`, t`Starting again where I left off.`)
       : waiting(
           "recovery",
-          "Needs attention",
-          "I can't go on by myself. The chat says what to do.",
+          t`Needs attention`,
+          t`I can't go on by myself. The chat says what to do.`,
         );
   if (blocked && (state === "done" || state === "idle")) return unfinished();
-  if (state === "done") return finished("done", "Done", "Done.");
+  if (state === "done") return finished("done", t`Done`, t`Done.`);
   if (state === "idle" && reason === "gave up") return unfinished();
   if (state === "idle" && reason === STALL.actionLimit)
-    return waiting("limit", "Reached your action limit", "I stopped at the action limit you set.");
+    return waiting(
+      "limit",
+      t`Reached your action limit`,
+      t`I stopped at the action limit you set.`,
+    );
   if (state === "idle")
     return facts?.result
-      ? finished("done", "Done", "Done.")
-      : finished("ready", "Ready", "Ready for a follow-up.");
+      ? finished("done", t`Done`, t`Done.`)
+      : finished("ready", t`Ready`, t`Ready for a follow-up.`);
 
   const step = stepAt(model, nowMs);
   const stepRunning = step && (step.endT === undefined || step.endT > nowMs);
@@ -457,9 +468,9 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     if (done !== current.label && nowMs - current.resultT < PAST_HOLD_MS)
       return running("acting", done, done);
   }
-  if (state === "thinking") return running("thinking", "Thinking…", THINKING);
-  if (state === "observing") return running("observing", "Checking the screen", CHECKING);
-  return running("working", "Working", n ? WORKING_ON : STARTING_OUT);
+  if (state === "thinking") return running("thinking", THINKING, THINKING);
+  if (state === "observing") return running("observing", t`Checking the screen`, CHECKING);
+  return running("working", t`Working`, n ? WORKING_ON : STARTING_OUT);
 }
 
 // The thread's foot follows dot's own work. While the user has the computer it says nothing: the
@@ -603,8 +614,8 @@ const DOWN = new Set<ComputerPhase>([
 // A task Stop outranks everything. A frozen computer outranks any task, its Stop included; a
 // computer that is down outranks it too but leaves its Stop. Intentionally suspending this
 // viewer's screen leaves the task's status (including a finished verdict) intact.
-const LOST_CAPTION = "I've lost touch with your Mac. Reconnecting…";
-const UNCONFIRMED_CAPTION = "I couldn't confirm that I stopped. Press Stop again to be sure.";
+const LOST_CAPTION = t`I've lost touch with your Mac. Reconnecting…`;
+const UNCONFIRMED_CAPTION = t`I couldn't confirm that I stopped. Press Stop again to be sure.`;
 
 export function statusFor({
   computer,
@@ -626,15 +637,15 @@ export function statusFor({
   // waits on the user keeps its own label.
   const label =
     halting === "stopping"
-      ? "Stopping…"
+      ? t`Stopping…`
       : halting === "unconfirmed"
-        ? "Stop not confirmed"
+        ? t`Stop not confirmed`
         : lost
-          ? "Reconnecting…"
+          ? t`Reconnecting…`
           : computer.phase === "reconnecting" && shown && AT_WORK.has(shown.row)
             ? computer.label
             : stop === "stopped" && computer.phase === "frozen"
-              ? "Stopped"
+              ? t`Stopped`
               : (shown ?? computer).label;
   const actions: HudAction[] =
     halting || (held && held.phase !== "finished")

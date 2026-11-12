@@ -1,6 +1,7 @@
 import type { ConversationEntry, LookWearables } from "@localdot/protocol";
 import { type ReactNode, type RefObject, useRef, useState } from "react";
 import type { Organize } from "../agent/conversation-list.ts";
+import { t } from "../i18n/index.ts";
 import { TagSwatches } from "../ui/ConversationTag.tsx";
 import { Menu, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
 import { type Align, levelWith, type Side } from "../ui/position.ts";
@@ -65,46 +66,46 @@ export function ConversationMenu({
         against={() =>
           row?.current && list?.current ? levelWith(row.current, list.current) : undefined
         }
-        label="Conversation actions"
+        label={t`Conversation actions`}
         side={side}
         align={align}
       >
         {children}
         {onStartSelecting && (
           <MenuItem icon="check-circle" onSelect={onStartSelecting}>
-            Select
+            {t`Select`}
           </MenuItem>
         )}
         <MenuItem icon="type" kbd={renameKeys} onSelect={onRename}>
-          Rename
+          {t`Rename`}
         </MenuItem>
         <MenuItem icon="smile" onSelect={() => setDressing(shown)}>
-          Change look
+          {t`Change look`}
         </MenuItem>
         <MenuItem
           icon={shown?.pinned ? "pin-off" : "pin"}
           onSelect={() => onOrganize({ pinned: !shown?.pinned })}
         >
-          {shown?.pinned ? "Unpin" : "Pin to top"}
+          {shown?.pinned ? t`Unpin` : t`Pin to top`}
         </MenuItem>
         <MenuItem
           icon={archived ? "archive-restore" : "archive"}
           disabledReason={
-            running && !archived ? "Stop this task before archiving its conversation." : undefined
+            running && !archived ? t`Stop this task before archiving its conversation.` : undefined
           }
           onSelect={() => onOrganize({ archived: !archived })}
         >
-          {archived ? "Unarchive" : "Archive"}
+          {archived ? t`Unarchive` : t`Archive`}
         </MenuItem>
         <MenuSeparator />
         <TagSwatches value={shown?.tag ?? null} onSelect={(tag) => onOrganize({ tag })} />
         <MenuSeparator />
         <MenuItem
           icon="trash"
-          disabledReason={running ? "Stop this task before deleting its conversation." : undefined}
+          disabledReason={running ? t`Stop this task before deleting its conversation.` : undefined}
           onSelect={onDelete}
         >
-          Delete conversation
+          {t`Delete conversation`}
         </MenuItem>
       </Menu>
       <LookChooser

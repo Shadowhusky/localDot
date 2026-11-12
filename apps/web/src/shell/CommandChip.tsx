@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
 import { useEffect } from "react";
 import { copyBlocked, useCopy } from "../agent/useCopy.ts";
+import { t } from "../i18n/index.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import "./sign-in.css";
@@ -17,14 +18,14 @@ export function CommandChip({
 }) {
   const { state, copy } = useCopy();
   useEffect(() => {
-    if (state === "copied") announce("copy", "Copied");
+    if (state === "copied") announce("copy", t`Copied`);
   }, [state]);
   return (
     <div className={clsx("command-chip", className)} data-size={size}>
       <code>{text}</code>
       <IconButton
         icon={state === "copied" ? "check" : "copy"}
-        label={state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : "Copy"}
+        label={state === "copied" ? t`Copied` : state === "failed" ? t`Couldn't copy` : t`Copy`}
         disabledReason={copyBlocked(text)}
         onClick={() => copy(text)}
       />

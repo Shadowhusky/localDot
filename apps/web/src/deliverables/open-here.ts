@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { showToast } from "../ui/Toast.tsx";
 import { DeliverableError, openOnMac } from "./api.ts";
@@ -14,9 +15,9 @@ export async function openHere(
 ): Promise<void> {
   try {
     await openOnMac(api, sessionId, name, version);
-    showToast({ title: `Opened ${name} on your Mac`, tone: "success" });
+    showToast({ title: t`Opened ${name} on your Mac`, tone: "success" });
   } catch (error) {
     const said = error instanceof DeliverableError && SPOKEN.has(error.status) && error.message;
-    showToast({ title: said || `Couldn't open ${name} on your Mac.`, tone: "danger" });
+    showToast({ title: said || t`Couldn't open ${name} on your Mac.`, tone: "danger" });
   }
 }

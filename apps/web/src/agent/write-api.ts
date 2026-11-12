@@ -1,4 +1,5 @@
 import { keyLikePresent, ReviseLink, type TaskModelRef, ULID_PATTERN } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 export type MessageMode = "new" | "steer" | "followup";
@@ -22,8 +23,8 @@ export class DeliveryFailure extends Error {
   ) {
     super(
       uncertain
-        ? "The reply was lost or could not be verified. This message may already have been accepted."
-        : "This message was not accepted. Check the computer and task, then try again.",
+        ? t`The reply was lost or could not be verified. This message may already have been accepted.`
+        : t`This message was not accepted. Check the computer and task, then try again.`,
     );
     this.name = "DeliveryFailure";
   }

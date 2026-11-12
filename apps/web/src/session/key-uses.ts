@@ -1,4 +1,5 @@
 import type { KeyUseState } from "@localdot/stage";
+import { t } from "../i18n/index.ts";
 
 export type { KeyUseState };
 
@@ -27,12 +28,19 @@ export function stepRow<S extends object>(step: S): S & { kind: "step" } {
 
 export function keyUseRow(k: KeyUseState): KeyUseRowView {
   const blocked = k.decision !== "allow";
-  const key = k.secretId === "unknown" ? "an unknown key" : `${k.secretId} key`;
+  const unknown = k.secretId === "unknown";
+  const label = blocked
+    ? unknown
+      ? t`Blocked an unknown key → ${k.host}`
+      : t`Blocked ${k.secretId} key → ${k.host}`
+    : unknown
+      ? t`Used an unknown key → ${k.host}`
+      : t`Used ${k.secretId} key → ${k.host}`;
   return {
     kind: "key",
     id: k.id,
     t: k.t,
-    label: `${blocked ? "Blocked" : "Used"} ${key} → ${k.host}`,
+    label,
     detail: `${k.method} ${k.path}`,
     blocked,
     count: 1,

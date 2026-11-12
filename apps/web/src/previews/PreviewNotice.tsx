@@ -1,14 +1,15 @@
 import { useRef } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Popover } from "../ui/Popover.tsx";
 import { type PreviewNoticeState, type Previews, unavailable } from "./PreviewsContext.tsx";
 import "../ui/previews.css";
 
 const TITLES = {
-  "needs-tailscale": "Previews open over Tailscale",
-  "needs-update": "Update your computer to open previews",
-  "computer-off": "Your computer is off",
-  ready: "Couldn't open the preview",
+  "needs-tailscale": tr("Previews open over Tailscale"),
+  "needs-update": tr("Update your computer to open previews"),
+  "computer-off": tr("Your computer is off"),
+  ready: tr("Couldn't open the preview"),
 } as const;
 
 // Beside the chip or button that was tapped: why the preview didn't open, and the step that fixes it.
@@ -33,7 +34,7 @@ export function PreviewNotice({ previews }: { previews: Previews | null }) {
         previews.openSettings(shown.anchor);
       }}
     >
-      Open settings
+      {t`Open settings`}
     </Button>
   );
   return (
@@ -43,18 +44,18 @@ export function PreviewNotice({ previews }: { previews: Previews | null }) {
       anchor={anchor}
       title={
         shown.copy && shown.link
-          ? "Copy the link"
+          ? t`Copy the link`
           : shown.link
-            ? "Your preview is ready"
+            ? t`Your preview is ready`
             : TITLES[state ?? "ready"]
       }
       className="preview-notice"
     >
       <p className="preview-notice-text">
         {shown.copy && shown.link
-          ? "Your browser didn't let localDot copy it. Select it to copy it yourself: it opens the app once, within two minutes."
+          ? t`Your browser didn't let localDot copy it. Select it to copy it yourself: it opens the app once, within two minutes.`
           : shown.link
-            ? "Your browser kept it from opening a new tab."
+            ? t`Your browser kept it from opening a new tab.`
             : state
               ? unavailable(state, shown.refusal?.message).message
               : shown.refusal?.message}
@@ -69,7 +70,7 @@ export function PreviewNotice({ previews }: { previews: Previews | null }) {
             rel="noopener noreferrer"
             onClick={close}
           >
-            Open preview
+            {t`Open preview`}
           </a>
         )}
         {state === "needs-tailscale" && settings}
@@ -85,7 +86,7 @@ export function PreviewNotice({ previews }: { previews: Previews | null }) {
                 close();
               }}
             >
-              Update
+              {t`Update`}
             </Button>
           ) : (
             settings
@@ -99,7 +100,7 @@ export function PreviewNotice({ previews }: { previews: Previews | null }) {
               else previews.open(shown.request, shown.anchor);
             }}
           >
-            Try again
+            {t`Try again`}
           </Button>
         )}
       </div>

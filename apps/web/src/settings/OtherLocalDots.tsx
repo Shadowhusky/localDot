@@ -1,6 +1,7 @@
 import { type LocalDotLink, outfit } from "@localdot/protocol";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Dot } from "../dot/Dot.tsx";
+import { t } from "../i18n/index.ts";
 import {
   deviceOnly,
   localDotHost,
@@ -39,8 +40,8 @@ const LIST_MAX = 12;
 
 // Why one this browser came from can't join the list every device shares, or undefined when it can.
 function keepReason(url: string, links: readonly LocalDotLink[]): string | undefined {
-  if (deviceOnly(url)) return "Its address works only on this device";
-  if (links.length >= LIST_MAX) return "The list is full";
+  if (deviceOnly(url)) return t`Its address works only on this device`;
+  if (links.length >= LIST_MAX) return t`The list is full`;
 }
 
 // What that localDot's dot wears there, once this browser has come from it.
@@ -98,7 +99,7 @@ export function OtherLocalDots({
   };
   return (
     <div ref={scope}>
-      <GroupHead title="Your other localDots" />
+      <GroupHead title={t`Your other localDots`} />
       <Group>
         {links.map((link) =>
           link.url === editing ? (
@@ -128,24 +129,24 @@ export function OtherLocalDots({
                     }}
                     variant="quiet"
                     size="sm"
-                    aria-label={`Edit ${link.name}`}
+                    aria-label={t`Edit ${link.name}`}
                     onClick={() => {
                       setReturnTo(null);
                       setEditing(link.url);
                     }}
                   >
-                    Edit
+                    {t`Edit`}
                   </Button>
                   <Button
                     variant="quiet"
                     size="sm"
-                    aria-label={`Remove ${link.name}`}
+                    aria-label={t`Remove ${link.name}`}
                     onClick={() => {
                       onChange(links.filter((other) => other.url !== link.url));
                       onForget(link.url);
                     }}
                   >
-                    Remove
+                    {t`Remove`}
                   </Button>
                 </>
               }
@@ -159,25 +160,25 @@ export function OtherLocalDots({
               key={entry.url}
               leading={<Look entry={entry} />}
               label={entry.name}
-              detail={`${localDotHost(entry.url)} · Only in this browser`}
+              detail={t`${localDotHost(entry.url)} · Only in this browser`}
               trailing={
                 <>
                   <Button
                     variant="quiet"
                     size="sm"
-                    aria-label={`Keep ${entry.name} in the list`}
+                    aria-label={t`Keep ${entry.name} in the list`}
                     disabledReason={keepReason(entry.url, links)}
                     onClick={() => onChange([...links, { name: entry.name, url: entry.url }])}
                   >
-                    Keep
+                    {t`Keep`}
                   </Button>
                   <Button
                     variant="quiet"
                     size="sm"
-                    aria-label={`Forget ${entry.name}`}
+                    aria-label={t`Forget ${entry.name}`}
                     onClick={() => onForget(entry.url)}
                   >
-                    Forget
+                    {t`Forget`}
                   </Button>
                 </>
               }
@@ -186,7 +187,7 @@ export function OtherLocalDots({
         {!editing && (
           <>
             <Field
-              label="Name"
+              label={t`Name`}
               inline
               className="ui-group-row"
               error={tried ? (nameProblem ?? undefined) : undefined}
@@ -195,14 +196,14 @@ export function OtherLocalDots({
                 size="sm"
                 value={name}
                 maxLength={40}
-                placeholder="Office PC"
+                placeholder={t`Office PC`}
                 autoComplete="off"
                 onChange={(event) => setName(event.target.value)}
                 onKeyDown={onEnter(add)}
               />
             </Field>
             <Field
-              label="Address"
+              label={t`Address`}
               inline
               className="ui-group-row"
               error={tried ? (problem ?? undefined) : undefined}
@@ -221,10 +222,10 @@ export function OtherLocalDots({
               />
             </Field>
             <GroupRow
-              label="Add this localDot"
+              label={t`Add this localDot`}
               trailing={
                 <Button size="sm" onClick={add}>
-                  Add
+                  {t`Add`}
                 </Button>
               }
             />
@@ -232,9 +233,7 @@ export function OtherLocalDots({
         )}
       </Group>
       <GroupNote>
-        Switch to one from the localDot menu at the top left. Paste a sign-in link from that
-        computer to sign this browser in there as you add it. A localDot you switch here from is
-        listed in this browser too.
+        {t`Switch to one from the localDot menu at the top left. Paste a sign-in link from that computer to sign this browser in there as you add it. A localDot you switch here from is listed in this browser too.`}
       </GroupNote>
     </div>
   );
@@ -273,7 +272,7 @@ function LocalDotEditor({
   return (
     <>
       <Field
-        label="Name"
+        label={t`Name`}
         inline
         className="ui-group-row"
         error={tried ? (nameProblem ?? undefined) : undefined}
@@ -290,10 +289,10 @@ function LocalDotEditor({
         />
       </Field>
       <Field
-        label="Address"
+        label={t`Address`}
         inline
         className="ui-group-row"
-        description="Changing the address means signing in again there."
+        description={t`Changing the address means signing in again there.`}
         error={tried ? (problem ?? undefined) : undefined}
       >
         <TextField
@@ -309,14 +308,14 @@ function LocalDotEditor({
         />
       </Field>
       <GroupRow
-        label={`Editing ${link.name}`}
+        label={t`Editing ${link.name}`}
         trailing={
           <>
             <Button variant="quiet" size="sm" onClick={onCancel}>
-              Cancel
+              {t`Cancel`}
             </Button>
             <Button size="sm" onClick={save}>
-              Save
+              {t`Save`}
             </Button>
           </>
         }

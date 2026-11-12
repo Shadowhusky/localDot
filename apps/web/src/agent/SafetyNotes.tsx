@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 import { AllowedNotice } from "./AllowedNotice.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
@@ -28,7 +29,7 @@ export function SafetyNotes({
       id: ERROR_TOAST,
       title: safety.error,
       tone: "danger",
-      action: { label: "Check again", onAction: () => checkAgain.current() },
+      action: { label: t`Check again`, onAction: () => checkAgain.current() },
     });
   }, [safety.error]);
   useEffect(() => () => dismissToast(ERROR_TOAST), []);

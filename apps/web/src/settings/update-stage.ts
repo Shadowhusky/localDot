@@ -1,4 +1,5 @@
 import type { AppUpdateStatus } from "../../../../packages/protocol/src/app-update.ts";
+import { tr } from "../i18n/index.ts";
 
 // What an update goes through, as the person watching it sees it. The last is the page's own.
 export const UPDATE_STAGES = [
@@ -13,13 +14,13 @@ export const UPDATE_STAGES = [
 export type UpdateStage = (typeof UPDATE_STAGES)[number];
 
 export const STAGE_NAMES: Record<UpdateStage, string> = {
-  check: "Check for updates",
-  download: "Download",
-  verify: "Verify the download",
-  images: "Prepare the computer",
-  install: "Install",
-  restart: "Restart",
-  reconnect: "Reconnect",
+  check: tr("Check for updates"),
+  download: tr("Download"),
+  verify: tr("Verify the download"),
+  images: tr("Prepare the computer"),
+  install: tr("Install"),
+  restart: tr("Restart"),
+  reconnect: tr("Reconnect"),
 };
 
 export interface UpdateView {

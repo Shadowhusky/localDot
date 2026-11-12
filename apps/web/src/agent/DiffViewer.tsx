@@ -1,6 +1,7 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Read-only diff lines have no child state; line position identifies each span.
 import { Fragment, useMemo } from "react";
 import { DIFF_LIMITS, diffPreview } from "../deliverables/viewer/diff.ts";
+import { t } from "../i18n/index.ts";
 import { diffStat } from "./activity.ts";
 import { changedFiles } from "./changed-files.ts";
 import type { AgentChange } from "./model.ts";
@@ -66,11 +67,11 @@ export function DiffViewer({
     <section
       className="diff-viewer step-preview-resource"
       data-compact={compact || undefined}
-      aria-label="File change"
+      aria-label={t`File change`}
     >
       {!preview.unavailable && (
         <StepPreviewButton
-          label="Preview code changes"
+          label={t`Preview code changes`}
           resource={
             file
               ? { kind: "files", entries: [file], index: 0, view: "changes" }
@@ -81,21 +82,21 @@ export function DiffViewer({
       <p className="diff-head">
         <span className="diff-op" hidden={compact}>
           {change.type === "memory"
-            ? "Memory"
+            ? t`Memory`
             : change.op === "create"
-              ? "Created"
+              ? t`Created`
               : change.op === "delete"
-                ? "Deleted"
-                : "Changed"}
+                ? t`Deleted`
+                : t`Changed`}
         </span>
         <span className="diff-path">{change.path.slice(0, DIFF_LIMITS.path)}</span>
         {stat && !compact && <span className="diff-stat num">{stat}</span>}
       </p>
       {preview.unavailable ? (
-        <p className="diff-empty">No text diff available.</p>
+        <p className="diff-empty">{t`No text diff available.`}</p>
       ) : (
         <>
-          <section className="diff-text" aria-label="Unified text diff">
+          <section className="diff-text" aria-label={t`Unified text diff`}>
             <pre>
               {preview.lines.map((line, index) => {
                 const row = numbered[index];
@@ -112,9 +113,9 @@ export function DiffViewer({
           </section>
           <div className="diff-foot">
             {(change.truncated || preview.truncated) && (
-              <span className="diff-shortened">Shortened to the kept text.</span>
+              <span className="diff-shortened">{t`Shortened to the kept text.`}</span>
             )}
-            <OutputCopy text={preview.text} label="Copy diff" />
+            <OutputCopy text={preview.text} label={t`Copy diff`} />
           </div>
         </>
       )}

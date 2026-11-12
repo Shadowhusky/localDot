@@ -1,10 +1,9 @@
 import { clsx } from "clsx";
 import { type CSSProperties, useId } from "react";
+import { t } from "../i18n/index.ts";
 
 // From this share of the limit the fill brightens and says so in words, never by colour alone.
 export const NEAR_LIMIT = 0.9;
-const NEAR_LIMIT_WORDS = "Almost at limit";
-const AT_LIMIT_WORDS = "Limit reached";
 
 export interface MeterProps {
   label: string;
@@ -20,9 +19,14 @@ export function Meter({ label, value, max = 100, valueText, className }: MeterPr
   const id = useId();
   const used = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   const near = used >= NEAR_LIMIT;
-  const words = used >= 1 ? AT_LIMIT_WORDS : NEAR_LIMIT_WORDS;
+  const full = used >= 1;
   const amount = valueText ?? `${Math.round(used * 100)}%`;
-  const shown = near ? `${words} · ${amount}` : amount;
+  const shown = near
+    ? full
+      ? t`Limit reached · ${amount}`
+      : t`Almost at limit · ${amount}`
+    : amount;
+  const spoken = full ? t`${amount}, limit reached` : t`${amount}, almost at limit`;
   return (
     <div
       className={clsx("ui-meter", className)}
@@ -44,7 +48,7 @@ export function Meter({ label, value, max = 100, valueText, className }: MeterPr
         aria-valuemin={0}
         aria-valuemax={max}
         aria-valuenow={Math.min(max, Math.max(0, value))}
-        aria-valuetext={near ? `${amount}, ${words.toLowerCase()}` : amount}
+        aria-valuetext={near ? spoken : amount}
         className="ui-meter-track"
       >
         <span className="ui-meter-fill" />

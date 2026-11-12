@@ -1,6 +1,7 @@
 import { BudgetRaiseRequest, refusalAdvice, STALL } from "@localdot/protocol";
 import { useEffect, useRef, useState } from "react";
 import { dollars } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { ownedPause } from "../session/status.ts";
 import type { ReportAbout } from "../settings/reports-api.ts";
 import type { SettingsTip } from "../settings/settings-link.ts";
@@ -12,18 +13,15 @@ import { Meter } from "../ui/Meter.tsx";
 import { MoneyField } from "../ui/MoneyField.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { planWait } from "./FixCards.tsx";
-import { resetTime } from "./UsageFooter.tsx";
+import { resetWhen } from "./UsageFooter.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 
-const UNEXPLAINED =
-  "The task could not continue. Check the reported reason and repair its provider or model before deciding whether to continue.";
+const UNEXPLAINED = t`The task could not continue. Check the reported reason and repair its provider or model before deciding whether to continue.`;
 export function recoveryMessage(reason: string | undefined, local: boolean): string {
   return knownReason(reason, local)?.text ?? UNEXPLAINED;
 }
 // A task keeps its model; another one takes a new task, and the conversation carries on.
-const ANOTHER_MODEL =
-  "pick another model in Settings, then stop this task and send your message again.";
 function knownReason(
   reason: string | undefined,
   local: boolean,
@@ -31,80 +29,80 @@ function knownReason(
 ): { title: string; text: string } | undefined {
   if (reason === STALL.budget)
     return {
-      title: "I stopped at your spending limit",
-      text: "I stopped at the spending limit. Raise it to continue; what was spent stays counted.",
+      title: t`I stopped at your spending limit`,
+      text: t`I stopped at the spending limit. Raise it to continue; what was spent stays counted.`,
     };
   if (reason === STALL.keyd)
     return {
-      title: "I can't reach your keys",
-      text: "dot can't reach your keys. Bring Keys back online, check the task, then continue.",
+      title: t`I can't reach your keys`,
+      text: t`dot can't reach your keys. Bring Keys back online, check the task, then continue.`,
     };
   if (reason === STALL.providerLimit)
     return {
-      title: "Your provider's credit or usage limit is reached",
-      text: "Add credit or wait for your plan to reset, then continue. You can also choose another model and continue with it.",
+      title: t`Your provider's credit or usage limit is reached`,
+      text: t`Add credit or wait for your plan to reset, then continue. You can also choose another model and continue with it.`,
     };
   if (reason === STALL.modelBusy)
     return {
-      title: "The model is busy",
-      text: "I'll try again by myself in a moment, or you can try now.",
+      title: t`The model is busy`,
+      text: t`I'll try again by myself in a moment, or you can try now.`,
     };
   if (reason === STALL.modelRefused)
     return {
-      title: "The provider could not process my request",
-      text: `${refusalAdvice(detail)}, then try again, or ${ANOTHER_MODEL}`,
+      title: t`The provider could not process my request`,
+      text: t`${refusalAdvice(detail)}, then try again, or pick another model in Settings, then stop this task and send your message again.`,
     };
   if (reason === STALL.keyReenter)
     return {
-      title: "A key needs re-entering",
-      text: "I can't use this key as it's stored. Enter it again in Keys, then continue. Its name and everything that uses it stay the same.",
+      title: t`A key needs re-entering`,
+      text: t`I can't use this key as it's stored. Enter it again in Keys, then continue. Its name and everything that uses it stay the same.`,
     };
   if (reason === STALL.keyRebound)
     return {
-      title: "A key was changed outside localDot",
-      text: "Where this key is sent was changed outside localDot, so I won't use it. Remove it in Keys and add it again, then continue.",
+      title: t`A key was changed outside localDot`,
+      text: t`Where this key is sent was changed outside localDot, so I won't use it. Remove it in Keys and add it again, then continue.`,
     };
   if (reason === STALL.actionLimit)
     return {
-      title: "I reached your action limit",
-      text: "I stop after the number of actions you set in Settings. Continue when you're ready; the count starts again.",
+      title: t`I reached your action limit`,
+      text: t`I stop after the number of actions you set in Settings. Continue when you're ready; the count starts again.`,
     };
   if (reason === "chatgpt sign-in expired" || reason === "chatgpt account changed")
     return {
-      title: "Sign in to ChatGPT again",
-      text: "Sign in to your ChatGPT account again, then continue this task.",
+      title: t`Sign in to ChatGPT again`,
+      text: t`Sign in to your ChatGPT account again, then continue this task.`,
     };
   if (reason === "chatgpt plan limit reached")
     return {
-      title: "Paused at your plan's limit",
-      text: "Your ChatGPT plan is at its limit. Wait for it to reset, or choose another model and continue with it.",
+      title: t`Paused at your plan's limit`,
+      text: t`Your ChatGPT plan is at its limit. Wait for it to reset, or choose another model and continue with it.`,
     };
   if (reason === "claude code sign-in expired")
     return {
-      title: "Sign in to Claude Code again",
-      text: "Claude Code on this Mac isn't signed in. Run claude auth login in Terminal (its setup shows the command too), then continue this task.",
+      title: t`Sign in to Claude Code again`,
+      text: t`Claude Code on this Mac isn't signed in. Run claude auth login in Terminal (its setup shows the command too), then continue this task.`,
     };
   if (reason === STALL.fixedElsewhere)
     return {
-      title: "That's fixed now",
-      text: "It was fixed outside this task, so I stayed stopped. Continue, and I'll pick up where I stopped.",
+      title: t`That's fixed now`,
+      text: t`It was fixed outside this task, so I stayed stopped. Continue, and I'll pick up where I stopped.`,
     };
   if (reason === STALL.keysLocked)
     return {
-      title: "Your saved keys are unlocked",
-      text: "Continue, and I'll pick up where I stopped.",
+      title: t`Your saved keys are unlocked`,
+      text: t`Continue, and I'll pick up where I stopped.`,
     };
   if (reason === "claude code plan limit reached")
     return {
-      title: "Paused at your plan's limit",
-      text: "Your Claude plan is at its limit. Wait for it to reset, or choose another model and continue with it.",
+      title: t`Paused at your plan's limit`,
+      text: t`Your Claude plan is at its limit. Wait for it to reset, or choose another model and continue with it.`,
     };
   if (reason === STALL.modelUnavailable)
     return {
-      title: "The model isn't answering",
+      title: t`The model isn't answering`,
       text: local
-        ? "The local model is unavailable. Start its server and load the chosen model, then continue."
-        : `I tried several times. Try again now, or ${ANOTHER_MODEL}`,
+        ? t`The local model is unavailable. Start its server and load the chosen model, then continue.`
+        : t`I tried several times. Try again now, or pick another model in Settings, then stop this task and send your message again.`,
     };
   return undefined;
 }
@@ -114,22 +112,27 @@ const FIXES: Record<
   { label: string; icon?: IconName; section: "models" | "keys"; tip?: SettingsTip }
 > = {
   "chatgpt sign-in expired": {
-    label: "Sign in to ChatGPT",
+    label: tr("Sign in to ChatGPT"),
     section: "models",
     tip: "models-chatgpt",
   },
   "chatgpt account changed": {
-    label: "Sign in to ChatGPT",
+    label: tr("Sign in to ChatGPT"),
     section: "models",
     tip: "models-chatgpt",
   },
   "claude code sign-in expired": {
-    label: "Open Claude Code setup",
+    label: tr("Open Claude Code setup"),
     section: "models",
     tip: "models-claude-code",
   },
-  [STALL.keyd]: { label: "Open Keys", icon: "key-round", section: "keys", tip: "keys-protection" },
-  [STALL.keyRebound]: { label: "Open Keys", icon: "key-round", section: "keys" },
+  [STALL.keyd]: {
+    label: tr("Open Keys"),
+    icon: "key-round",
+    section: "keys",
+    tip: "keys-protection",
+  },
+  [STALL.keyRebound]: { label: tr("Open Keys"), icon: "key-round", section: "keys" },
 };
 // What a step adds to the limit. Two are offered: the smallest that covers what the next request
 // needs, and the one after it.
@@ -147,19 +150,19 @@ export function spendingText(data: {
   spentUSD: number;
   needUSD?: number;
 }): string {
-  const limit = data.scope === "day" ? "today's limit" : "this task's limit";
   const left = Math.round(Math.max(0, data.limitUSD - data.spentUSD) * 100) / 100;
-  const why =
-    data.needUSD && left > 0
-      ? `dot's next step could cost up to ${dollars(data.needUSD)}, and ${dollars(left)} of ${limit} is left.`
-      : `dot has spent all of ${limit}.`;
+  if (data.needUSD && left > 0) {
+    const need = dollars(data.needUSD);
+    return data.scope === "day"
+      ? t`dot's next step could cost up to ${need}, and ${dollars(left)} of today's limit is left.`
+      : t`dot's next step could cost up to ${need}, and ${dollars(left)} of this task's limit is left. Raise the limit to continue; what was spent stays counted.`;
+  }
   return data.scope === "day"
-    ? why
-    : `${why} Raise the limit to continue; what was spent stays counted.`;
+    ? t`dot has spent all of today's limit.`
+    : t`dot has spent all of this task's limit. Raise the limit to continue; what was spent stays counted.`;
 }
 // The daily limit belongs to the key layer and is shared by every task, so no raise here moves it.
-const DAY_LIMIT =
-  "Today's spending limit is used up. All tasks share it, and it resets at midnight.";
+const DAY_LIMIT = t`Today's spending limit is used up. All tasks share it, and it resets at midnight.`;
 const CUSTOM = "other";
 const MAX_LIMIT = 10_000;
 
@@ -172,19 +175,23 @@ export function raiseChoice(choice: string, custom: string, limitUSD: number): n
       value <= limitUSD ||
       !BudgetRaiseRequest.safeParse({ budgetUSD: value }).success)
   )
-    return `Enter a limit above ${dollars(limitUSD)}, up to ${dollars(MAX_LIMIT)}.`;
+    return t`Enter a limit above ${dollars(limitUSD)}, up to ${dollars(MAX_LIMIT)}.`;
   return Math.round(value * 100) / 100;
 }
 
-// When a plan's limit lifts, by the last of the windows that reached it.
+// When a plan's limit lifts, by the last of the windows that reached it, said as a sentence.
 export function planResets(model: AgentSessionView["model"]): string | null {
-  return resetTime(
+  const when = resetWhen(
     model.subscription?.data.windows
       .filter((window) => window.usedPercent >= 100 || model.subscription?.data.limitReached)
       .map((window) => window.resetsAt)
       .filter((at): at is number => at !== undefined)
       .sort((a, b) => b - a)[0],
   );
+  if (!when) return null;
+  return when.day
+    ? t`Your plan's limit resets ${when.day}, ${when.time}.`
+    : t`Your plan's limit resets ${when.time}.`;
 }
 
 // Reasons whose one fix is to try the model again, with another model as the way out.
@@ -242,7 +249,7 @@ export function TaskRecovery({
     setContinuing(true);
     void run().then((sent) => {
       setContinuing(false);
-      setProblem(sent ? null : "That didn't go through. Try again.");
+      setProblem(sent ? null : t`That didn't go through. Try again.`);
     });
   };
   const carryOn = useRef(send);
@@ -257,14 +264,14 @@ export function TaskRecovery({
   const waiting = wait?.waiting ? wait : undefined;
   if (agent.interrupted && !controls.fenced)
     return (
-      <section className="thread-recovery" aria-label="Task recovery">
+      <section className="thread-recovery" aria-label={t`Task recovery`}>
         <h3 className="thread-recovery-title">
-          {waiting ? waiting.title : "I was cut off before I finished"}
+          {waiting ? waiting.title : t`I was cut off before I finished`}
         </h3>
         <p className="thread-recovery-text">
           {waiting
             ? waiting.text
-            : "localDot restarted while I was working. Continue, and I'll pick up where I left off."}
+            : t`localDot restarted while I was working. Continue, and I'll pick up where I left off.`}
         </p>
         <div className="thread-recovery-actions">
           {onCarryOn || !computer ? (
@@ -272,10 +279,10 @@ export function TaskRecovery({
               variant="primary"
               icon="continue"
               busy={continuing}
-              disabledReason={onCarryOn ? undefined : "Your computer is on its way"}
+              disabledReason={onCarryOn ? undefined : t`Your computer is on its way`}
               onClick={() => onCarryOn && send(onCarryOn)}
             >
-              {waiting ? "Continue now" : "Continue"}
+              {waiting ? t`Continue now` : t`Continue`}
             </Button>
           ) : (
             <Button
@@ -288,12 +295,12 @@ export function TaskRecovery({
                 computer.run();
               }}
             >
-              {`${computer.label} and continue`}
+              {t`${computer.label} and continue`}
             </Button>
           )}
           {waiting && onDontContinue && (
             <Button variant="quiet" busy={continuing} onClick={() => send(onDontContinue)}>
-              Don't continue
+              {t`Don't continue`}
             </Button>
           )}
         </div>
@@ -316,11 +323,10 @@ export function TaskRecovery({
   if (agent.model.ended?.reason === "error" && agent.sessionId && onReport && !controls.fenced) {
     const why = state?.state === "error" ? state.reason : undefined;
     return (
-      <section className="thread-recovery" aria-label="Task recovery">
-        <h3 className="thread-recovery-title">The task ended with an error</h3>
+      <section className="thread-recovery" aria-label={t`Task recovery`}>
+        <h3 className="thread-recovery-title">{t`The task ended with an error`}</h3>
         <p className="thread-recovery-text">
-          If it keeps happening, send a report so the localDot team can see what went wrong. You see
-          everything in it before it goes.
+          {t`If it keeps happening, send a report so the localDot team can see what went wrong. You see everything in it before it goes.`}
         </p>
         <div className="thread-recovery-actions">
           <Button
@@ -328,12 +334,12 @@ export function TaskRecovery({
             onClick={(event) =>
               report(
                 event.currentTarget,
-                why ? `The task ended: ${why}` : "The task ended with an error.",
+                why ? t`The task ended: ${why}` : t`The task ended with an error.`,
                 why,
               )
             }
           >
-            Report this problem
+            {t`Report this problem`}
           </Button>
         </div>
       </section>
@@ -390,32 +396,33 @@ export function TaskRecovery({
     <Button
       variant="primary"
       busy={continuing}
-      disabledReason={onContinue ? undefined : "The task can't continue right now."}
+      disabledReason={onContinue ? undefined : t`The task can't continue right now.`}
       onClick={() => onContinue && send(onContinue)}
     >
-      Continue
+      {t`Continue`}
     </Button>
   ) : (
     <Button
       variant={raising || reentry !== undefined || fix ? "secondary" : "primary"}
       disabledReason={
-        resumeBlocked ?? (controls.canResumeTask ? undefined : "The task can't continue right now.")
+        resumeBlocked ??
+        (controls.canResumeTask ? undefined : t`The task can't continue right now.`)
       }
       busy={continuing}
       onClick={() => send(onResumeSelected ?? controls.resume)}
     >
-      {raising ? "Continue without raising" : retry ? "Retry now" : "Continue"}
+      {raising ? t`Continue without raising` : retry ? t`Retry now` : t`Continue`}
     </Button>
   );
   return (
-    <section className="thread-recovery" aria-label="Task recovery">
+    <section className="thread-recovery" aria-label={t`Task recovery`}>
       <h3 className="thread-recovery-title">
         {reentry
-          ? `Re-enter your ${reentry} key`
+          ? t`Re-enter your ${reentry} key`
           : changed
-            ? `Your ${changed} key was changed outside localDot`
+            ? t`Your ${changed} key was changed outside localDot`
             : (known?.title ??
-              (hold || state.state === "paused" ? "Task paused" : "The task needs attention"))}
+              (hold || state.state === "paused" ? t`Task paused` : t`The task needs attention`))}
       </h3>
       <p className="thread-recovery-text">
         {dayLimit
@@ -424,28 +431,31 @@ export function TaskRecovery({
             ? spendingText(budget.data)
             : (known?.text ?? UNEXPLAINED)}
       </p>
-      {reason && !known && <p className="thread-recovery-reason">Reported reason: {reason}</p>}
+      {reason && !known && (
+        <p className="thread-recovery-reason">{t`Reported reason: ${reason}`}</p>
+      )}
       {state.detail && !reentry && !changed && (
         <p className="thread-recovery-reason">
-          {reason === STALL.modelRefused ? "The provider said" : "The model said"}: {state.detail}
+          {reason === STALL.modelRefused
+            ? t`The provider said: ${state.detail}`
+            : t`The model said: ${state.detail}`}
         </p>
       )}
-      {resets && (
-        <p className="thread-recovery-reason">
-          {resets.replace(/^Resets/, "Your plan's limit resets")}.
-        </p>
-      )}
+      {resets && <p className="thread-recovery-reason">{resets}</p>}
       {!subscription && budget && reason === STALL.budget && (
         <div className="thread-recovery-meter">
           <p className="num">
-            {dollars(budget.data.spentUSD)} of {dollars(budget.data.limitUSD)} spent
-            {budget.data.scope === "day" ? " today" : ""}
+            {budget.data.scope === "day"
+              ? t`${dollars(budget.data.spentUSD)} of ${dollars(budget.data.limitUSD)} spent today`
+              : t`${dollars(budget.data.spentUSD)} of ${dollars(budget.data.limitUSD)} spent`}
           </p>
           <Meter
             value={budget.data.spentUSD}
             max={budget.data.limitUSD}
             label={
-              budget.data.scope === "day" ? "Spent of today's limit" : "Spent of this task's limit"
+              budget.data.scope === "day"
+                ? t`Spent of today's limit`
+                : t`Spent of this task's limit`
             }
           />
         </div>
@@ -453,7 +463,7 @@ export function TaskRecovery({
       {raising ? (
         <form
           className="thread-recovery-raise"
-          aria-label="Raise the spending limit"
+          aria-label={t`Raise the spending limit`}
           onSubmit={(event) => {
             event.preventDefault();
             if (typeof raised !== "number") {
@@ -465,10 +475,10 @@ export function TaskRecovery({
           }}
         >
           <SegmentedControl
-            aria-label="Raise the limit by"
+            aria-label={t`Raise the limit by`}
             items={[
               ...steps.map((raise) => ({ value: String(raise), label: `+$${raise}` })),
-              { value: CUSTOM, label: "Other" },
+              { value: CUSTOM, label: t`Other` },
             ]}
             value={choice}
             onValueChange={(value) => {
@@ -477,7 +487,7 @@ export function TaskRecovery({
             }}
           />
           <Collapse open={choice === CUSTOM} className="thread-recovery-custom">
-            <Field label="New limit" error={problem}>
+            <Field label={t`New limit`} error={problem}>
               <MoneyField
                 placeholder={String(budget.data.limitUSD + 5)}
                 value={custom}
@@ -493,14 +503,16 @@ export function TaskRecovery({
               type="submit"
               variant="primary"
               disabledReason={
-                controls.canRaiseBudget ? undefined : "The limit can't be raised right now."
+                controls.canRaiseBudget ? undefined : t`The limit can't be raised right now.`
               }
             >
               {typeof raised === "number"
-                ? `Raise to ${dollars(raised)}${hold ? "" : " and continue"}`
+                ? hold
+                  ? t`Raise to ${dollars(raised)}`
+                  : t`Raise to ${dollars(raised)} and continue`
                 : hold
-                  ? "Raise the limit"
-                  : "Raise and continue"}
+                  ? t`Raise the limit`
+                  : t`Raise and continue`}
             </Button>
           </div>
         </form>
@@ -517,7 +529,7 @@ export function TaskRecovery({
                     : onSettings(event.currentTarget, "keys")
                 }
               >
-                Re-enter key
+                {t`Re-enter key`}
               </Button>
             )}
             {fix && (
@@ -535,7 +547,7 @@ export function TaskRecovery({
                 variant="secondary"
                 onClick={(event) => onSettings(event.currentTarget, "models")}
               >
-                Change model
+                {t`Change model`}
               </Button>
             )}
           </div>
@@ -547,32 +559,34 @@ export function TaskRecovery({
         </p>
       )}
       {hold && (
-        <p className="thread-recovery-reason">The task stays paused until you press Continue.</p>
+        <p className="thread-recovery-reason">
+          {t`The task stays paused until you press Continue.`}
+        </p>
       )}
-      <Disclosure summary="Recovery options" className="thread-recovery-options">
+      <Disclosure summary={t`Recovery options`} className="thread-recovery-options">
         <div className="thread-recovery-actions">
           {raising && !hold && resume}
           <Button variant="quiet" onClick={(event) => onSettings(event.currentTarget)}>
-            Open Settings
+            {t`Open Settings`}
           </Button>
           <Button variant="quiet" onClick={controls.recheck}>
-            Check task state
+            {t`Check task state`}
           </Button>
           {onReport && (
             <Button
               variant="quiet"
               onClick={(event) =>
-                report(event.currentTarget, known?.title ?? "The task needs attention", reason)
+                report(event.currentTarget, known?.title ?? t`The task needs attention`, reason)
               }
             >
-              Report this problem
+              {t`Report this problem`}
             </Button>
           )}
         </div>
         <p className="thread-note">
           {onResumeSelected
-            ? "Continue starts the next task with your selected model and the conversation so far."
-            : "Continuing keeps this task's model and its spending limit."}
+            ? t`Continue starts the next task with your selected model and the conversation so far.`
+            : t`Continuing keeps this task's model and its spending limit.`}
         </p>
       </Disclosure>
     </section>
