@@ -193,8 +193,16 @@ export class SystemMigration {
           timeoutMs: 120000,
         });
       }
-      if (plan.ldconfig) {
-        await put(clone, JSON.stringify({ remove: [], directories: [], ldconfig: true }));
+      if (plan.ldconfig || plan.appIndex) {
+        await put(
+          clone,
+          JSON.stringify({
+            remove: [],
+            directories: [],
+            ldconfig: plan.ldconfig,
+            appIndex: plan.appIndex,
+          }),
+        );
         await run(clone);
       }
       report({ share: 0.7, detail: "Saving the new version with your apps" });

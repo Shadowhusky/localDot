@@ -243,6 +243,22 @@ describe("daemon browser client", () => {
     );
   });
 
+  it("tells a page the browser's own surface covers from one that refuses", async () => {
+    let error = "covered";
+    const f = await fixture((_request, response) => {
+      response.writeHead(409, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error }));
+    });
+    await expect(f.client.clock(f.permit, f.tab, f.scope)).rejects.toMatchObject({
+      code: "covered",
+      message: expect.stringContaining("one of its own dialogs, bubbles or menus"),
+    });
+    error = "refused";
+    await expect(f.client.clock(f.permit, f.tab, f.scope)).rejects.toMatchObject({
+      code: "refused",
+    });
+  });
+
   it("tells a browser restarting in place from one whose connection is gone", async () => {
     let retry = true;
     const f = await fixture((_request, response) => {

@@ -59,7 +59,8 @@ def setup():
         return inspect_surface(commands, 8, atspi,
                                read_executable=lambda _path: '/usr/lib/chromium/chromium')
     return SimpleNamespace(inspect=inspect, commands=commands, atspi=atspi, field=field,
-                           document=document, toolbar=toolbar, frame=frame, desktop=desktop)
+                           document=document, toolbar=toolbar, frame=frame, desktop=desktop,
+                           application=application)
 
 
 class BrowserSurfaceTests(unittest.TestCase):
@@ -104,6 +105,28 @@ class BrowserSurfaceTests(unittest.TestCase):
                 peer = setup()
                 peer.frame.children.append(Node(role))
                 self.assertIsNone(peer.inspect()['page'])
+
+    def test_says_when_the_browsers_own_surface_covers_the_page(self):
+        for role in ['dialog', 'menu', 'alert']:
+            for where in ['frame', 'application']:
+                with self.subTest(role=role, where=where):
+                    peer = setup()
+                    getattr(peer, where).children.append(Node(role))
+                    self.assertEqual(peer.inspect(), {'window': 8, 'page': None, 'covered': True})
+
+    def test_says_nothing_covers_a_page_refused_for_another_reason(self):
+        peer = setup()
+        peer.frame.children.append(Node('document web'))
+        self.assertEqual(peer.inspect(), {'window': 8, 'page': None})
+        hidden = setup()
+        hidden.frame.children.append(Node('dialog', states={'defunct'}))
+        self.assertIsNotNone(hidden.inspect()['page'])
+        foreign = setup()
+        foreign.frame.children.append(Node('dialog'))
+        self.assertEqual(
+            inspect_surface(foreign.commands, 8, foreign.atspi,
+                            read_executable=lambda _path: '/usr/bin/xterm'),
+            {'window': 8, 'page': None})
 
     def test_refuses_hidden_document_and_invalid_rectangles(self):
         for rect in [[0, 0, 0, 3], [0, 0, 3, -1], [0, 0, 9000, 3]]:

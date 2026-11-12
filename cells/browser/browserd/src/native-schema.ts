@@ -201,17 +201,21 @@ const replies = {
   }),
   arm: schema.strictObject({ mono }),
   clearSelections: schema.strictObject({ cleared: schema.literal(true) }),
-  surface: schema.strictObject({
-    window: windowId,
-    page: schema
-      .strictObject({
-        frame: schema.tuple([coordinate, coordinate, dimension, dimension]),
-        windowFrame: schema.tuple([coordinate, coordinate, dimension, dimension]),
-        urlHash: schema.string().regex(/^[a-f0-9]{64}$/u),
-        focus: schema.enum(["page", "chrome", "unknown"]),
-      })
-      .nullable(),
-  }),
+  surface: schema.union([
+    schema.strictObject({
+      window: windowId,
+      page: schema
+        .strictObject({
+          frame: schema.tuple([coordinate, coordinate, dimension, dimension]),
+          windowFrame: schema.tuple([coordinate, coordinate, dimension, dimension]),
+          urlHash: schema.string().regex(/^[a-f0-9]{64}$/u),
+          focus: schema.enum(["page", "chrome", "unknown"]),
+        })
+        .nullable(),
+    }),
+    // The browser's own dialog, bubble or menu is over the page.
+    schema.strictObject({ window: windowId, page: schema.null(), covered: schema.literal(true) }),
+  ]),
   move: schema.strictObject({ mono }),
   click: schema.strictObject({
     button: schema.number().int().min(1).max(3),

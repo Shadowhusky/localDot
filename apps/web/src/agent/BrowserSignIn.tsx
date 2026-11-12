@@ -194,40 +194,52 @@ export function BrowserSignIn({
         </p>
       ) : signingIn ? (
         <>
-          <strong>{t`Sign-in mode is on — you're in control`}</strong>
-          <p role="status">
-            {t`Sign in now in the browser, then choose Hand back. dot can't see the page while you sign in, and stays signed in afterwards.`}
-          </p>
-          {defaulted.current && <p>{OWN_BROWSER_LINE}</p>}
-          <p>{SIGN_IN_MODE_LIMITS}</p>
+          <div className="thread-browser-signin-words">
+            <strong>{t`Sign-in mode is on — you're in control`}</strong>
+            <p role="status">
+              {t`Sign in now in the browser, then choose Hand back. dot can't see the page while you sign in, and stays signed in afterwards.`}
+            </p>
+          </div>
+          <div className="thread-browser-signin-notes">
+            {defaulted.current && <p>{OWN_BROWSER_LINE}</p>}
+            <p>{SIGN_IN_MODE_LIMITS}</p>
+            <p>{PASSKEY_LINE}</p>
+          </div>
         </>
       ) : ownBrowser && !error ? (
         <p role="status">{OWN_BROWSER_LINE}</p>
       ) : (
         <>
           {saved && (
-            <div className="thread-browser-signin-saved">
-              <strong>{t`Your saved login for ${saved.site}`}</strong>
+            <div className="thread-browser-signin-row">
+              <div className="thread-browser-signin-words">
+                <strong>{t`Your saved login for ${saved.site}`}</strong>
+                <p>{t`localDot enters it on this site without sharing it with dot.`}</p>
+              </div>
               <Button variant="primary" busy={filling} onClick={() => void fill()}>
                 {saved.username ? t`Sign in as ${saved.username}` : t`Fill saved password`}
               </Button>
-              <p>{t`localDot enters it on this site without sharing it with dot.`}</p>
             </div>
           )}
           {fillLine && <p role="status">{fillLine}</p>}
-          <strong>{t`Sign in yourself`}</strong>
-          <p>
-            {t`If a site won't accept sign-in while dot controls the browser, switch to a browser that only you control — same tabs and sign-ins, with dot's automation disconnected. Sign in, then choose Hand back; dot stays signed in afterwards and never sees your password.`}
-          </p>
-          <Button
-            variant={saved ? "secondary" : "primary"}
-            busy={busy || state?.changing}
-            onClick={() => void start()}
-          >
-            {t`Sign in without agent control`}
-          </Button>
-          <p>{t`Only the browser restarts; your tabs and saved sign-ins are kept.`}</p>
-          <p>{PASSKEY_LINE}</p>
+          <div className="thread-browser-signin-row">
+            <div className="thread-browser-signin-words">
+              <strong>{t`Sign in yourself`}</strong>
+              <p>
+                {t`For a site that won't take a sign-in while dot controls the browser. The browser restarts with dot disconnected; your tabs and saved sign-ins are kept.`}
+              </p>
+            </div>
+            <Button
+              variant={saved ? "secondary" : "primary"}
+              busy={busy || state?.changing}
+              onClick={() => void start()}
+            >
+              {t`Sign in without agent control`}
+            </Button>
+          </div>
+          <div className="thread-browser-signin-notes">
+            <p>{PASSKEY_LINE}</p>
+          </div>
         </>
       )}
       {error && (

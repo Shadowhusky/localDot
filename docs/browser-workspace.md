@@ -283,6 +283,21 @@ including when you are not watching. Choose one in Replay to inspect or export t
 on the live screen is drawn by the page and isn't recorded as such. Manual-control gaps stay private.
 See [the Replay guide](replay.md) for retention, export and recovery details.
 
+## The browser's own dialogs
+
+dot can't read or use a page while one of the browser's own dialogs, bubbles or menus is over it:
+what is on screen there can't be checked, so the web browser refuses until it closes. The image
+keeps the ones no task could answer from coming up: the offer to save a password, the downloads
+bubble, "Restore pages?", Google Chrome's offer to translate a page in another language (a policy),
+and "Open xdg-open?" for a link to an app, as a site that opens its desktop app makes (the browser
+asks `xdg-settings` first, and the image's answers that the link is its own, so it is dropped).
+`browserd-chrome-surfaces.docker.test.ts` checks both in a real browser.
+
+One that still comes up, such as a site asking for a name and password in the browser's own box, is
+said so: dot hears that the browser is showing its own dialog over the page, not that the page is
+busy, and asks you to take control and close it. Restarting the browser doesn't help when the site
+brings it up again.
+
 ## Account reuse and verification
 
 Connected apps and saved browser accounts are used before requesting another sign-in. A connector's authentication does not log a separate command-line client in: dot should use the connected tools for supported work and the existing browser account for website work, and explain any missing capability before asking for additional access.

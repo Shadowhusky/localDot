@@ -328,7 +328,7 @@ it("merges both package databases and rebuilds the loader's index once the new f
   );
   // Only the new library is copied; the databases are merged and ldconfig writes its caches.
   expect(f.find(ARCHIVE_SYSTEM)[0]?.plans).toEqual([["/usr/lib/libfont.so.1"]]);
-  expect(rebuild).toEqual({ remove: [], directories: [], ldconfig: true });
+  expect(rebuild).toEqual({ remove: [], directories: [], ldconfig: true, appIndex: false });
   expect(f.events).toEqual(["plan", "run", "copy", "plan", "run"]);
 });
 

@@ -41,7 +41,7 @@ type GeometryTargets = Pick<BrowserTargets, "tabs" | "documents" | "check" | "co
 type Rect = readonly [number, number, number, number];
 
 export class BrowserGeometryError extends Error {
-  constructor(readonly reason: "aborted" | "stale" | "unavailable" | "point") {
+  constructor(readonly reason: "aborted" | "stale" | "unavailable" | "covered" | "point") {
     super(`Browser geometry refused: ${reason}`);
   }
 }
@@ -207,8 +207,12 @@ export class BrowserGeometry {
     const second = await this.native.command("surface", { window: window.id }, signal);
     this.#check(signal, documents);
     const page = second.page;
-    if (!page || !first.page || first.window !== window.id || second.window !== window.id)
+    if (first.window !== window.id || second.window !== window.id)
       throw new BrowserGeometryError("unavailable");
+    if (!page || !first.page)
+      throw new BrowserGeometryError(
+        "covered" in first || "covered" in second ? "covered" : "unavailable",
+      );
     // The page changed its address under the read, as a click that starts something does.
     if (page.urlHash !== urlHash || first.page.urlHash !== urlHash)
       throw new BrowserTargetError("stale");

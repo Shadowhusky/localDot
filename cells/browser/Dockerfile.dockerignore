@@ -1,6 +1,8 @@
 *
 !cells/browser/root/etc/localdot/browser-nginx.conf
 !cells/browser/root/etc/chromium/policies/managed/localdot-network.json
+!cells/browser/root/etc/chromium/policies/managed/localdot-translate.json
+!cells/browser/root/usr/local/bin/xdg-settings
 !cells/browser/install-chrome.sh
 !cells/browser/browserd/dist/browserd.mjs
 !cells/browser/browserd/dist/forwarder.mjs

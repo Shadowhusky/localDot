@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { archivePayload, helperOutput } from "./system-migration.ts";
 import {
+  APP_INDEX,
   LIBRARY_CACHE,
   LIBRARY_ID_CACHE,
   type Manifest,
@@ -66,7 +67,7 @@ it("retains user files in an upstream-removed directory", () => {
 it("accepts already-applied changes and refuses unsafe paths", () => {
   expect(
     migrationPlan({ "/a": file("old") }, { "/a": file("new") }, { "/a": file("new") }),
-  ).toEqual({ copy: [], remove: [], directories: [], ldconfig: false });
+  ).toEqual({ copy: [], remove: [], directories: [], ldconfig: false, appIndex: false });
   expect(() => migrationPlan({}, { "/../outside": file("new") }, {})).toThrow(
     "Invalid migration path",
   );
@@ -84,6 +85,7 @@ describe("ldconfig's caches", () => {
       remove: [],
       directories: [],
       ldconfig: false,
+      appIndex: false,
     });
     verifyMigration(current, target, { ...current, "/usr/lib/libfont": file("new") }, plan);
   });
@@ -107,6 +109,7 @@ describe("ldconfig's caches", () => {
       remove: [],
       directories: [],
       ldconfig: true,
+      appIndex: false,
     });
     const rebuilt = {
       ...current,
@@ -154,4 +157,62 @@ it("decodes framed helper output and rejects truncated frames", () => {
   header.writeUInt32BE(3, 4);
   expect(helperOutput(Buffer.concat([header, Buffer.from("abc")]))).toEqual(Buffer.from("abc"));
   expect(() => helperOutput(Buffer.concat([header, Buffer.from("ab")]))).toThrow();
+});
+
+// Nov 12: an app installed on the computer had rewritten the dock's index of apps, the new image
+// brought other apps and so another index, and the update was refused whole over that one file.
+describe("the dock's index of apps", () => {
+  const index = (text: string, mode = 0o644): Manifest[string] => ["f", mode, 0, 0, text];
+
+  it("rebuilds the index when an installed app and the update both changed the apps", () => {
+    const base = { [APP_INDEX]: index("old") };
+    const target = {
+      [APP_INDEX]: index("image"),
+      "/usr/share/applications/new.desktop": file("new"),
+    };
+    const current = {
+      [APP_INDEX]: index("user"),
+      "/usr/share/applications/installed.desktop": file("installed"),
+    };
+    const plan = migrationPlan(base, target, current);
+    expect(plan).toEqual({
+      copy: ["/usr/share/applications/new.desktop"],
+      remove: [],
+      directories: [],
+      ldconfig: false,
+      appIndex: true,
+    });
+    const rebuilt = {
+      ...current,
+      [APP_INDEX]: index("both"),
+      "/usr/share/applications/new.desktop": file("new"),
+    };
+    verifyMigration(current, target, rebuilt, plan);
+    for (const wrong of [
+      { ...rebuilt, [APP_INDEX]: index("both", 0o666) },
+      { ...rebuilt, [APP_INDEX]: ["f", 0o644, 1000, 0, "both"] as Manifest[string] },
+      { ...rebuilt, [APP_INDEX]: ["l", 0o777, 0, 0, "/tmp/index"] as Manifest[string] },
+      { ...rebuilt, [`${APP_INDEX}.new`]: index("left over") },
+      { ...rebuilt, "/usr/share/applications/installed.desktop": file("lost") },
+    ])
+      expect(() => verifyMigration(current, target, wrong, plan)).toThrow("verification failed");
+    const { [APP_INDEX]: _, ...missing } = rebuilt;
+    expect(() => verifyMigration(current, target, missing, plan)).toThrow("verification failed");
+  });
+
+  it("takes the image's index when nothing on the computer changed it", () => {
+    const base = { [APP_INDEX]: index("old") };
+    const plan = migrationPlan(base, { [APP_INDEX]: index("image") }, base);
+    expect(plan).toMatchObject({ copy: [APP_INDEX], appIndex: false });
+  });
+
+  it("refuses an index that isn't a plain file on every side", () => {
+    expect(() =>
+      migrationPlan(
+        { [APP_INDEX]: index("old") },
+        { [APP_INDEX]: index("image") },
+        { [APP_INDEX]: ["l", 0o777, 0, 0, "/tmp/elsewhere"] },
+      ),
+    ).toThrow(SystemMigrationConflict);
+  });
 });

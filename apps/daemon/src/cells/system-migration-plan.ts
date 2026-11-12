@@ -28,6 +28,10 @@ export class SystemMigrationConflict extends Error {
 export const LIBRARY_ID_CACHE = "/var/cache/ldconfig/aux-cache";
 // The loader's index of the libraries present, which ldconfig derives from them alone.
 export const LIBRARY_CACHE = "/etc/ld.so.cache";
+// The dock's index of the apps installed, which bamfdaemon's own package trigger writes from the
+// apps present alone, as root.
+export const APP_INDEX = "/usr/share/applications/bamf-2.index";
+const APP_INDEX_MODE = 0o644;
 // What ldconfig writes as root, with the modes it gives them.
 const LDCONFIG_OUTPUT: Record<string, number> = {
   [LIBRARY_CACHE]: 0o644,
@@ -42,6 +46,7 @@ export function migrationPlan(base: Manifest, target: Manifest, current: Manifes
     directories: string[] = [],
     conflicts: string[] = [];
   let ldconfig = false;
+  let appIndex = false;
   for (const path of new Set([...Object.keys(base), ...Object.keys(target)])) {
     if (!safePath(path)) throw new Error("Invalid migration path");
     const before = base[path],
@@ -54,8 +59,10 @@ export function migrationPlan(base: Manifest, target: Manifest, current: Manifes
       if (before?.[0] === "d" && next?.[0] === "d" && now?.[0] === "d") continue;
       if (path === LIBRARY_ID_CACHE) continue;
       // Neither side's index lists the other's libraries; rebuild it from both once they are in.
-      if (path === LIBRARY_CACHE && [before, next, now].every((entry) => entry?.[0] === "f"))
-        ldconfig = true;
+      const files = [before, next, now].every((entry) => entry?.[0] === "f");
+      if (path === LIBRARY_CACHE && files) ldconfig = true;
+      // Likewise the dock's index, which an installed app and the image's own apps each rewrote.
+      else if (path === APP_INDEX && files) appIndex = true;
       else conflicts.push(path);
     } else if (!next) remove.push(path);
     else if (next[0] === "d") directories.push(path);
@@ -79,6 +86,7 @@ export function migrationPlan(base: Manifest, target: Manifest, current: Manifes
     remove: remove.filter((path) => !rebuilt(path)).sort((a, b) => b.length - a.length),
     directories: directories.sort((a, b) => a.length - b.length),
     ldconfig,
+    appIndex,
   };
 }
 // Check the committed candidate against the complete saved system, including files unrelated
@@ -110,6 +118,13 @@ export function verifyMigration(
         throw unverified();
       expected[path] = entry;
     }
+  // The index lists the merged apps, so here too only how it was written can be checked.
+  if (plan.appIndex) {
+    const entry = actual[APP_INDEX];
+    if (entry?.[0] !== "f" || entry[1] !== APP_INDEX_MODE || entry[2] !== 0 || entry[3] !== 0)
+      throw unverified();
+    expected[APP_INDEX] = entry;
+  }
   if (!equal(expected, actual)) throw unverified();
 }
 const unverified = () =>
@@ -165,7 +180,7 @@ def open_file(path, flags):
 `;
 
 // Runs in the private clone only. A second run, once the new files are in, rebuilds the loader's
-// index without touching library links.
+// index without touching library links, and the dock's index of apps by the package's own trigger.
 export const PREPARE_SYSTEM = `
 import os, sys, json, stat, errno, subprocess
 ${OPEN_FILE}
@@ -187,6 +202,8 @@ for p, merged in plan.get('packageDatabases', {}).items():
         os.fchmod(f.fileno(), merged['entry'][1])
 if plan.get('ldconfig'):
     subprocess.run(['/sbin/ldconfig', '-X'], check=True, stdout=subprocess.DEVNULL)
+if plan.get('appIndex') and os.path.isfile('/var/lib/dpkg/info/bamfdaemon.postinst'):
+    subprocess.run(['/bin/sh', '/var/lib/dpkg/info/bamfdaemon.postinst', 'triggered'], check=True, stdout=subprocess.DEVNULL)
 print('prepared')
 `;
 

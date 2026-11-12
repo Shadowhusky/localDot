@@ -154,6 +154,7 @@ class HttpRefusal extends Error {
       | "unavailable"
       | "restarting"
       | "refused"
+      | "covered"
       | "login-form"
       | "protected-input",
   ) {
@@ -788,7 +789,9 @@ export class BrowserHttp {
                 error instanceof BrowserInputError &&
                 error.reason === "login-form"
               ? new HttpRefusal(422, "login-form")
-              : new HttpRefusal(409, "refused");
+              : error instanceof BrowserInputError && error.reason === "covered"
+                ? new HttpRefusal(409, "covered")
+                : new HttpRefusal(409, "refused");
       if (response.headersSent) {
         if (downloadStream) {
           response.destroy();

@@ -25,6 +25,34 @@ const PICTURE_RATIO = 1.6;
 // Under the picture on a tall screen: dot's line, a few steps, the controls and the steer box.
 const BELOW_PX = 360;
 const LEAST_PICTURE = 240;
+// What waits on the user under the controls, which scrolls where it is squeezed for room.
+const DOCKED_NOTES = ".thread-handoff, .thread-browser-signin";
+
+// The height everything but the picture takes of the screen, each part at its own: the bar above
+// it, dot's line, the controls and what is docked under them. A note squeezed for room still says
+// how tall it would be, so the picture gives way to it instead of the note running off the screen.
+function aroundPicture(layer: HTMLElement, place: HTMLElement): number {
+  const part = (selector: string) => layer.querySelector<HTMLElement>(selector)?.offsetHeight ?? 0;
+  let squeezed = 0;
+  for (const note of layer.querySelectorAll<HTMLElement>(
+    `.phone-computer-dock :is(${DOCKED_NOTES})`,
+  ))
+    squeezed += Math.max(0, note.scrollHeight - note.clientHeight);
+  // The steps give up their room first, all but their own padding.
+  const steps = layer.querySelector<HTMLElement>(".phone-steps");
+  const padding = steps ? getComputedStyle(steps) : null;
+  const kept = padding
+    ? Number.parseFloat(padding.paddingTop) + Number.parseFloat(padding.paddingBottom)
+    : 0;
+  return (
+    place.offsetTop +
+    part(".phone-computer-line") +
+    kept +
+    part(".phone-computer-controls") +
+    part(".phone-computer-dock") +
+    squeezed
+  );
+}
 const THUMB_RADIUS = 8;
 const BUTTON_RADIUS = 18;
 const OPEN_RADIUS = 14;
@@ -79,6 +107,7 @@ export function ComputerScreen({
   const ui = useRef<HTMLDivElement>(null);
   const bg = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
+  const bottom = useRef<HTMLDivElement>(null);
   const [host] = useState(() => {
     const element = document.createElement("div");
     element.className = "phone-picture";
@@ -110,9 +139,10 @@ export function ComputerScreen({
         h: width / PICTURE_RATIO,
       };
     }
+    const below = Math.max(BELOW_PX, aroundPicture(layer, place));
     const width = Math.min(
       base.width - 16,
-      Math.max(LEAST_PICTURE, (base.height - BELOW_PX) * PICTURE_RATIO),
+      Math.max(LEAST_PICTURE, (base.height - below) * PICTURE_RATIO),
     );
     place.style.height = `${Math.round(width / PICTURE_RATIO)}px`;
     layer.style.setProperty("--_picture-w", `${Math.round(width)}px`);
@@ -203,17 +233,28 @@ export function ComputerScreen({
     from.current = null;
     draw();
   }, [thumb, !!curtain, draw]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the curtain takes the dock away and brings it back.
   useEffect(() => {
     const layer = screen.current;
     if (!layer || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
+    const place = () => {
       from.current = null;
       draw();
-    });
+    };
+    const observer = new ResizeObserver(place);
     observer.observe(layer);
     if (thumb) observer.observe(thumb);
-    return () => observer.disconnect();
-  }, [draw, thumb]);
+    // What is docked under the picture comes, goes and grows, and the picture makes room for it.
+    const under = bottom.current;
+    const docked = under && typeof MutationObserver !== "undefined" && new MutationObserver(place);
+    if (under) observer.observe(under);
+    if (under && docked)
+      docked.observe(under, { childList: true, subtree: true, characterData: true });
+    return () => {
+      observer.disconnect();
+      if (docked) docked.disconnect();
+    };
+  }, [draw, thumb, !!curtain]);
 
   const first = useRef(true);
   useLayoutEffect(() => {
@@ -348,7 +389,7 @@ export function ComputerScreen({
         {curtain && <div ref={room} className="phone-picture-room" data-empty="" />}
         {!curtain && <div className="phone-steps">{steps}</div>}
         {!curtain && (
-          <div className="phone-computer-bottom">
+          <div ref={bottom} className="phone-computer-bottom">
             <div className="phone-computer-controls">{controls}</div>
             <div ref={dockRef} className="phone-computer-dock" />
           </div>

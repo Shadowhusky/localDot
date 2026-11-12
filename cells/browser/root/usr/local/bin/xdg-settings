@@ -1,0 +1,10 @@
+#!/bin/sh
+# The browser asks this whether it is itself the app for a link's scheme before it offers to open
+# another one. Told yes, it drops a link to an app (douyin.com opens its desktop app as it loads)
+# instead of showing "Open xdg-open?", which takes the page from a task and which nothing here can
+# answer: this computer has no other app to open.
+if [ "$1" = check ] && [ "$2" = default-url-scheme-handler ]; then
+  echo yes
+  exit 0
+fi
+exec /usr/bin/xdg-settings "$@"

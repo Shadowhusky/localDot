@@ -276,11 +276,9 @@ export const agent = {
   "localDot enters it on this site without sharing it with dot.":
     "localDot 会在此网站上填写它，而不会分享给 dot。",
   "Sign in yourself": "自行登录",
-  "If a site won't accept sign-in while dot controls the browser, switch to a browser that only you control — same tabs and sign-ins, with dot's automation disconnected. Sign in, then choose Hand back; dot stays signed in afterwards and never sees your password.":
-    "如果网站在 dot 控制浏览器时不接受登录，请切换到只有你控制的浏览器——标签页和登录状态不变，但会断开 dot 的自动化。登录后选择“交还”；dot 之后会保持登录状态，且绝不会看到你的密码。",
+  "For a site that won't take a sign-in while dot controls the browser. The browser restarts with dot disconnected; your tabs and saved sign-ins are kept.":
+    "用于在 dot 控制浏览器时不接受登录的网站。浏览器会断开 dot 的连接并重启，你的标签页和已保存的登录状态都会保留。",
   "Sign in without agent control": "在无智能体控制的情况下登录",
-  "Only the browser restarts; your tabs and saved sign-ins are kept.":
-    "只会重启浏览器；你的标签页和存储的登录状态都会保留。",
   "Check status": "检查状态",
   "Message cleared": "消息已清除",
   "Key not moved": "密钥未移动",

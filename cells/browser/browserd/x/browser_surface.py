@@ -11,6 +11,11 @@ class SurfaceUnavailable(Exception):
     pass
 
 
+# The browser's own dialog, bubble or menu is over the page.
+class SurfaceCovered(SurfaceUnavailable):
+    pass
+
+
 def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clock=time.monotonic):
     deadline = clock() + 0.9
     visited = 0
@@ -82,7 +87,7 @@ def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clo
                 continue
             role = frame.get_role_name()
             if role in ['menu', 'dialog', 'alert']:
-                raise SurfaceUnavailable()
+                raise SurfaceCovered()
             if role == 'frame' and frame.get_state_set().contains(atspi.StateType.ACTIVE):
                 frames.append(frame)
         if len(frames) != 1:
@@ -99,7 +104,7 @@ def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clo
                 return
             role = node.get_role_name()
             if role in ['menu', 'dialog', 'alert']:
-                raise SurfaceUnavailable()
+                raise SurfaceCovered()
             if role == 'document web':
                 documents.append(node)
                 return
@@ -188,6 +193,9 @@ def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clo
             'frame': content, 'windowFrame': list(initial[1:]),
             'urlHash': hashlib.sha256(url.encode('utf-8')).hexdigest(), 'focus': focus,
         }}
+    except SurfaceCovered:
+        # Said so the task hears what is in its way, never what the surface holds.
+        return {'window': window_id, 'page': None, 'covered': True}
     except Exception:
         return {'window': window_id, 'page': None}
 
