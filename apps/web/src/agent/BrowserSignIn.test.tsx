@@ -54,7 +54,7 @@ it("observes an unfinished transition without restarting it after a reload", asy
   );
   await screen.findByText(/Restarting the browser without dot's connection/);
   // The screen covers the restart while it lasts, and lets go once the browser is back.
-  expect(seen).toContain(true);
+  await waitFor(() => expect(seen).toContain(true));
   await screen.findByText(/Sign-in mode is on/);
   await waitFor(() => expect(seen.at(-1)).toBe(false));
   expect(
