@@ -7,6 +7,12 @@ import time
 MANAGED_BROWSER_EXECUTABLES = ('/usr/lib/chromium/chromium', '/opt/google/chrome/chrome')
 
 
+# How long a look at the browser's window may take. Most of it goes on Chrome's own window (its tab
+# strip and toolbar, read one accessibility call at a time), which a heavy page and a busy computer
+# slow to most of a second. browserd gives the helper 5 s an answer before it retires it.
+SURFACE_DEADLINE_S = 3.0
+
+
 class SurfaceUnavailable(Exception):
     pass
 
@@ -17,7 +23,7 @@ class SurfaceCovered(SurfaceUnavailable):
 
 
 def inspect_surface(commands, window_id, atspi, read_executable=os.readlink, clock=time.monotonic):
-    deadline = clock() + 0.9
+    deadline = clock() + SURFACE_DEADLINE_S
     visited = 0
     focus_complete = True
 

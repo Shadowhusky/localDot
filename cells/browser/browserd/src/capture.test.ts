@@ -185,6 +185,23 @@ describe("bounded private browser capture", () => {
     }
   });
 
+  // Nov 12: on a busy Mac a whole-screen picture took 2.8 to 4.1 s, and one past 3 s stopped the
+  // web browser, its pages with it. A slow picture is still a picture.
+  it("waits out a picture a busy computer takes seconds to make", async () => {
+    vi.useFakeTimers();
+    const peer = await started();
+    try {
+      const pending = peer.capture.capture();
+      await vi.advanceTimersByTimeAsync(4500);
+      peer.output.write(reply(1));
+      await expect(pending).resolves.toBeInstanceOf(Buffer);
+      expect(peer.capture.alive).toBe(true);
+      expect(peer.fatal).not.toHaveBeenCalled();
+    } finally {
+      peer.capture.close();
+    }
+  });
+
   it.each(["startup", "frame"] as const)("bounds a stalled %s", async (phase) => {
     vi.useFakeTimers();
     const peer = phase === "startup" ? fixture() : await started();
