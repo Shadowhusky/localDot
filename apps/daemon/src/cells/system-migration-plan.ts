@@ -23,6 +23,10 @@ export class SystemMigrationConflict extends Error {
   }
 }
 
+// How much a migration settles by itself, raised each time a file both sides changed stops being a
+// conflict (2: the dock's index of apps). An update refused under fewer is tried again.
+export const MERGE_RULES = 2;
+
 // ldconfig's private record of the libraries it has read, keyed by each file's identity. It checks
 // every entry against the file it names and reads changed files again, so the user's copy stays.
 export const LIBRARY_ID_CACHE = "/var/cache/ldconfig/aux-cache";
