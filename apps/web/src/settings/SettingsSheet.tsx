@@ -15,6 +15,7 @@ import type { FreshStart } from "../cells/useFreshStart.ts";
 import { spendText } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ShowDotControl } from "../dot/show-dot.ts";
+import { t } from "../i18n/index.ts";
 import { KeysPanel, type KeysPanelProps } from "../keys/KeysPanel.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import {
@@ -68,6 +69,7 @@ import {
 import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
 import { DotsOnThisComputer } from "./DotsOnThisComputer.tsx";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
+import { LanguageSetting } from "./LanguageSetting.tsx";
 import { CheckIns, ResearchLimits, SpendingLimits } from "./Limits.tsx";
 import { ModelLibrary, type ModelLibraryProps } from "./ModelLibrary.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
@@ -1364,51 +1366,44 @@ function Appearance({
   showDot?: ShowDotControl;
   view?: Pick<ViewStyleControl, "value" | "recommended" | "saved" | "change">;
 }) {
+  const unsaved = t`Applied for this visit. This browser couldn't save it.`;
   return (
     <>
+      <LanguageSetting />
       {view && (
         <div>
-          <GroupHead title="View" />
+          <GroupHead title={t`View`} />
           <ViewStylePicker
-            aria-label="View"
+            aria-label={t`View`}
             value={view.value}
             recommended={view.recommended}
             onChange={view.change}
           />
-          <GroupNote>
-            {view.saved
-              ? "Just for this device."
-              : "Applied for this visit. This browser couldn't save it."}
-          </GroupNote>
+          <GroupNote>{view.saved ? t`Just for this device.` : unsaved}</GroupNote>
         </div>
       )}
       <div>
-        {view && <GroupHead title="Theme" />}
-        <AppearancePicker appearance={appearance} aria-label="Theme" />
+        {view && <GroupHead title={t`Theme`} />}
+        <AppearancePicker appearance={appearance} aria-label={t`Theme`} />
         {appearance.value === "system" && (
           <GroupNote>
-            Daylight while this device is light, {APPEARANCE_NAMES[appearance.dark]} while it's
-            dark.
+            {t`Daylight while this device is light, ${APPEARANCE_NAMES[appearance.dark]} while it's dark.`}
           </GroupNote>
         )}
-        {!appearance.saved && (
-          <GroupNote>Applied for this visit. This browser couldn't save it.</GroupNote>
-        )}
+        {!appearance.saved && <GroupNote>{unsaved}</GroupNote>}
       </div>
       {showDot && (
         <div>
           <Group>
             <Switch
               className="ui-group-row"
-              label="Show dot"
-              description="dot's face on the curtain and beside the computer"
+              label={t`Show dot`}
+              description={t`dot's face on the curtain and beside the computer`}
               checked={showDot.value}
               onCheckedChange={(checked) => showDot.change(checked)}
             />
           </Group>
-          {!showDot.saved && (
-            <GroupNote>Applied for this visit. This browser couldn't save it.</GroupNote>
-          )}
+          {!showDot.saved && <GroupNote>{unsaved}</GroupNote>}
         </div>
       )}
     </>
