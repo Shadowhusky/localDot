@@ -163,6 +163,10 @@ for (const scheme of ["light", "dark"] as const)
       await panel.getByRole("button", { name: "Sign in without agent control" }).click();
       await expect(panel).toContainText("Sign-in mode is on");
       await expect(panel).toContainText("Saved logins can't be filled here");
+      // Its notes follow its words, with no empty stretch between them.
+      const words = await panel.locator(".thread-browser-signin-words").boundingBox();
+      const notes = await panel.locator(".thread-browser-signin-notes").boundingBox();
+      expect((notes?.y ?? 999) - ((words?.y ?? 0) + (words?.height ?? 0))).toBeLessThanOrEqual(16);
       await shot(page, "hold-signin-mode");
     });
   });

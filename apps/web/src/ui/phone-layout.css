@@ -1561,9 +1561,33 @@
     letter-spacing: var(--text-footnote--letter-spacing);
   }
 
+  /* What waits on the user gives way before it leaves the screen: where there is no room for all of
+     it, it scrolls, and the controls and the message box keep their places. */
   .phone-computer-bottom {
     position: relative;
     margin-top: auto;
+    flex: 0 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .phone-computer-dock,
+  .phone-computer-dock > .thread-dock {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .phone-computer-dock .thread-toolbar {
+    flex: none;
+  }
+
+  .phone-computer-dock :is(.thread-handoff, .thread-browser-signin) {
+    flex: 0 1 auto;
+    min-height: calc(var(--spacing) * 14);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   /* On the computer screen a decision floats over the picture and steps, dimmed behind it, and
@@ -1590,6 +1614,7 @@
   }
 
   .phone-computer-controls {
+    flex: none;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1930,13 +1955,19 @@
     left: 0;
   }
 
-  /* On a wide screen what is under the picture lines up with it. */
+  /* On a wide screen what is under the picture lines up with it, down to a width a row of words and
+     its button still fit in. */
   .phone-stack[data-split]
     .phone-computer-ui
     > :is(.phone-computer-line, .phone-steps, .phone-computer-bottom) {
     width: 100%;
-    max-width: var(--_picture-w);
+    max-width: max(var(--_picture-w), 600px);
     margin-inline: auto;
+  }
+
+  /* Its dock too, which keeps a thread's measure only under a thread. */
+  .phone-stack[data-split] .phone-computer-dock > .thread-dock {
+    max-width: none;
   }
 
   .phone-stack[data-split] .phone-dim,

@@ -74,6 +74,68 @@ test.describe("a desktop", () => {
     });
   }
 
+  // Nov 12: with the user holding the web browser, the sign-in offer under the controls stood
+  // narrower than the picture and ran off the bottom of the window, the message box with it.
+  for (const { width, height, saved } of [
+    { width: 1645, height: 957, saved: false },
+    { width: 1440, height: 900, saved: true },
+    { width: 1100, height: 700, saved: true },
+  ]) {
+    test(`at ${width} by ${height}, what waits on a user holding the browser sits under the controls, within the window${saved ? ", with a saved login" : ""}`, async ({
+      page,
+      ui,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.route("**/takeover/sign-in", (route) =>
+        route.fulfill({
+          status: 200,
+          json: {
+            available: true,
+            mode: "standard",
+            changing: false,
+            ...(saved
+              ? { page: { saved: { site: "github.com", username: "henry@example.com" } } }
+              : {}),
+          },
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      const fixture = await ui.open("running");
+      await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+      await page.locator(".phone-thumb").click();
+      const controls = page.locator(".phone-computer-controls");
+      await controls.getByRole("button", { name: "Take control" }).click();
+      const handBack = controls.getByRole("button", { name: "Hand back" });
+      await expect(handBack).toBeVisible();
+      expect((await page.request.post(`${fixture.origin}/__qa/screen?to=browser`)).ok()).toBe(true);
+      const panel = page.locator(".phone-computer-dock .thread-browser-signin");
+      await expect(
+        panel.getByRole("button", { name: "Sign in without agent control" }),
+      ).toBeVisible();
+      await ui.settle();
+      const box = await panel.boundingBox();
+      const field = await page.locator(".phone-computer-dock textarea").boundingBox();
+      const first = await controls.getByRole("button").first().boundingBox();
+      const last = await handBack.boundingBox();
+      const picture = await page.locator(".phone-picture").boundingBox();
+      if (!box || !field || !first || !last || !picture) throw new Error("Nothing to measure");
+      await page.screenshot({ path: test.info().outputPath("holding-browser.png") });
+      // Under the picture, at the width of its controls.
+      expect(box.y).toBeGreaterThan(picture.y + picture.height);
+      expect(Math.abs(box.x - first.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(box.x + box.width - (last.x + last.width))).toBeLessThanOrEqual(1);
+      // All of it on the screen, and the message box under it with room to spare.
+      expect(box.y + box.height).toBeLessThanOrEqual(field.y);
+      expect(field.y + field.height).toBeLessThanOrEqual(height - 8);
+      // The picture gives way to it: none of it is squeezed into scrolling.
+      expect(
+        await panel.evaluate((element) => element.scrollHeight - element.clientHeight),
+      ).toBeLessThanOrEqual(0);
+      // An offer, not a page of reading: a row for each thing it offers.
+      expect(box.height).toBeLessThanOrEqual(saved ? 200 : 130);
+    });
+  }
+
   test("a mouse selects text, and a right click opens what a hold would", async ({ page, ui }) => {
     await ui.open("done");
     await expect(page.locator(".app")).not.toHaveAttribute("data-entering");

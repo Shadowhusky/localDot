@@ -2383,6 +2383,8 @@
   flex: none;
 }
 
+/* What the user holding the web browser is offered: a row for each, its button beside its words
+   where there is room and under them where there isn't. */
 .thread-browser-signin {
   margin-block: calc(var(--spacing) * 3);
   padding: calc(var(--spacing) * 3);
@@ -2394,19 +2396,45 @@
   overflow-wrap: anywhere;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: calc(var(--spacing) * 2);
+  align-items: stretch;
+  gap: calc(var(--spacing) * 2.5);
 }
 .thread-browser-signin p {
-  margin-top: 0;
+  margin: 0;
   color: var(--color-fg-2);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-wrap: pretty;
 }
-.thread-browser-signin-saved {
+.thread-browser-signin-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 2) calc(var(--spacing) * 4);
+  min-width: 0;
+}
+.thread-browser-signin-row + .thread-browser-signin-row,
+.thread-browser-signin-notes {
+  padding-top: calc(var(--spacing) * 2.5);
+  border-top: 1px solid var(--color-separator);
+}
+.thread-browser-signin-words {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: calc(var(--spacing) * 2);
-  margin-block-end: calc(var(--spacing) * 2);
-  min-width: 0;
+  gap: calc(var(--spacing) * 0.5);
+}
+.thread-browser-signin-row > .thread-browser-signin-words {
+  flex: 1 1 15rem;
+}
+.thread-browser-signin-row > .ui-button {
+  flex: none;
+  max-width: 100%;
+}
+.thread-browser-signin-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing);
+}
+.thread-browser-signin-notes p {
+  color: var(--color-fg-3);
 }
