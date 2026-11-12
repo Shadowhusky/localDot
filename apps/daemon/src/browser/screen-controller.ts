@@ -171,6 +171,18 @@ export class BrowserBusyError extends ScreenUnavailableError {
   }
 }
 
+// The web browser runs and its page answers, but one of the browser's own surfaces is over the
+// page: a person closes one in a click, and a restart only meets the site's next one.
+export class BrowserCoveredError extends BrowserBusyError {
+  constructor(onDesktop = false) {
+    super(onDesktop);
+    this.name = "BrowserCoveredError";
+    this.message = `The web browser is showing one of its own dialogs, bubbles or menus over the page, so ${
+      onDesktop ? "you're on the desktop" : "nothing was done there"
+    } and the page can't be read or used until it closes. Ask the user to take control and close it. Don't restart the web browser for this: a site that brings it up does so again. Don't sign in on the desktop's Chromium or open another browser instead.`;
+  }
+}
+
 const seconds = (iso: string, now: number) =>
   `${Math.max(1, Math.round((Date.parse(iso) - now) / 1000))} seconds`;
 
@@ -1004,6 +1016,7 @@ export class ScreenController {
             this.#reportBrowser(error);
             const desktop = await this.#onDesktop(scope, operationScope, handback, recorded);
             if (handback && desktop) return desktop;
+            if (error instanceof BrowserCoveredError) throw new BrowserCoveredError(true);
             if (error instanceof BrowserBusyError) throw new BrowserBusyError(true);
             throw await this.#browserUnavailable();
           } else if (handback || integrity) {
@@ -1053,14 +1066,16 @@ export class ScreenController {
   #reportBrowser(error: unknown, what = "the web browser couldn't be shown"): void {
     this.deps.report?.(
       `${what}: ${
-        error instanceof BrowserBusyError
-          ? "its page didn't answer in time"
-          : error instanceof BrowserClientError ||
-              error instanceof BrowserLifecycleError ||
-              error instanceof ScreenControlError ||
-              (error instanceof Error && error.name === "ScreenRecordingError")
-            ? error.message
-            : "unknown"
+        error instanceof BrowserCoveredError
+          ? "one of its own dialogs, bubbles or menus is over its page"
+          : error instanceof BrowserBusyError
+            ? "its page didn't answer in time"
+            : error instanceof BrowserClientError ||
+                error instanceof BrowserLifecycleError ||
+                error instanceof ScreenControlError ||
+                (error instanceof Error && error.name === "ScreenRecordingError")
+              ? error.message
+              : "unknown"
       }`,
     );
   }
@@ -1128,12 +1143,15 @@ export class ScreenController {
     const expiry = new AbortController();
     const deadline = setTimeout(() => expiry.abort(), BROWSER_FOREGROUND_MS);
     const signal = AbortSignal.any([outer.signal, expiry.signal]);
+    // What the last look at the tabs found over the page, if anything.
+    let covered = false;
     const scope: BrowserScope = {
       signal,
       check: () => {
         outer.check();
         if (outer.signal.aborted) throw new ScreenControlError();
-        if (expiry.signal.aborted) throw new BrowserBusyError();
+        if (expiry.signal.aborted)
+          throw covered ? new BrowserCoveredError() : new BrowserBusyError();
       },
     };
     try {
@@ -1145,6 +1163,7 @@ export class ScreenController {
         scope.check();
         if (!listing.tabs.length) throw new ScreenControlError();
         let settling = listing.tabs.some((tab) => !tab.ready);
+        let found = false;
         const ordered = [...listing.tabs]
           .filter((tab) => tab.ready)
           .sort((a, b) => Number(b.id === owner.tabId) - Number(a.id === owner.tabId));
@@ -1162,10 +1181,14 @@ export class ScreenController {
             // A background tab fails geometry admission with HTTP 409 (refused), not
             // 503 (unavailable). Continue to the visible popup. Only this read-only
             // probe is retried; input keeps its original tab and is never replayed.
-            if (error.code === "refused" || error.code === "restarting") settling = true;
+            // A surface of the browser's own may close by itself, as a menu does: looked for again
+            // like a page that is settling, and named if it is still there when the time is up.
+            if (error.code === "covered") found = true;
+            if (["refused", "restarting", "covered"].includes(error.code)) settling = true;
             else if (error.code !== "unavailable") throw error;
           }
         }
+        covered = found;
         if (!settling) throw new ScreenControlError();
         await sleep(150, undefined, { signal });
         scope.check();
@@ -1175,7 +1198,9 @@ export class ScreenController {
       // waiting by the page; one whose screen ended hears that instead.
       scope.check();
       throw error instanceof BrowserClientError && error.code === "aborted"
-        ? new BrowserBusyError()
+        ? covered
+          ? new BrowserCoveredError()
+          : new BrowserBusyError()
         : error;
     } finally {
       clearTimeout(deadline);

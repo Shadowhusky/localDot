@@ -14,6 +14,7 @@ import {
   BROWSER_FOREGROUND_MS,
   BROWSER_WINDOW_LOST,
   BrowserBusyError,
+  BrowserCoveredError,
   browserUnavailableText,
   ScreenControlError,
   ScreenController,
@@ -1258,11 +1259,14 @@ describe("a web browser that stopped working", () => {
 
 // A page whose main thread runs for seconds at a time: browserd's geometry probe waits out two of
 // its turns, so it answers, but in seconds.
-function answersIn(ms: number, refuse = false) {
+function answersIn(ms: number, refuse: boolean | "covered" = false) {
   return (_permit: unknown, _tabId: string, scope: BrowserScope) =>
     new Promise<{ mono: number }>((resolve, reject) => {
       const timer = setTimeout(
-        () => (refuse ? reject(new BrowserClientError("refused")) : resolve({ mono: 50 })),
+        () =>
+          refuse
+            ? reject(new BrowserClientError(refuse === true ? "refused" : refuse))
+            : resolve({ mono: 50 }),
         ms,
       );
       scope.signal.addEventListener(
@@ -1319,6 +1323,71 @@ describe("a web browser on a busy page", () => {
       await vi.advanceTimersByTimeAsync(4100);
       expect(settled).toHaveBeenCalledWith(undefined);
       expect(f.client.clock).toHaveBeenCalledTimes(2);
+      lease.finish();
+      await f.controller.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Nov 12: douyin.com brought up the browser's "Open xdg-open?" over its page. Every probe was
+  // refused at once for 15 seconds and dot was told the page was busy, so it waited, restarted the
+  // browser, met the same dialog and gave up; a person closes one in a click.
+  it("says the browser's own surface is over the page, not that the page is busy", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const report = vi.fn();
+    const controller = new ScreenController({ ...f.deps, report });
+    try {
+      await controller.switchTo("browser", f.scope);
+      f.client.clock.mockImplementation(answersIn(20, "covered"));
+      const lease = controller.lease(f.scope);
+      const read = controller.refreshBrowser(lease);
+      const failure = read.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(BROWSER_FOREGROUND_MS + 1200);
+      const error = await failure;
+      expect(error).toBeInstanceOf(BrowserCoveredError);
+      expect(error).toBeInstanceOf(ScreenUnavailableError);
+      expect((error as Error).message).toMatch(/one of its own dialogs, bubbles or menus over/u);
+      expect((error as Error).message).toMatch(/take control and close it/u);
+      expect((error as Error).message).not.toMatch(/didn't answer in time/u);
+      expect(report).toHaveBeenCalledWith(
+        "the web browser couldn't be read: one of its own dialogs, bubbles or menus is over its page",
+      );
+      // As for a busy page, nothing changed hands and nothing was stopped.
+      expect(() => lease.check()).not.toThrow();
+      expect(controller.browserAccess(lease).tabId).toBe(f.tabId);
+      expect(controller.selection.screen).toBe("browser");
+      expect(f.deps.browser.stop).not.toHaveBeenCalled();
+      lease.finish();
+      await controller.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finds the page once the surface over it has closed", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      await f.controller.switchTo("browser", f.scope);
+      f.client.clock
+        .mockImplementationOnce(answersIn(20, "covered"))
+        .mockImplementationOnce(answersIn(20, "covered"))
+        .mockImplementation(answersIn(20));
+      f.client.clock.mockClear();
+      const lease = f.controller.lease(f.scope);
+      const read = f.controller.refreshBrowser(lease);
+      const settled = vi.fn();
+      void read.then(settled, settled);
+      for (let look = 0; look < 2; look++) {
+        await vi.advanceTimersByTimeAsync(30);
+        // The search's own pause before it looks again.
+        await wait(200);
+      }
+      await vi.advanceTimersByTimeAsync(30);
+      expect(settled).toHaveBeenCalledWith(undefined);
+      expect(f.client.clock).toHaveBeenCalledTimes(3);
       lease.finish();
       await f.controller.close();
     } finally {

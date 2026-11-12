@@ -346,6 +346,23 @@ describe("authenticated browser HTTP transport", () => {
     expect(unknown.text).not.toContain("private-password-canary");
   });
 
+  // The daemon tells a page the browser's own dialog covers from one that won't answer.
+  it("names a page the browser's own surface covers, and nothing else, as covered", async () => {
+    const peer = await setup();
+    peer.setWork(async () => {
+      throw new BrowserInputError("covered");
+    });
+    const clock = await peer.send("POST", "/timing", { permit, tabId, request: { kind: "clock" } });
+    expect(clock.status).toBe(409);
+    expect(JSON.parse(clock.text)).toEqual({ error: "covered" });
+    peer.setWork(async () => {
+      throw new BrowserInputError("unavailable");
+    });
+    const other = await peer.send("POST", "/timing", { permit, tabId, request: { kind: "clock" } });
+    expect(other.status).toBe(409);
+    expect(JSON.parse(other.text)).toEqual({ error: "refused" });
+  });
+
   it("separates authenticated manual grants from agent permits and drops plaintext", async () => {
     const peer = await setup();
     const { owner: _, ...user } = { ...permit, revision: 2 };

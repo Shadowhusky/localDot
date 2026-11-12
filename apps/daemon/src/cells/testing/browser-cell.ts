@@ -75,9 +75,33 @@ if (!sessionStorage.getItem("checked")) { sessionStorage.setItem("checked", "1")
 else location.replace("/checked");
 </script>`;
 
+// A page in Chinese, which a browser set to English offers to translate, and pages that open an
+// app's own link as they load, as douyin.com opens its desktop app: the page itself, or a frame in it.
+const CHINESE = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>中文页面</title>
+<body><h1>欢迎来到这个页面</h1><p>${"这是一个用来测试浏览器的中文页面，里面有足够多的中文内容，让浏览器判断它的语言。".repeat(12)}</p>
+<button id="go" onclick="this.textContent='已点击'">点击这里</button></body></html>`;
+const APP_LINK = `<!doctype html><title>App link</title><body><h1>App link page</h1>
+<button id="go" onclick="this.textContent='clicked'">Press here</button>
+<script>setTimeout(() => { location.href = "localdot-test-app://open"; }, 300)</script></body>`;
+const APP_FRAME = `<!doctype html><title>App frame</title><body><h1>App frame page</h1>
+<button id="go" onclick="this.textContent='clicked'">Press here</button>
+<script>setTimeout(() => {
+  const frame = document.createElement("iframe");
+  frame.style.display = "none";
+  frame.src = "localdot-test-app://open";
+  document.body.append(frame);
+}, 300)</script></body>`;
+
+// A page whose picture asks for a name and password, which the browser asks for in its own dialog.
+const NEEDS_SIGN_IN = `<!doctype html><title>Needs sign-in</title><body><h1>Needs sign-in page</h1>
+<img src="/locked.png" alt=""></body>`;
+
 const GATE = `
 import http.server, json, time, urllib.parse
-pages = {"/hop": ${JSON.stringify(HOP)}.encode(), "/reload-once": ${JSON.stringify(RELOAD_ONCE)}.encode()}
+pages = {"/hop": ${JSON.stringify(HOP)}.encode(), "/reload-once": ${JSON.stringify(RELOAD_ONCE)}.encode(),
+         "/zh": ${JSON.stringify(CHINESE)}.encode(), "/app-link": ${JSON.stringify(APP_LINK)}.encode(),
+         "/app-frame": ${JSON.stringify(APP_FRAME)}.encode(),
+         "/needs-sign-in": ${JSON.stringify(NEEDS_SIGN_IN)}.encode()}
 busy = ${JSON.stringify(BUSY)}.encode()
 beats = {}
 SLOW_CHUNKS = ${SLOW_CHUNKS}
@@ -98,6 +122,12 @@ class Gate(http.server.BaseHTTPRequestHandler):
             self.send_header("content-length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if path == "/locked.png":
+            self.send_response(401)
+            self.send_header("www-authenticate", 'Basic realm="localdot test"')
+            self.send_header("content-length", "0")
+            self.end_headers()
             return
         self.send_response(200)
         if path == "/slow.bin":

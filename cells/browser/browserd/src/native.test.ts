@@ -52,9 +52,29 @@ describe("browser private native protocol", () => {
     expect(peer.fatal).not.toHaveBeenCalled();
   });
 
+  it("accepts a surface the browser's own dialog covers, said without what it holds", async () => {
+    const peer = setup();
+    const pending = peer.native.command("surface", { window: 8 });
+    peer.reply({ window: 8, page: null, covered: true });
+    await expect(pending).resolves.toEqual({ window: 8, page: null, covered: true });
+    expect(peer.fatal).not.toHaveBeenCalled();
+  });
+
   it.each([
     { window: 9, page: null },
     { window: 8, page: null, url: "private" },
+    { window: 8, page: null, covered: false },
+    { window: 8, page: null, covered: "Open xdg-open?" },
+    {
+      window: 8,
+      page: {
+        frame: [0, 174, 2560, 1426],
+        windowFrame: [0, 0, 2560, 1600],
+        urlHash: "a".repeat(64),
+        focus: "page",
+      },
+      covered: true,
+    },
   ])("retires malformed or mismatched native surface replies", async (reply) => {
     const peer = setup();
     const pending = peer.native.command("surface", { window: 8 });

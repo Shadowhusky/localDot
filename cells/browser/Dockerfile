@@ -26,6 +26,12 @@ RUN if [ "$INSTALL_CHROME" = 1 ]; then /opt/localdot/install-chrome.sh; fi
 COPY cells/browser/root/etc/localdot/browser-nginx.conf /etc/localdot/browser-nginx.conf
 COPY cells/browser/root/etc/chromium/policies/managed/localdot-network.json /etc/chromium/policies/managed/localdot-network.json
 COPY cells/browser/root/etc/chromium/policies/managed/localdot-network.json /etc/opt/chrome/policies/managed/localdot-network.json
+# The browser's own dialogs and bubbles take the page from a task, and nothing can answer them:
+# Google Chrome's offer to translate a page in another language, and "Open xdg-open?" for a link to
+# an app, which the browser asks xdg-settings about first.
+COPY cells/browser/root/etc/chromium/policies/managed/localdot-translate.json /etc/chromium/policies/managed/localdot-translate.json
+COPY cells/browser/root/etc/chromium/policies/managed/localdot-translate.json /etc/opt/chrome/policies/managed/localdot-translate.json
+COPY --chmod=755 cells/browser/root/usr/local/bin/xdg-settings /usr/local/bin/xdg-settings
 COPY cells/browser/browserd/dist/browserd.mjs cells/browser/browserd/dist/forwarder.mjs /opt/localdot/
 COPY cells/browser/browserd/x/browser-helper.py cells/browser/browserd/x/browser_surface.py cells/browser/browserd/x/browser-capture.py /opt/localdot/
 COPY cells/desktop/desktopd/x/xhelper.py /opt/localdot/xhelper.py

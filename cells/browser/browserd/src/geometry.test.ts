@@ -192,6 +192,46 @@ describe("browser measured geometry", () => {
     },
   );
 
+  // The browser's own dialog, bubble or menu over the page is its own refusal: the task hears what
+  // is in its way instead of a page that seems not to answer.
+  it.each(["first", "second", "both"])(
+    "says a page is covered when the %s look finds it so",
+    async (look) => {
+      const peer = setup();
+      let looks = 0;
+      peer.nativeCommand.mockImplementation(async (method) => {
+        if (method === "windows")
+          return { windows: [{ id: 8, active: true, frame: peer.page.windowFrame }] };
+        looks += 1;
+        const covered = look === "both" || (look === "first") === (looks === 1);
+        return covered ? { window: 8, page: null, covered: true } : { window: 8, page: peer.page };
+      });
+      await expect(peer.geometry.read("tab", peer.controller.signal)).rejects.toMatchObject({
+        reason: "covered",
+      });
+    },
+  );
+
+  it("keeps a page with no surface to measure, and one behind another window, unavailable", async () => {
+    const peer = setup();
+    peer.nativeCommand.mockImplementation(async (method) =>
+      method === "windows"
+        ? { windows: [{ id: 8, active: true, frame: peer.page.windowFrame }] }
+        : { window: 8, page: null },
+    );
+    await expect(peer.geometry.read("tab", peer.controller.signal)).rejects.toMatchObject({
+      reason: "unavailable",
+    });
+    peer.nativeCommand.mockImplementation(async (method) =>
+      method === "windows"
+        ? { windows: [{ id: 8, active: true, frame: peer.page.windowFrame }] }
+        : { window: 9, page: null, covered: true },
+    );
+    await expect(peer.geometry.read("tab", peer.controller.signal)).rejects.toMatchObject({
+      reason: "unavailable",
+    });
+  });
+
   it.each(["surface", "tabs"])("refuses %s changes at the final native await", async (change) => {
     const peer = setup();
     peer.nativeCommand.mockImplementation(async (method) => {

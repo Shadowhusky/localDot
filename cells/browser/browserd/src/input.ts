@@ -128,6 +128,7 @@ export class BrowserInputError extends Error {
       | "login-form"
       | "target"
       | "delivery"
+      | "covered"
       | "unavailable",
   ) {
     super(`Browser input refused: ${reason}`);
@@ -331,7 +332,12 @@ export class BrowserInput {
       if (error instanceof BrowserInputError && error.reason === "delivery") throw error;
       if (combined?.aborted || signal.aborted) throw new BrowserInputError("aborted");
       if (error instanceof BrowserInputError) throw error;
-      throw new BrowserInputError("unavailable");
+      // The browser's own dialog, bubble or menu over the page is said so: a person can close it.
+      throw new BrowserInputError(
+        error instanceof BrowserGeometryError && error.reason === "covered"
+          ? "covered"
+          : "unavailable",
+      );
     } finally {
       clearTimeout(deadline);
       // Input given up on lands before the next holder is told it may act.
@@ -506,7 +512,8 @@ export class BrowserInput {
         const again =
           (error instanceof BrowserInputError &&
             ["focus", "chrome-focus"].includes(error.reason)) ||
-          (error instanceof BrowserGeometryError && error.reason === "unavailable");
+          (error instanceof BrowserGeometryError &&
+            ["unavailable", "covered"].includes(error.reason));
         if (!again || attempt >= KEYBOARD_ATTEMPTS) throw error;
       }
       await sleep(KEYBOARD_RETRY_MS, undefined, { signal: scope.signal }).catch(() => {});

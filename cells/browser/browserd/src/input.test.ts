@@ -1,7 +1,7 @@
 import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserControl } from "./control.ts";
-import type { BrowserGeometrySnapshot } from "./geometry.ts";
+import { BrowserGeometryError, type BrowserGeometrySnapshot } from "./geometry.ts";
 import { BrowserInput, type BrowserInputOptions } from "./input.ts";
 import { BrowserNative } from "./native.ts";
 import { type NativeEvent, nativeRequest } from "./native-schema.ts";
@@ -555,6 +555,23 @@ describe("guarded browser input", () => {
       { quietMs: 250, firstMs: 1500, timeoutMs: 3000 },
       expect.any(AbortSignal),
     );
+  });
+  // The browser's own dialog over the page is its own refusal, for the look that finds the page in
+  // front and for an input alike; any other failure to measure stays "unavailable".
+  it("refuses a page the browser's own surface covers as covered", async () => {
+    const f = await setup();
+    f.geometry.read.mockRejectedValue(new BrowserGeometryError("covered"));
+    await expect(
+      f.input.timing(permit, "tab", { kind: "clock" }, f.abort.signal),
+    ).rejects.toMatchObject({ reason: "covered" });
+    await expect(f.input.inject(permit, "tab", click, f.abort.signal)).rejects.toMatchObject({
+      reason: "covered",
+    });
+    f.geometry.read.mockRejectedValue(new BrowserGeometryError("unavailable"));
+    await expect(
+      f.input.timing(permit, "tab", { kind: "clock" }, f.abort.signal),
+    ).rejects.toMatchObject({ reason: "unavailable" });
+    expect(f.effects()).toEqual([]);
   });
   // The gateway names the input it settles after, which only the desktop's helper reads.
   it("settles after a named input with the arguments the native helper takes", async () => {

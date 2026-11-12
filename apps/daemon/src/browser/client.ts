@@ -164,6 +164,8 @@ const REFUSALS = {
     "This page contains entered protected input, so it cannot be read safely. Complete or clear that input privately; do not restart the browser or repeat sign-in.",
   refused:
     "The browser refused this operation because its page, field, or control is not ready or has changed. The connection is still available. Read the current page before retrying; do not repeat unchanged calls.",
+  covered:
+    "The web browser is showing one of its own dialogs, bubbles or menus over the page, so the page can't be read or used until it closes. Ask the user to take control and close it; restarting the web browser won't help when the site brings it up again.",
   busy: "The web browser is still finishing the previous action. Try again in a moment.",
   stale: "The web browser or the selected screen changed during the request.",
   aborted: "The browser request timed out or was cancelled; the page may still have loaded.",
@@ -1139,14 +1141,18 @@ export class BrowserClient {
       if ((path === "/secret" || path === "/manual/secret") && response.statusCode === 409)
         throw new BrowserClientError("secret_refused");
       if (response.statusCode === 423) throw new BrowserClientError("protected_input");
-      if (path === "/windows/enter" && response.statusCode === 409) {
+      if (response.statusCode === 409) {
         const chunks: Buffer[] = [];
         for await (const chunk of response) chunks.push(chunk as Buffer);
+        const refusal = Buffer.concat(chunks).toString("utf8");
         throw new BrowserClientError(
-          Buffer.concat(chunks).toString("utf8").includes('"busy"') ? "busy" : "refused",
+          path === "/windows/enter" && refusal.includes('"busy"')
+            ? "busy"
+            : refusal.includes('"covered"')
+              ? "covered"
+              : "refused",
         );
       }
-      if (response.statusCode === 409) throw new BrowserClientError("refused");
       // browserd restarting its Chromium in place says when to ask again.
       if (response.statusCode === 503 && response.headers["retry-after"] !== undefined)
         throw new BrowserClientError("restarting");
