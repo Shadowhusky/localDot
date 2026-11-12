@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SELFTEST_CHECKS, ulid } from "@localdot/protocol";
@@ -26,6 +34,7 @@ import {
 import { desktopSpec, gateSpec } from "./spec.ts";
 import { CellStore } from "./store.ts";
 import {
+  MERGE_RULES,
   SYSTEM_BASE_MISSING,
   SystemBaseMissing,
   SystemMigrationConflict,
@@ -1102,6 +1111,34 @@ describe("an update that met files an installed app changed", () => {
     expect(restarted.orchestrator.get(id)?.updateAvailable).toBe(true);
     expect(restarted.orchestrator.get(id)).not.toHaveProperty("updateBlocked");
     expect(existsSync(refusalFile(home, id))).toBe(false);
+  });
+
+  // Nov 12: a computer refused over the dock's index of apps stayed refused once the daemon had
+  // learnt to rebuild that index, and was told to start fresh, until a new image happened along.
+  it("is tried again by a daemon that settles more than the one that refused it", async () => {
+    const migrateSystem = conflicting();
+    const { updates, orchestrator, boot, home, id, record } = await setup({}, { migrateSystem });
+    rebuild();
+    await updates.check(record);
+    await quietly(() => expect(orchestrator.update(id)).rejects.toThrow(UPDATE_BLOCKED));
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    const file = refusalFile(home, id);
+    const saved = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    expect(saved.rules).toBe(MERGE_RULES);
+    for (const older of [
+      { ...saved, rules: MERGE_RULES - 1 },
+      { ...saved, rules: undefined },
+    ]) {
+      writeFileSync(file, `${JSON.stringify(older)}\n`, { mode: 0o600 });
+      const restarted = boot();
+      await restarted.orchestrator.reconcile();
+      expect(await restarted.updates.check(record)).toBe(true);
+      expect(restarted.orchestrator.get(id)?.updateAvailable).toBe(true);
+      expect(restarted.orchestrator.get(id)).not.toHaveProperty("updateBlocked");
+      expect(existsSync(file)).toBe(false);
+      restarted.orchestrator.dispose();
+    }
+    orchestrator.dispose();
   });
 
   it("is still refused when only the gate's new version changes", async () => {

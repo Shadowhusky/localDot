@@ -7,7 +7,7 @@ import type {
   TranscriptMessage,
 } from "@localdot/protocol";
 import { DEFAULT_AGENT_LIMITS, TranscriptAppend, ulid } from "@localdot/protocol";
-import { simulateReadableStream } from "ai";
+import { type ModelMessage, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import type { ToolClient } from "../tool-client.ts";
 
@@ -112,6 +112,11 @@ export function binding(over: Partial<ModelBinding> = {}): ModelBinding {
     ...over,
   };
 }
+
+// What a resumed brain has restored: the task as the conversation began with it.
+export const restored = (): ModelMessage[] => [
+  { role: "user", content: "Find the weather in Lyon" },
+];
 
 export function bootConfig(over: Partial<BootConfig> = {}): BootConfig {
   return {

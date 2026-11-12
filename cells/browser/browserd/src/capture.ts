@@ -1,7 +1,9 @@
 import type { Readable, Writable } from "node:stream";
 import { captureMaskPacket } from "./capture-mask.ts";
 
-export const BROWSER_CAPTURE_TIMEOUT_MS = 3000;
+// A helper that hasn't answered by now has stopped, and the browser is started again. A busy computer
+// takes seconds over a whole-screen picture (2.8 to 4.1 s measured), which is no reason to.
+export const BROWSER_CAPTURE_TIMEOUT_MS = 10_000;
 export const MAX_BROWSER_CAPTURE_BYTES = 2 * 1024 * 1024;
 export const MAX_BROWSER_CAPTURE_CHUNK = 262_144;
 

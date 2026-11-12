@@ -2,7 +2,7 @@ import { type ToolResult, ulid } from "@localdot/protocol";
 import { expect, it } from "vitest";
 import { EventSink } from "./events.ts";
 import { Agent } from "./loop.ts";
-import { bootConfig, call, calls, fakeApi, scriptedModel } from "./testing/scripted.ts";
+import { bootConfig, call, calls, fakeApi, restored, scriptedModel } from "./testing/scripted.ts";
 
 it.each(["failure-count", "turn-count"] as const)(
   "a Pause at the %s guard remains resumable instead of treating refusal as user Stop",
@@ -73,7 +73,13 @@ it.each(["failure-count", "turn-count"] as const)(
     ]);
     const signal = new AbortController();
     const sink = new EventSink({ send: async () => {}, flushMs: 10000, heartbeatMs: 10000 });
-    const agent = new Agent({ boot, api: f.api, sink, models: { main: model.model }, history: [] });
+    const agent = new Agent({
+      boot,
+      api: f.api,
+      sink,
+      models: { main: model.model },
+      history: restored(),
+    });
     const running = agent.run(signal.signal).then((v) => {
       finished = v;
       return v;
@@ -163,7 +169,13 @@ it("Pause arriving during a loop guard waits and asks again only after explicit 
   ]);
   const abort = new AbortController();
   const sink = new EventSink({ send: async () => {}, flushMs: 10000, heartbeatMs: 10000 });
-  const agent = new Agent({ boot, api: f.api, sink, models: { main: model.model }, history: [] });
+  const agent = new Agent({
+    boot,
+    api: f.api,
+    sink,
+    models: { main: model.model },
+    history: restored(),
+  });
   let finished: string | undefined;
   const running = agent.run(abort.signal).then((out) => {
     finished = out;

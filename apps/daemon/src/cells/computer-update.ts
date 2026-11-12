@@ -19,7 +19,7 @@ import { type GateRelay, HOST_RELAY } from "./relay.ts";
 import { newCellToken } from "./secrets.ts";
 import { desktopSpec, gateSpec, type StreamOptions } from "./spec.ts";
 import { SYSTEM_BASE, SYSTEM_SOURCE } from "./system-migration.ts";
-import { SystemMigrationConflict } from "./system-migration-plan.ts";
+import { MERGE_RULES, SystemMigrationConflict } from "./system-migration-plan.ts";
 import { requireUnmodifiedSystem } from "./system-state.ts";
 import type { CellRecord } from "./types.ts";
 
@@ -121,8 +121,14 @@ export type MigrationReport = (progress: { share?: number; detail?: string }) =>
 export type UpdateStep = "keep" | "replace";
 
 // The new desktop image an update was refused for because an installed app changed files it
-// needs. The same image would meet the same files again; a different one is offered afresh.
-const UpdateRefusal = z.strictObject({ v: z.literal(1), cellId: Id, image: ImageId });
+// needs. The same image would meet the same files again; a different one is offered afresh, and so
+// is the same one by a daemon that settles more than the one that refused it.
+const UpdateRefusal = z.strictObject({
+  v: z.literal(1),
+  cellId: Id,
+  image: ImageId,
+  rules: z.number().int().positive().optional(),
+});
 type UpdateRefusal = z.infer<typeof UpdateRefusal>;
 
 export interface ComputerUpdatesDeps {
@@ -184,7 +190,10 @@ export class ComputerUpdates {
         if (refusal.cellId !== id) throw new Error("Computer update refusal owner mismatch");
         return refusal;
       });
-      for (const refusal of refusals.list()) this.#refused.set(refusal.cellId, refusal.image);
+      for (const refusal of refusals.list()) {
+        if ((refusal.rules ?? 1) < MERGE_RULES) refusals.remove(refusal.cellId);
+        else this.#refused.set(refusal.cellId, refusal.image);
+      }
       this.#refusals = refusals;
     } catch {
       console.error("computer update refusals are unreadable");
@@ -519,7 +528,7 @@ export class ComputerUpdates {
     this.#refused.set(cellId, image);
     this.#offers.set(cellId, "blocked");
     try {
-      this.#refusals?.write(cellId, { v: 1, cellId, image });
+      this.#refusals?.write(cellId, { v: 1, cellId, image, rules: MERGE_RULES });
     } catch {
       console.error(`computer update refusal for ${cellId} could not be saved`);
     }

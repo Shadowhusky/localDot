@@ -2,7 +2,7 @@ import hashlib
 from types import SimpleNamespace
 import unittest
 
-from browser_surface import inspect_surface
+from browser_surface import SURFACE_DEADLINE_S, inspect_surface
 
 
 class Node:
@@ -146,6 +146,26 @@ class BrowserSurfaceTests(unittest.TestCase):
         result = inspect_surface(peer.commands, 8, peer.atspi, clock=lambda: next(ticks))
         self.assertIsNone(result['page'])
 
+    # Nov 12: on douyin.com, with a busy computer, walking Chrome's own window took up to 0.9 s and
+    # the old 0.9 s deadline refused the page outright about half the time.
+    def test_a_slow_walk_of_the_browsers_own_window_still_measures_the_page(self):
+        peer = setup()
+        now = [0.0]
+        def slow(state):
+            now[0] += 0.4
+            return state in {'visible', 'showing'}
+        peer.toolbar.get_state_set = lambda: SimpleNamespace(contains=slow)
+        result = inspect_surface(peer.commands, 8, peer.atspi,
+                                 read_executable=lambda _path: '/usr/lib/chromium/chromium',
+                                 clock=lambda: now[0])
+        self.assertGreater(now[0], 0.9)
+        self.assertIsNotNone(result['page'])
+
+    def test_deadline_stays_within_the_helpers_command_limit(self):
+        # browserd retires the helper after 5 s without an answer; one more AT-SPI call (0.5 s at
+        # most) can run past the deadline before the walk stops.
+        self.assertLessEqual(SURFACE_DEADLINE_S + 0.5, 4.0)
+
     def test_focus_budget_exhaustion_keeps_verified_page_geometry(self):
         peer = setup()
         peer.document.children = [Node('section', [Node('section') for _ in range(100)])
@@ -155,7 +175,7 @@ class BrowserSurfaceTests(unittest.TestCase):
         self.assertEqual(page['focus'], 'unknown')
 
     def test_focus_timeout_keeps_geometry_only_within_overall_deadline(self):
-        for elapsed in [0.4, 1.0]:
+        for elapsed in [0.4, SURFACE_DEADLINE_S + 0.1]:
             peer = setup()
             now = [0.0]
             def state():
@@ -165,7 +185,7 @@ class BrowserSurfaceTests(unittest.TestCase):
             result = inspect_surface(peer.commands, 8, peer.atspi,
                                      read_executable=lambda _path: '/usr/lib/chromium/chromium',
                                      clock=lambda: now[0])
-            if elapsed < 0.9:
+            if elapsed < SURFACE_DEADLINE_S:
                 self.assertEqual(result['page']['focus'], 'unknown')
             else:
                 self.assertIsNone(result['page'])

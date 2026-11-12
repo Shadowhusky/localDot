@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "f1049e94284610f4a60f765748769d60525767a63792019b567e725ac05b6859",
+  "inputSha256": "e46dbef4d2e127e303962f2b210acb6e371ee6372223f2ee338d2d9fdb88e2bb",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -470,8 +470,8 @@
     "apps/daemon/src/cells/computer-size.test.ts": "f940d11996214e534a6017af295ebc66dae8c97cb3e0822f9a0a2e0ae34271ce",
     "apps/daemon/src/cells/computer-size.ts": "ce51012fe4c94caaab0b1864f54b773fb398da0af5daf079ccb1426008946e9d",
     "apps/daemon/src/cells/computer-update.docker.test.ts": "1d39379d25ea6f8c67af2d7b13935f4497692663e2dc065d8cc9580d4656fc69",
-    "apps/daemon/src/cells/computer-update.test.ts": "826554a67f238b903101c099cb18171a5fa6dfbe4d51520ea20af4597d5bd56e",
-    "apps/daemon/src/cells/computer-update.ts": "f74acf18da7f6202f93122ecbf4a27a58520516eacd32a88414a8f2b9d7de90c",
+    "apps/daemon/src/cells/computer-update.test.ts": "5704a0e5e6fa562efb98a6fd52c294c792fc0a06793a79ae6ea9bbfea5794d0e",
+    "apps/daemon/src/cells/computer-update.ts": "273b54208cf9eb9267011172b7289a6d73ceb3c1fbbd168c926b2bfc727c1e0e",
     "apps/daemon/src/cells/desktop-image.docker.test.ts": "a6ce82205f2501c361c3c1f34b0cf4750b867000b01f3c503ec7e7b3d7729012",
     "apps/daemon/src/cells/desktop-keyd-files.docker.test.ts": "487ac10cf8189fbf636e8d127a98932944804144ea05e6fb1569234ff5ae2bf6",
     "apps/daemon/src/cells/desktop-preview.docker.test.ts": "96f64b6341c78718c4cd94bd51624c398b0aad5f170e994b8f20ed1b77809a1d",
@@ -560,7 +560,7 @@
     "apps/daemon/src/cells/stream-tuning.test.ts": "6f15f8ef5c517128fffb4f67e1780fe74caa412fca53cc9225135aa7067fef49",
     "apps/daemon/src/cells/stream-tuning.ts": "5b0b8db8033a389b847be17f7a4e464e2e65ba70c9adf959c17b9ba8b04ada73",
     "apps/daemon/src/cells/system-migration-plan.test.ts": "80232885598a35e33ac102ecd5a814c20d65b70fac80f8220f2e8530f6bfc1f6",
-    "apps/daemon/src/cells/system-migration-plan.ts": "68eb03baa91c956bb53b70af45f4a1a0c4e09ded3fc03e282df767b71da57d62",
+    "apps/daemon/src/cells/system-migration-plan.ts": "dbce7e182311ef1b33a7ab79911326938d9d71f8aaf433453695a6ad800127d1",
     "apps/daemon/src/cells/system-migration.test.ts": "9830bd763fe63d5faaab5ebcab6c00cff0d99ce4c944706290f0c8553e3d54fa",
     "apps/daemon/src/cells/system-migration.ts": "ae3f72062e8a85a1b907f53a813d2420be902b7e51c4bb35cb2e3a5ec2bc8993",
     "apps/daemon/src/cells/system-state-labels.test.ts": "f0e676e3640f3eac4f5584fc5b056490dd510c34070b6b4ad874edc5d752c523",
@@ -1303,7 +1303,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "456c44d7c823e0f7baa91eddb57e9b6c70480e6807f1e23e12f018b500fcc475",
+  "reportSha256": "396b5e80045961d862b221de6686507c77635440fb216d99f56f1fef2a7520b3",
   "exit": {
     "code": 0,
     "signal": null
