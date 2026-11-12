@@ -3,6 +3,7 @@ import {
   SpeechInstallStatus,
   type SpeechTierId,
 } from "../../../../packages/protocol/src/speech-install.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { showToast } from "../ui/Toast.tsx";
 import { refreshVoiceSupport } from "./support.ts";
@@ -31,15 +32,15 @@ function speechEnded(status: SpeechInstallStatus, tier: SpeechTierId) {
   if (status.job?.state === "failed")
     showToast({
       id: "speech-install",
-      title: "Speech didn't finish installing",
-      description: "Settings → Voice says why, and can try again.",
+      title: t`Speech didn't finish installing`,
+      description: t`Settings → Voice says why, and can try again.`,
       tone: "danger",
     });
   else if (!status.job && status.installed?.tier === tier)
     showToast({
       id: "speech-install",
-      title: "dot can hear you now",
-      description: "Tap the microphone to talk.",
+      title: t`dot can hear you now`,
+      description: t`Tap the microphone to talk.`,
       tone: "success",
     });
 }
@@ -113,7 +114,7 @@ export function useSpeechInstall(
       change(
         "install",
         () => api.post(INSTALL_PATH, { tier }),
-        "Couldn't start the download. Try again.",
+        t`Couldn't start the download. Try again.`,
       ),
     [api, change],
   );
@@ -121,7 +122,7 @@ export function useSpeechInstall(
     void change(
       "cancel",
       () => api.post(`${INSTALL_PATH}/cancel`),
-      "Couldn't cancel the download. Try again.",
+      t`Couldn't cancel the download. Try again.`,
     );
   }, [api, change]);
   const remove = useCallback(() => {
@@ -131,7 +132,7 @@ export function useSpeechInstall(
         await api.del(INSTALL_PATH);
         return api.get(INSTALL_PATH);
       },
-      "Couldn't remove speech. Try again.",
+      t`Couldn't remove speech. Try again.`,
     );
   }, [api, change]);
 

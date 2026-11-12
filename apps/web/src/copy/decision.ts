@@ -4,6 +4,7 @@ import {
   type AlwaysScope,
   type ApprovalCard,
 } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
 
 export interface DecisionWords {
   // A question with the action's own verb.
@@ -17,37 +18,37 @@ export interface DecisionWords {
 }
 
 const QUESTION: Readonly<Record<ActionClass, string>> = {
-  reading: "Read this?",
-  browsing: "Open this website?",
-  computer: "Do this on your computer?",
-  purchase: "Make this payment?",
-  send: "Send this as you?",
-  post: "Post this as you?",
-  delete: "Delete this online data?",
-  download_execute: "Run this downloaded program?",
-  system_settings: "Change this account setting?",
-  memory: "Save this to dot's memory?",
-  upload: "Upload these files?",
-  credentials: "Use this password or code?",
-  unknown: "Allow this step?",
-  network: "Allow this connection?",
+  reading: tr("Read this?"),
+  browsing: tr("Open this website?"),
+  computer: tr("Do this on your computer?"),
+  purchase: tr("Make this payment?"),
+  send: tr("Send this as you?"),
+  post: tr("Post this as you?"),
+  delete: tr("Delete this online data?"),
+  download_execute: tr("Run this downloaded program?"),
+  system_settings: tr("Change this account setting?"),
+  memory: tr("Save this to dot's memory?"),
+  upload: tr("Upload these files?"),
+  credentials: tr("Use this password or code?"),
+  unknown: tr("Allow this step?"),
+  network: tr("Allow this connection?"),
 };
 
 const ASK: Readonly<Record<ActionClass, string>> = {
-  reading: "Can I read this?",
-  browsing: "Can I open this website?",
-  computer: "Can I do this on your computer?",
-  purchase: "Can I make this payment?",
-  send: "Can I send this as you?",
-  post: "Can I post this as you?",
-  delete: "Can I delete this online data?",
-  download_execute: "Can I run this downloaded program?",
-  system_settings: "Can I change this account setting?",
-  memory: "Can I save this to my memory?",
-  upload: "Can I upload these files?",
-  credentials: "Can I use this password or code?",
-  unknown: "Can I take this step?",
-  network: "Can I let this app connect?",
+  reading: tr("Can I read this?"),
+  browsing: tr("Can I open this website?"),
+  computer: tr("Can I do this on your computer?"),
+  purchase: tr("Can I make this payment?"),
+  send: tr("Can I send this as you?"),
+  post: tr("Can I post this as you?"),
+  delete: tr("Can I delete this online data?"),
+  download_execute: tr("Can I run this downloaded program?"),
+  system_settings: tr("Can I change this account setting?"),
+  memory: tr("Can I save this to my memory?"),
+  upload: tr("Can I upload these files?"),
+  credentials: tr("Can I use this password or code?"),
+  unknown: tr("Can I take this step?"),
+  network: tr("Can I let this app connect?"),
 };
 
 // A question for the user, such as "Send this email?", becomes dot asking to do it.
@@ -57,46 +58,45 @@ function askLine(actionClass: ActionClass, title: string): string {
   return `Can I ${title.charAt(0).toLowerCase()}${title.slice(1)}`;
 }
 
-const VERB: Partial<Readonly<Record<ActionClass, string>>> = {
-  purchase: "Buy",
-  send: "Send",
-  post: "Post",
-  delete: "Delete",
-  download_execute: "Run",
-  system_settings: "Change",
-  memory: "Save",
-  upload: "Upload",
+// The answers, yes and no, with the action's own verb.
+const VERB: Partial<Readonly<Record<ActionClass, readonly [string, string]>>> = {
+  purchase: [tr("Buy"), tr("Don't buy")],
+  send: [tr("Send"), tr("Don't send")],
+  post: [tr("Post"), tr("Don't post")],
+  delete: [tr("Delete"), tr("Don't delete")],
+  download_execute: [tr("Run"), tr("Don't run")],
+  system_settings: [tr("Change"), tr("Don't change")],
+  memory: [tr("Save"), tr("Don't save")],
+  upload: [tr("Upload"), tr("Don't upload")],
 };
 
 // Acting as you always asks; everything else asks because your settings say so.
 const ALWAYS_ASKS: Partial<Readonly<Record<ActionClass, string>>> = {
-  purchase: "Paying",
-  send: "Sending as you",
-  post: "Posting as you",
-  delete: "Deleting your online data",
-  system_settings: "Changing your account",
-  upload: "Sharing your files",
-  credentials: "Using a password or code",
+  purchase: tr("Paying"),
+  send: tr("Sending as you"),
+  post: tr("Posting as you"),
+  delete: tr("Deleting your online data"),
+  system_settings: tr("Changing your account"),
+  upload: tr("Sharing your files"),
+  credentials: tr("Using a password or code"),
 };
 
 const WORK: Readonly<Record<ActionClass, string>> = {
-  reading: "reading",
-  browsing: "opening websites",
-  computer: "steps on your computer",
-  purchase: "paying",
-  send: "sending",
-  post: "posting",
-  delete: "deleting",
-  download_execute: "running downloaded programs",
-  system_settings: "changing accounts",
-  memory: "saving to memory",
-  upload: "uploading files",
-  credentials: "using passwords",
-  unknown: "unclear steps",
-  network: "connections beyond websites",
+  reading: tr("reading"),
+  browsing: tr("opening websites"),
+  computer: tr("steps on your computer"),
+  purchase: tr("paying"),
+  send: tr("sending"),
+  post: tr("posting"),
+  delete: tr("deleting"),
+  download_execute: tr("running downloaded programs"),
+  system_settings: tr("changing accounts"),
+  memory: tr("saving to memory"),
+  upload: tr("uploading files"),
+  credentials: tr("using passwords"),
+  unknown: tr("unclear steps"),
+  network: tr("connections beyond websites"),
 };
-
-const WAITS = "dot waits here; nothing times out.";
 
 // The daemon's own words for this action and its reason win; its plain class name becomes a
 // question.
@@ -104,7 +104,7 @@ export function decisionWords(
   card: Pick<ApprovalCard, "actionClass" | "title" | "why"> & Partial<Pick<ApprovalCard, "fields">>,
 ): DecisionWords {
   const { actionClass } = card;
-  const verb = VERB[actionClass] ?? "Allow";
+  const [primary, secondary] = VERB[actionClass] ?? [t`Allow`, t`Don't allow`];
   const always = ALWAYS_ASKS[actionClass];
   const title =
     card.title === ACTION_CLASS_LABELS[actionClass] ? QUESTION[actionClass] : card.title;
@@ -112,15 +112,15 @@ export function decisionWords(
   const network = actionClass === "network";
   return {
     title,
-    primary: verb,
-    secondary: `Don't ${verb.toLowerCase()}`,
+    primary,
+    secondary,
     why: network
-      ? (card.why ?? "Apps reach websites on their own; anything else waits for your OK.")
+      ? (card.why ?? t`Apps reach websites on their own; anything else waits for your OK.`)
       : card.why
-        ? `${card.why} ${WAITS}`
+        ? t`${card.why} dot waits here; nothing times out.`
         : always
-          ? `${always} always needs your OK. ${WAITS}`
-          : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
+          ? t`${always} always needs your OK. dot waits here; nothing times out.`
+          : t`Your settings ask before ${WORK[actionClass]}. dot waits here; nothing times out.`,
     line: (network && connectionLine(card.fields)) || askLine(actionClass, title),
   };
 }
@@ -129,7 +129,9 @@ export function decisionWords(
 function connectionLine(fields: ApprovalCard["fields"] | undefined): string | undefined {
   const app = fields?.find(([label]) => label === "App")?.[1];
   if (!fields) return undefined;
-  return `${app && app !== NOT_KNOWN ? app : "An app"} is trying to reach a new server.`;
+  return app && app !== NOT_KNOWN
+    ? t`${app} is trying to reach a new server.`
+    : t`An app is trying to reach a new server.`;
 }
 
 // The daemon's word for an app it couldn't name.

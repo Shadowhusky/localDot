@@ -12,6 +12,7 @@ import {
   compareReleaseVersions,
 } from "../../../../packages/protocol/src/app-update.ts";
 import { RELEASE_VERSION } from "../../../../packages/protocol/src/release.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 
@@ -90,8 +91,8 @@ const active = (status: AppUpdateStatus | null) =>
   status?.phase === "checking" || status?.phase === "downloading" || status?.phase === "installing";
 
 function liveLine(status: AppUpdateStatus) {
-  if (status.phase === "checking") return "Checking for updates…";
-  return status.progress?.detail ?? "Working on it…";
+  if (status.phase === "checking") return t`Checking for updates…`;
+  return status.progress?.detail ?? t`Working on it…`;
 }
 
 // A toast keeps its element while its words stay the same, so its live line follows by itself.
@@ -109,7 +110,7 @@ function GoingLine() {
     },
     () => goingLine,
   );
-  return `Updating localDot · ${line}`;
+  return t`Updating localDot · ${line}`;
 }
 
 export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void): AppUpdateControl {
@@ -239,7 +240,7 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
       () => api.post("/api/app-update/update", { confirmShutdown: true }),
       // The daemon's own plain words, such as why a working task holds the update back.
       (err) =>
-        err.status === 409 ? err.message : "The update couldn't start. Try again in a moment.",
+        err.status === 409 ? err.message : t`The update couldn't start. Try again in a moment.`,
       () => setStarting(false),
     );
   }, [act, api]);
@@ -257,10 +258,10 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
     const notes = !status.availableVersion && status.notes.length > 0;
     showToast({
       id: UPDATED,
-      title: `Updated to ${shown(status.currentVersion)}`,
+      title: t`Updated to ${shown(status.currentVersion)}`,
       ...(notes && {
         action: {
-          label: "What's new",
+          label: t`What's new`,
           onAction: () => {
             dismissToast(UPDATED);
             reviewRef.current();
@@ -286,9 +287,9 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
     noticed.current = version;
     showToast({
       id: NOTICE,
-      title: `localDot ${shown(version)} is available`,
+      title: t`localDot ${shown(version)} is available`,
       action: {
-        label: "Review update",
+        label: t`Review update`,
         onAction: () => {
           dismissToast(NOTICE);
           reviewRef.current();
@@ -314,10 +315,10 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
     }
     showToast({
       id: GOING,
-      title: "Updating localDot",
+      title: t`Updating localDot`,
       live: createElement(GoingLine),
       action: {
-        label: "Details",
+        label: t`Details`,
         onAction: () => reviewRef.current(),
       },
     });
@@ -331,9 +332,9 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
     }
     showToast({
       id: HELD,
-      title: "The update waits for your task",
+      title: t`The update waits for your task`,
       description: held,
-      action: { label: "Details", onAction: () => reviewRef.current() },
+      action: { label: t`Details`, onAction: () => reviewRef.current() },
     });
   }, [held]);
   const failure = status?.progress && !active(status) ? status.error : null;
@@ -348,11 +349,11 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
     watched.current = false;
     showToast({
       id: FAILED,
-      title: "The update didn't finish",
+      title: t`The update didn't finish`,
       description: failure,
       tone: "danger",
       action: {
-        label: "Retry",
+        label: t`Retry`,
         onAction: () => {
           dismissToast(FAILED);
           update();
@@ -364,7 +365,7 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
     status,
     error:
       refusal ??
-      (unreachable ? "localDot isn't answering right now. This page reconnects by itself." : null),
+      (unreachable ? t`localDot isn't answering right now. This page reconnects by itself.` : null),
     busy,
     starting,
     restarting,
@@ -377,13 +378,13 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
     check: () =>
       act(
         () => api.post("/api/app-update/check"),
-        () => "That didn't work. Try again.",
+        () => t`That didn't work. Try again.`,
       ),
     update,
     cancel: () =>
       act(
         () => api.post("/api/app-update/cancel"),
-        () => "That didn't work. Try again.",
+        () => t`That didn't work. Try again.`,
       ),
     stopAndUpdate: () => {
       if (pending.current) return;
@@ -393,14 +394,14 @@ export function useAppUpdate(api: ApiClient, idle: boolean, review: () => void):
       act(
         () => api.post("/api/app-update/stop-and-update", { confirmShutdown: true }),
         (err) =>
-          err.status === 409 ? err.message : "The update couldn't start. Try again in a moment.",
+          err.status === 409 ? err.message : t`The update couldn't start. Try again in a moment.`,
         () => setStarting(false),
       );
     },
     preferences: (value) =>
       act(
         () => api.put("/api/app-update/preferences", value),
-        () => "That didn't work. Try again.",
+        () => t`That didn't work. Try again.`,
       ),
   };
 }

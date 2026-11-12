@@ -1,5 +1,6 @@
 import { type ProviderSpec, providerById } from "@localdot/providers";
 import { useMemo } from "react";
+import { t } from "../i18n/index.ts";
 import type { Provider } from "../keys/binding.ts";
 import { KeyForm, type KeyFormPreset } from "../keys/KeyForm.tsx";
 import { keysUnavailable, LOCKED_TEXT, SETUP_TEXT } from "../keys/KeysPanel.tsx";
@@ -38,7 +39,7 @@ export function SourceSetup({
   if (source.setup === "plan")
     return (
       <div className="settings-setup">
-        <p className="settings-lede">Its models are listed here once it's ready.</p>
+        <p className="settings-lede">{t`Its models are listed here once it's ready.`}</p>
         {source.provider === CHATGPT ? (
           <ChatgptPanel account={controls.plans.chatgpt} />
         ) : (
@@ -89,23 +90,24 @@ function KeySetup({
     <div className="settings-setup">
       <p className="settings-lede">
         {endpoint
-          ? "Your server's https address, and a key for it."
+          ? t`Your server's https address, and a key for it. It goes straight to your key layer and isn't shown again.`
           : spec.plan
-            ? `Paste your ${spec.name} key.`
-            : `Paste an API key from ${spec.name}.`}{" "}
-        It goes straight to your key layer and isn't shown again.
+            ? t`Paste your ${spec.name} key. It goes straight to your key layer and isn't shown again.`
+            : t`Paste an API key from ${spec.name}. It goes straight to your key layer and isn't shown again.`}
       </p>
       {spec.rule && <p className="settings-note">{spec.rule}</p>}
       {page ? (
         <p className="settings-setup-link">
           <a href={page} target="_blank" rel="noopener noreferrer">
-            Get a key from {spec.name}
+            {t`Get a key from ${spec.name}`}
           </a>
           <span className="settings-setup-host">{hostOf(page)}</span>
         </p>
       ) : (
         !endpoint && (
-          <p className="settings-note">Make one in your {spec.name} account, then paste it here.</p>
+          <p className="settings-note">
+            {t`Make one in your ${spec.name} account, then paste it here.`}
+          </p>
         )
       )}
       {vaultLocked(health) && unlock && (
@@ -114,7 +116,7 @@ function KeySetup({
           <UnlockKeys
             setup={setup}
             unlock={unlock}
-            label={setup ? "Choose a passphrase" : "Unlock saved keys"}
+            label={setup ? t`Choose a passphrase` : t`Unlock saved keys`}
           />
           <p className="settings-note">{UNLOCK_PRIVACY}</p>
         </>

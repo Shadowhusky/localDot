@@ -1,4 +1,5 @@
 import { createContext, type ReactNode, useContext } from "react";
+import { t } from "../../i18n/index.ts";
 import { FileCard } from "../../ui/Card.tsx";
 import { Progress } from "../../ui/Progress.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
@@ -75,7 +76,7 @@ export function ViewSwitch({ choice, without }: { choice?: ViewChoice; without?:
   return (
     <SegmentedControl
       size={28}
-      aria-label="Show"
+      aria-label={t`Show`}
       value={choice.value}
       items={items}
       onValueChange={choice.choose}

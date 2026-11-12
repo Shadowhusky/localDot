@@ -12,6 +12,7 @@ import {
   SECRET_ID_PATTERN,
   SecretBinding,
 } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
 
 export type Provider = (typeof LLM_PROVIDERS)[number];
 export type HttpFormat = (typeof HTTP_FORMATS)[number];
@@ -53,15 +54,15 @@ export const PROVIDER_NAMES: Record<Provider, string> = {
   deepseek: "DeepSeek",
   groq: "Groq",
   openrouter: "OpenRouter",
-  "openai-compatible": "OpenAI-compatible",
+  "openai-compatible": tr("OpenAI-compatible"),
   azure: "Azure OpenAI",
-  "anthropic-compatible": "Anthropic-compatible",
+  "anthropic-compatible": tr("Anthropic-compatible"),
 };
 
 // Providers with their own address first, then those that take an address the user names.
 export const PROVIDER_GROUPS: readonly { label: string; providers: readonly Provider[] }[] = [
   {
-    label: "Providers",
+    label: tr("Providers"),
     providers: [
       "anthropic",
       "openai",
@@ -73,14 +74,17 @@ export const PROVIDER_GROUPS: readonly { label: string; providers: readonly Prov
       "openrouter",
     ],
   },
-  { label: "Your own address", providers: ["openai-compatible", "anthropic-compatible", "azure"] },
+  {
+    label: tr("Your own address"),
+    providers: ["openai-compatible", "anthropic-compatible", "azure"],
+  },
 ];
 
 export const FORMAT_NAMES: Record<HttpFormat, string> = {
-  bearer: "Bearer token",
-  raw: "The key as is",
-  "basic-user": "Basic auth, key as user",
-  "basic-password": "Basic auth, key as password",
+  bearer: tr("Bearer token"),
+  raw: tr("The key as is"),
+  "basic-user": tr("Basic auth, key as user"),
+  "basic-password": tr("Basic auth, key as password"),
 };
 
 // The providers with no fixed address: the key goes to the base URL the user names.
@@ -89,9 +93,9 @@ export const needsBaseURL = (p: Provider) =>
 
 // keyd refuses private hosts and ports, so a server on this Mac is reached through its own route.
 export function baseURLHint(p: Provider): string | undefined {
-  const local = "Local servers go through LM Studio or Ollama.";
-  if (p === "openai-compatible") return `Use https. ${local}`;
-  if (p === "anthropic-compatible") return `Use https, ending in /v1 (added if missing). ${local}`;
+  if (p === "openai-compatible") return t`Use https. Local servers go through LM Studio or Ollama.`;
+  if (p === "anthropic-compatible")
+    return t`Use https, ending in /v1 (added if missing). Local servers go through LM Studio or Ollama.`;
   return undefined;
 }
 
@@ -102,7 +106,8 @@ export type DraftCheck =
 
 const HOST =
   /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$/;
-const HEADER = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
+// The quote and backtick are escaped so the message check reads the messages below as written.
+const HEADER = /^[!#$%&\x27*+.^_\x60|~0-9A-Za-z-]{1,128}$/;
 
 // The binding the key will be sealed for, from what the form holds. keyd checks every field again
 // (and more: the deny list, forbidden headers); this catches what a person can fix while typing.
@@ -113,11 +118,11 @@ export function bindingOf(d: KeyDraft): DraftCheck {
   if (!SECRET_ID_PATTERN.test(id)) {
     return fail(
       "id",
-      "Use lower-case letters, digits, - or _ (up to 64), starting with a letter or digit.",
+      t`Use lower-case letters, digits, - or _ (up to 64), starting with a letter or digit.`,
     );
   }
   if (RESERVED_SECRET_IDS.includes(id))
-    return fail("id", `"${id}" is built in; pick another name.`);
+    return fail("id", t`"${id}" is built in; pick another name.`);
   if (d.kind === "secret") return { ok: true, binding: { id, kind: "secret" } };
   if (d.kind === "llm") {
     if (!needsBaseURL(d.provider))
@@ -126,11 +131,11 @@ export function bindingOf(d: KeyDraft): DraftCheck {
     if (!baseURL)
       return fail(
         "baseURL",
-        "Enter the API's https:// address by host name, with no port, user, query or #.",
+        t`Enter the API's https:// address by host name, with no port, user, query or #.`,
       );
     if (d.provider === "anthropic-compatible") {
       if (/(^|\.)anthropic\.com$/.test(new URL(baseURL).hostname))
-        return fail("baseURL", "For Anthropic's own API, choose Anthropic as the provider.");
+        return fail("baseURL", t`For Anthropic's own API, choose Anthropic as the provider.`);
       // Vendors give the address Anthropic's SDKs add /v1/messages to; the route keyd holds ends
       // in the version, as Anthropic's own does.
       baseURL = baseURL.replace(/\/+$/, "");
@@ -147,18 +152,18 @@ export function bindingOf(d: KeyDraft): DraftCheck {
     ),
   ];
   if (hosts.length === 0 || hosts.length > 16)
-    return fail("hosts", "Name 1 to 16 hosts, like api.example.com.");
+    return fail("hosts", t`Name 1 to 16 hosts, like api.example.com.`);
   const bad = hosts.find((h) => !HOST.test(h));
   if (bad)
     return fail(
       "hosts",
-      `"${bad}" is not a host name: use names like api.example.com, not addresses or URLs.`,
+      t`"${bad}" is not a host name: use names like api.example.com, not addresses or URLs.`,
     );
   const header = d.header.trim();
   if (!HEADER.test(header))
-    return fail("header", "Enter a header name, like Authorization or X-Api-Key.");
+    return fail("header", t`Enter a header name, like Authorization or X-Api-Key.`);
   if (d.format.startsWith("basic-") && header.toLowerCase() !== "authorization") {
-    return fail("header", "Basic auth travels in the Authorization header.");
+    return fail("header", t`Basic auth travels in the Authorization header.`);
   }
   return { ok: true, binding: { id, kind: "http", hosts, header, format: d.format } };
 }
@@ -209,28 +214,32 @@ export function valueProblem(
   if (kind === "secret")
     return GeneralSecretValue.safeParse(value).success
       ? undefined
-      : "Enter 1–8,192 UTF-8 bytes without NUL. Multiline values are supported.";
+      : t`Enter 1–8,192 UTF-8 bytes without NUL. Multiline values are supported.`;
   if (claudePlanToken(value)) return CLAUDE_PLAN_REFUSAL;
   if (value.length < 8 || value.length > 8192 || !PRINTABLE_ASCII.test(value)) {
-    return "A key is 8 to 8,192 characters of printable ASCII.";
+    return t`A key is 8 to 8,192 characters of printable ASCII.`;
   }
   if (value.startsWith(" ") || value.endsWith(" ")) {
-    return "Remove spaces at the start or end of the key.";
+    return t`Remove spaces at the start or end of the key.`;
   }
   const spaced = value.includes(" ");
   if (spaced && (kind === "llm" || (shape.format ?? "bearer") === "bearer"))
-    return "A key has no spaces. Paste the key itself.";
+    return t`A key has no spaces. Paste the key itself.`;
   if (shape.replacing && value.split(" ").length > 2)
-    return "That reads like a message, not a key. Paste the key itself.";
+    return t`That reads like a message, not a key. Paste the key itself.`;
   if (!shape.replacing) return undefined;
   const fits =
     kind === "llm" && shape.provider ? fitsProviderKey(shape.provider, value) : undefined;
-  if (fits === false)
-    return `That doesn't look like ${PROVIDER_NAMES[shape.provider as Provider] ?? "this provider"}'s key. Paste the key itself.`;
+  if (fits === false) {
+    const name = PROVIDER_NAMES[shape.provider as Provider];
+    return name
+      ? t`That doesn't look like ${name}'s key. Paste the key itself.`
+      : t`That doesn't look like this provider's key. Paste the key itself.`;
+  }
   // A key or token nearly always has a digit, and a typed word or two almost never does. A raw header
   // may start with its scheme ("Token …"): the digit is looked for after it.
   if (fits !== true && !/\d/.test(value.split(" ").at(-1) ?? ""))
-    return "That doesn't look like a key: keys have digits in them. Paste the key itself.";
+    return t`That doesn't look like a key: keys have digits in them. Paste the key itself.`;
   return undefined;
 }
 
@@ -268,12 +277,12 @@ export function describeKey(k: {
   hosts?: string[] | null;
   header?: string;
 }): string {
-  if (k.kind === "secret") return "General key";
+  if (k.kind === "secret") return t`General key`;
   if (k.kind === "llm") {
     const name =
       k.provider && Object.hasOwn(PROVIDER_NAMES, k.provider)
         ? PROVIDER_NAMES[k.provider as Provider]
-        : (k.provider ?? "Model provider");
+        : (k.provider ?? t`Model provider`);
     try {
       return k.baseURL ? `${name} · ${new URL(k.baseURL).host}` : name;
     } catch {
@@ -326,7 +335,7 @@ export function destinationOf(k: {
   baseURL?: string;
   hosts?: string[] | null;
 }): string {
-  if (k.kind === "secret") return "general key storage";
+  if (k.kind === "secret") return t`general key storage`;
   if (k.kind === "http") return (k.hosts ?? []).join(", ");
   try {
     if (k.baseURL) return new URL(k.baseURL).host;
@@ -335,5 +344,5 @@ export function destinationOf(k: {
   }
   return k.provider && Object.hasOwn(PROVIDER_NAMES, k.provider)
     ? PROVIDER_NAMES[k.provider as Provider]
-    : (k.provider ?? "its provider");
+    : (k.provider ?? t`its provider`);
 }

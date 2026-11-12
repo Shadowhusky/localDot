@@ -1,5 +1,6 @@
 import { ULID_PATTERN, ulid } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { FreshStartAction } from "../shell/Curtain.tsx";
 import { DOCKER_DOWN } from "./errors.ts";
@@ -19,11 +20,11 @@ export interface FreshStart {
   curtain?: FreshStartAction;
 }
 
-const UNFINISHED = "Starting fresh didn't finish. Try again.";
+const UNFINISHED = t`Starting fresh didn't finish. Try again.`;
 
 export function describeFreshStartError(status: number | null): string {
-  if (status === null) return "localDot isn't answering. Check that it's running.";
-  if (status === 502) return `${DOCKER_DOWN}, then try again.`;
+  if (status === null) return t`localDot isn't answering. Check that it's running.`;
+  if (status === 502) return DOCKER_DOWN;
   return UNFINISHED;
 }
 

@@ -1,5 +1,6 @@
 import type { ScreenSelectionSnapshot } from "@localdot/protocol";
 import { useEffect, useMemo, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
 import { parseCell } from "./parse.ts";
@@ -84,7 +85,7 @@ export function useBrowserScreen(
               throw new Error("Browser owner changed");
             setView({ owner, cell, stale: false, reconnects, error: null });
           } catch {
-            clear("Browser status could not be verified. Reconnecting…");
+            clear(t`Browser status could not be verified. Reconnecting…`);
           }
         },
         onOpen() {
@@ -92,7 +93,7 @@ export function useBrowserScreen(
           opened = true;
           hold(null);
         },
-        onClose: () => hold("Browser connection interrupted. Reconnecting…"),
+        onClose: () => hold(t`Browser connection interrupted. Reconnecting…`),
         onRefused() {
           // The WebSocket API hides refusal codes. This authenticated read detects revoked
           // install tokens; only a new status stream can restore display/input readiness.

@@ -1,5 +1,6 @@
 import type { DotSummary } from "@localdot/protocol";
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { StopDotDialog } from "../shell/StopDotDialog.tsx";
 import type { LocalDots } from "../shell/useLocalDots.ts";
@@ -35,17 +36,17 @@ export function DotsOnThisComputer({
   const report = (pending: Promise<string | null>) => void pending.then((text) => setProblem(text));
   return (
     <div>
-      <GroupHead title="Dots on this computer" />
+      <GroupHead title={t`Dots on this computer`} />
       <Group>
         {list === null ? (
-          <GroupRow label="Looking for dots on this computer…" />
+          <GroupRow label={t`Looking for dots on this computer…`} />
         ) : (
           list.map((dot) => (
             <GroupRow
               key={dot.id}
               leading={<IconTile icon="smile" />}
               label={dot.name}
-              detail={dot.self ? "This dot" : DOT_STATE_WORD[dot.state]}
+              detail={dot.self ? t`This dot` : DOT_STATE_WORD[dot.state]}
               trailing={
                 !dot.self &&
                 dots.manage &&
@@ -53,19 +54,19 @@ export function DotsOnThisComputer({
                   <Button
                     size="sm"
                     busy={dots.busy === dot.id}
-                    aria-label={`Stop ${dot.name}`}
+                    aria-label={t`Stop ${dot.name}`}
                     onClick={() => setStopping(dot)}
                   >
-                    Stop
+                    {t`Stop`}
                   </Button>
                 ) : (
                   <Button
                     size="sm"
                     busy={dots.busy === dot.id}
-                    aria-label={`Start ${dot.name}`}
+                    aria-label={t`Start ${dot.name}`}
                     onClick={() => report(dots.start(dot))}
                   >
-                    Start
+                    {t`Start`}
                   </Button>
                 ))
               }
@@ -75,7 +76,7 @@ export function DotsOnThisComputer({
         {dots.manage && list && (
           <GroupRow
             leading={<IconTile icon="plus" />}
-            label="Add a dot on this computer…"
+            label={t`Add a dot on this computer…`}
             onSelect={(trigger) => {
               addRow.current = trigger;
               setProblem(null);
@@ -86,8 +87,8 @@ export function DotsOnThisComputer({
         {dots.manage && self && !self.main && (
           <GroupRow
             leading={<IconTile icon="trash" />}
-            label="Remove this dot"
-            detail="Stops it and removes its services, saved keys and computers."
+            label={t`Remove this dot`}
+            detail={t`Stops it and removes its services, saved keys and computers.`}
             trailing={
               <Button
                 ref={removeButton}
@@ -95,7 +96,7 @@ export function DotsOnThisComputer({
                 variant="destructive"
                 onClick={() => setRemoving(true)}
               >
-                Remove…
+                {t`Remove…`}
               </Button>
             }
           />
@@ -107,9 +108,9 @@ export function DotsOnThisComputer({
             {problem}
           </span>
         ) : list && !dots.manage ? (
-          "Add dots from Terminal: localdot dots add <name>."
+          t`Add dots from Terminal: localdot dots add <name>.`
         ) : (
-          "Each dot has its own address, keys and computer. Switching to one signs this browser in there."
+          t`Each dot has its own address, keys and computer. Switching to one signs this browser in there.`
         )}
       </GroupNote>
       {list && (
@@ -137,7 +138,7 @@ export function DotsOnThisComputer({
               else dots.refresh();
             } catch (error) {
               setRemoving(false);
-              setProblem(dotProblem(error, `${self.name} wasn't removed.`));
+              setProblem(dotProblem(error, t`${self.name} wasn't removed.`));
             }
           }}
         />
@@ -176,19 +177,19 @@ function RemoveDotDialog({
         if (!busy) onClose();
       }}
       anchor={anchor}
-      title={`Remove ${dot.name}?`}
-      description="It stops, and its services, saved keys, computers and Tailscale address are removed. Its data folder is kept unless you tick the box. You'll go to another dot."
+      title={t`Remove ${dot.name}?`}
+      description={t`It stops, and its services, saved keys, computers and Tailscale address are removed. Its data folder is kept unless you tick the box. You'll go to another dot.`}
       body={
         <Checkbox
-          label="Also delete its data"
-          description="Its settings, memory and conversations, for good."
+          label={t`Also delete its data`}
+          description={t`Its settings, memory and conversations, for good.`}
           checked={deleteData}
           onCheckedChange={setDeleteData}
         />
       }
     >
       <Button variant="quiet" onClick={onClose}>
-        Cancel
+        {t`Cancel`}
       </Button>
       <Button
         variant="destructive"
@@ -198,7 +199,7 @@ function RemoveDotDialog({
           void onRemove(deleteData).finally(() => setBusy(false));
         }}
       >
-        {`Remove ${dot.name}`}
+        {t`Remove ${dot.name}`}
       </Button>
     </Dialog>
   );

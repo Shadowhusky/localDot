@@ -1,5 +1,6 @@
 import type { StreamQuality } from "@localdot/protocol";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { STREAM_PREFERENCES, type StreamPreference } from "./stream-quality.ts";
 
 export const STREAM_PREFERENCE_KEY = "localdot.stream-quality.v1";
@@ -40,11 +41,15 @@ export function chooseStreamPreference(next: StreamPreference): boolean {
   }
 }
 
-const names: Record<StreamPreference, string> = { auto: "Auto", sharp: "Sharp", smooth: "Smooth" };
+const names: Record<StreamPreference, string> = {
+  auto: tr("Auto"),
+  sharp: tr("Sharp"),
+  smooth: tr("Smooth"),
+};
 const details: Record<StreamPreference, string> = {
-  auto: "Adapts to your connection and device.",
-  sharp: "Keeps text crisp while the screen moves, using more data.",
-  smooth: "Prioritizes fluid motion when the stream slows down.",
+  auto: tr("Adapts to your connection and device."),
+  sharp: tr("Keeps text crisp while the screen moves, using more data."),
+  smooth: tr("Prioritizes fluid motion when the stream slows down."),
 };
 type Notify = (notice: { id: string; title: string; description: string }) => void;
 let pending:
@@ -63,10 +68,14 @@ export function streamPreferenceAdopted(value: StreamPreference, quality: Stream
   clearTimeout(pending.timer);
   const { saved, notify } = pending;
   pending = undefined;
+  const detail = details[value];
+  const fps = quality.framerate;
   notify({
     id: "stream-preference",
-    title: `${names[value]} preference active`,
-    description: `${details[value]} Up to ${quality.framerate} fps requested. The picture may look unchanged on a good connection.${saved ? "" : " Not saved in this browser."}`,
+    title: t`${names[value]} preference active`,
+    description: saved
+      ? t`${detail} Up to ${fps} fps requested. The picture may look unchanged on a good connection.`
+      : t`${detail} Up to ${fps} fps requested. The picture may look unchanged on a good connection. Not saved in this browser.`,
   });
 }
 
@@ -74,8 +83,8 @@ function switching(value: StreamPreference, saved: boolean, notify: Notify): voi
   clearTimeout(pending?.timer);
   notify({
     id: "stream-preference",
-    title: `Switching to ${names[value]}…`,
-    description: "Waiting for the live stream to use this preference.",
+    title: t`Switching to ${names[value]}…`,
+    description: t`Waiting for the live stream to use this preference.`,
   });
   const request = {
     value,
@@ -85,8 +94,8 @@ function switching(value: StreamPreference, saved: boolean, notify: Notify): voi
       if (pending !== request) return;
       notify({
         id: "stream-preference",
-        title: `${names[value]} preference ${saved ? "saved" : "selected"}`,
-        description: "Waiting for the live stream. It will apply when connected.",
+        title: saved ? t`${names[value]} preference saved` : t`${names[value]} preference selected`,
+        description: t`Waiting for the live stream. It will apply when connected.`,
       });
     }, 3000),
   };

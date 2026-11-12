@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { t } from "../i18n/index.ts";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
 import "./rails.css";
 
@@ -39,7 +40,7 @@ export function RailPanel({
         <div className="rail-head">
           {switching ? (
             <SegmentedControl
-              aria-label="Show"
+              aria-label={t`Show`}
               size={32}
               compact
               fit

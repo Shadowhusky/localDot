@@ -1,4 +1,5 @@
 import type { MouseEvent } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { SETUP_STEPS, type SetupStep } from "./setup.ts";
@@ -18,10 +19,11 @@ export function FinishSetup({ steps, done, onChooseModel, onContinue }: FinishSe
   return (
     <section className="setup" aria-labelledby="setup-title">
       <div className="setup-head">
-        <h3 id="setup-title">Finish setting up</h3>
+        <h3 id="setup-title">{t`Finish setting up`}</h3>
         <p>
-          {done} of {SETUP_STEPS} steps done.
-          {modelReady ? "" : " dot needs a model before it can start."}
+          {modelReady
+            ? t`${done} of ${SETUP_STEPS} steps done.`
+            : t`${done} of ${SETUP_STEPS} steps done. dot needs a model before it can start.`}
         </p>
       </div>
       <ul className="setup-group">
@@ -34,14 +36,14 @@ export function FinishSetup({ steps, done, onChooseModel, onContinue }: FinishSe
             </span>
             {step.id === "model" && !step.done && (
               <Button size="sm" onClick={onChooseModel}>
-                Choose…
+                {t`Choose…`}
               </Button>
             )}
           </li>
         ))}
       </ul>
       <Button className="setup-continue" icon="continue" onClick={onContinue}>
-        Continue setup
+        {t`Continue setup`}
       </Button>
     </section>
   );

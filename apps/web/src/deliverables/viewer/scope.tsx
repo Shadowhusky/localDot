@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import type { AgentResult } from "../../agent/model.ts";
 import type { DownloadVersion, FileState, ResultDownloads } from "../../agent/ResultFiles.tsx";
+import { t } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { ErrorBoundary } from "../../ui/ErrorBoundary.tsx";
 import { showToast } from "../../ui/Toast.tsx";
@@ -64,9 +65,9 @@ export function resultDownloads(
     state: (entry) => downloads.state(entry.resultId, entry.file),
     blocked: (entry) =>
       !downloads.sessionId
-        ? "This task is no longer available."
+        ? t`This task is no longer available.`
         : downloads.busy && downloads.state(entry.resultId, entry.file) !== "busy"
-          ? "Another download is still running."
+          ? t`Another download is still running.`
           : undefined,
     request: (entry, version) => void downloads.request(entry.resultId, entry.file, version),
   };
@@ -105,7 +106,7 @@ export function FileViewerScope({
       if (keys.includes(key)) setViewing({ open: true, key, shown });
       else
         showToast({
-          title: "This file is no longer in the list. Reopen the task and try again.",
+          title: t`This file is no longer in the list. Reopen the task and try again.`,
           tone: "neutral",
         });
     },

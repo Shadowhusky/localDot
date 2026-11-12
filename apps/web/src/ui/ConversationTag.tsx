@@ -1,16 +1,17 @@
 import { CONVERSATION_TAGS, type ConversationTag } from "@localdot/protocol";
 import type { KeyboardEvent } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { focusWithoutScroll } from "./focus.ts";
 import { useMenuItem } from "./Menu.tsx";
 import "./tags.css";
 
 export const TAG_NAMES: Record<ConversationTag, string> = {
-  red: "Red",
-  orange: "Orange",
-  yellow: "Yellow",
-  green: "Green",
-  blue: "Blue",
-  purple: "Purple",
+  red: tr("Red"),
+  orange: tr("Orange"),
+  yellow: tr("Yellow"),
+  green: tr("Green"),
+  blue: tr("Blue"),
+  purple: tr("Purple"),
 };
 
 // A conversation's colour tag, drawn by its status glyph inside the glyph's own box, so it moves
@@ -60,7 +61,7 @@ export function TagSwatches({
     // biome-ignore lint/a11y/useSemanticElements: a menu groups its items with role group, not a fieldset.
     <div
       role="group"
-      aria-label="Tag"
+      aria-label={t`Tag`}
       className="ui-tag-swatches"
       data-inline-choices=""
       onKeyDown={onKeyDown}
@@ -82,7 +83,7 @@ function Swatch({
   onSelect(tag: ConversationTag | null): void;
 }) {
   const item = useMenuItem(() => onSelect(tag));
-  const name = tag ? TAG_NAMES[tag] : "No tag";
+  const name = tag ? TAG_NAMES[tag] : t`No tag`;
   return (
     <button
       {...item}

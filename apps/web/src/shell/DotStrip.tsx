@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import "../ui/phone-layout.css";
 
@@ -53,7 +54,7 @@ export function DotStrip({ live, hidden, band, status, thumb, time }: DotStripPr
               variant="quiet"
               className="phone-thumb"
               data-light={thumb.light}
-              aria-label="Open the computer"
+              aria-label={t`Open the computer`}
               onClick={thumb.onOpen}
             >
               <span ref={thumb.slotRef} className="phone-thumb-slot" />

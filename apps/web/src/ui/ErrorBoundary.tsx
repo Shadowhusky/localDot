@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { Component, Fragment, type ReactNode } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "./Button.tsx";
 import { Card } from "./Card.tsx";
 import { Icon } from "./Icon.tsx";
@@ -55,9 +56,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, State> {
       >
         <Card className="ui-part-failed-card" role="status">
           <Icon name="circle-alert" size={16} className="ui-part-failed-icon" />
-          <p className="ui-part-failed-title">Something went wrong here</p>
+          <p className="ui-part-failed-title">{t`Something went wrong here`}</p>
           <Button size="sm" onClick={this.reload}>
-            Reload this part
+            {t`Reload this part`}
           </Button>
         </Card>
       </div>

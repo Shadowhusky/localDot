@@ -1,6 +1,7 @@
 import { type DotSummary, outfit } from "@localdot/protocol";
 import { useRef, useState } from "react";
 import { Dot } from "../dot/Dot.tsx";
+import { t } from "../i18n/index.ts";
 import { DOT_STATE_WORD } from "../settings/dot-copy.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -43,7 +44,7 @@ export function LocalDotSwitcher({
           variant="quiet"
           size="sm"
           className="bar-brand"
-          aria-label={name ? `localDot: ${name}. Switch localDot` : "Switch localDot"}
+          aria-label={name ? t`localDot: ${name}. Switch localDot` : t`Switch localDot`}
           {...triggerProps("menu", open)}
           onClick={() => {
             if (!open) here?.refresh();
@@ -59,9 +60,9 @@ export function LocalDotSwitcher({
           <Icon name="chevron-down" size={14} className="bar-brand-chevron" />
         </Button>
       </span>
-      <Menu open={open} onClose={() => setOpen(false)} anchor={anchor} label="localDots">
+      <Menu open={open} onClose={() => setOpen(false)} anchor={anchor} label={t`localDots`}>
         {dots && here && (
-          <MenuGroup label="On this computer">
+          <MenuGroup label={t`On this computer`}>
             {dots.map((dot) => (
               <MenuItem
                 key={dot.id}
@@ -80,19 +81,23 @@ export function LocalDotSwitcher({
                 <MenuItem
                   key={`stop-${dot.id}`}
                   icon="stop"
-                  textValue={`Stop ${dot.name}`}
+                  textValue={t`Stop ${dot.name}`}
                   onSelect={() => setStopping(dot)}
                 >
-                  {`Stop ${dot.name}…`}
+                  {t`Stop ${dot.name}…`}
                 </MenuItem>
               ))}
           </MenuGroup>
         )}
         {(!dots || others.length > 0) && (
-          <MenuGroup label={dots ? "Your other localDots" : "localDots"}>
+          <MenuGroup label={dots ? t`Your other localDots` : t`localDots`}>
             {!dots && (
-              <MenuItem textValue={name ?? "This localDot"} checked onSelect={() => setOpen(false)}>
-                {name ?? "This localDot"}
+              <MenuItem
+                textValue={name ?? t`This localDot`}
+                checked
+                onSelect={() => setOpen(false)}
+              >
+                {name ?? t`This localDot`}
               </MenuItem>
             )}
             {others.map((link) => (
@@ -115,7 +120,7 @@ export function LocalDotSwitcher({
               if (anchor.current) onAddHere(anchor.current);
             }}
           >
-            Add a dot on this computer…
+            {t`Add a dot on this computer…`}
           </MenuItem>
         )}
         <MenuItem
@@ -125,7 +130,7 @@ export function LocalDotSwitcher({
             if (anchor.current) onManage(anchor.current);
           }}
         >
-          {others.length || dots ? "Add or manage localDots…" : "Add another localDot…"}
+          {others.length || dots ? t`Add or manage localDots…` : t`Add another localDot…`}
         </MenuItem>
       </Menu>
       {here && (
@@ -138,7 +143,7 @@ export function LocalDotSwitcher({
             void here.stop(dot).then((problem) => {
               if (problem)
                 showToast({
-                  title: `Couldn't stop ${dot.name}`,
+                  title: t`Couldn't stop ${dot.name}`,
                   description: problem,
                   tone: "danger",
                 });

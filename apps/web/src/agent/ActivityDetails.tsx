@@ -1,4 +1,5 @@
 import { useContext, useEffect, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
@@ -30,34 +31,36 @@ const pct = (value: number) => `${(value * 100).toFixed(3)}%`;
 // A 16:10 window around the target, wide enough to show what surrounds it; the whole frame without one.
 export function frameCrop(target: StepRowView["target"], scale: number): FrameCrop {
   if (!target) return { image: { width: "100%", left: "0%", top: "0%" }, target: null };
-  const t = {
+  const box = {
     x: target.x / scale,
     y: target.y / scale,
     w: target.w / scale,
     h: target.h / scale,
   };
-  const w = Math.min(FRAME_W, Math.max(MIN_WINDOW, Math.max(t.w, t.h * 1.6) * 4));
+  const w = Math.min(FRAME_W, Math.max(MIN_WINDOW, Math.max(box.w, box.h * 1.6) * 4));
   const h = (w * FRAME_H) / FRAME_W;
-  const x = Math.min(Math.max(t.x + t.w / 2 - w / 2, 0), FRAME_W - w);
-  const y = Math.min(Math.max(t.y + t.h / 2 - h / 2, 0), FRAME_H - h);
+  const x = Math.min(Math.max(box.x + box.w / 2 - w / 2, 0), FRAME_W - w);
+  const y = Math.min(Math.max(box.y + box.h / 2 - h / 2, 0), FRAME_H - h);
   return {
     image: { width: pct(FRAME_W / w), left: pct(-x / w), top: pct(-y / h) },
     target: {
-      left: pct((t.x - x) / w),
-      top: pct((t.y - y) / h),
-      width: pct(t.w / w),
-      height: pct(t.h / h),
+      left: pct((box.x - x) / w),
+      top: pct((box.y - y) / h),
+      width: pct(box.w / w),
+      height: pct(box.h / h),
     },
   };
 }
 
 const screenshot = (sessionId: string, frameId: string): StepResource => ({
   kind: "file",
-  entries: [{ sessionId, frameId, name: "Step screenshot" }],
+  entries: [{ sessionId, frameId, name: t`Step screenshot` }],
   index: 0,
 });
 
-const NoScreenshot = () => <p className="activity-detail-note">No screenshot for this step.</p>;
+const NoScreenshot = () => (
+  <p className="activity-detail-note">{t`No screenshot for this step.`}</p>
+);
 
 function LiveFrame({
   api,
@@ -98,7 +101,7 @@ function LiveFrame({
   const url = image?.frameId === frameId ? image.url : undefined;
   return (
     <div className="activity-frame step-preview-resource" data-loaded={url ? "" : undefined}>
-      <StepPreviewCover label="Preview screenshot" resource={screenshot(sessionId, frameId)} />
+      <StepPreviewCover label={t`Preview screenshot`} resource={screenshot(sessionId, frameId)} />
       {url && (
         <img
           className="activity-frame-crop"
@@ -117,7 +120,7 @@ function LiveFrame({
 
 function KeysUsed({ keys }: { keys: readonly KeyUseRowView[] }) {
   return (
-    <ul className="activity-keys" aria-label="Keys used">
+    <ul className="activity-keys" aria-label={t`Keys used`}>
       {keys.map((key) => (
         <li key={key.id}>
           <Icon name="key-round" size={12} />
@@ -161,8 +164,8 @@ export function ActivityDetail({
       {note && (
         <div className="activity-detail-note step-preview-resource">
           <StepPreviewButton
-            label="Preview step details"
-            resource={{ kind: "text", name: "Step details", text: note, markdown: true }}
+            label={t`Preview step details`}
+            resource={{ kind: "text", name: t`Step details`, text: note, markdown: true }}
           />
           <SafeMarkdown text={note} compact />
         </div>
@@ -173,7 +176,7 @@ export function ActivityDetail({
           computer.frameId ? (
             <div className="activity-frame step-preview-resource" data-loaded="">
               <StepPreviewCover
-                label="Preview screenshot"
+                label={t`Preview screenshot`}
                 resource={screenshot(sessionId, computer.frameId)}
               />
               <ReplayImage api={api} sessionId={sessionId} frameId={computer.frameId} />

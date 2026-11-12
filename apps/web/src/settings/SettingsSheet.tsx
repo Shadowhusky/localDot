@@ -15,6 +15,7 @@ import type { FreshStart } from "../cells/useFreshStart.ts";
 import { spendText } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ShowDotControl } from "../dot/show-dot.ts";
+import { t, tr } from "../i18n/index.ts";
 import { KeysPanel, type KeysPanelProps } from "../keys/KeysPanel.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import {
@@ -68,6 +69,7 @@ import {
 import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
 import { DotsOnThisComputer } from "./DotsOnThisComputer.tsx";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
+import { LanguageSetting } from "./LanguageSetting.tsx";
 import { CheckIns, ResearchLimits, SpendingLimits } from "./Limits.tsx";
 import { ModelLibrary, type ModelLibraryProps } from "./ModelLibrary.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
@@ -110,6 +112,7 @@ import type { RulesView } from "./useRules.ts";
 import type { SignInView } from "./useSignIn.ts";
 import { type VoiceControl, VoiceSection } from "./VoiceSection.tsx";
 import "./settings.css";
+import { personaName } from "../dot/persona-words.ts";
 
 export type { SettingsSection } from "./sections.ts";
 
@@ -235,30 +238,32 @@ function ago(at: string | undefined, now: number): string | null {
   const time = at ? Date.parse(at) : Number.NaN;
   if (!Number.isFinite(time)) return null;
   const minutes = Math.max(0, Math.round((now - time) / 60_000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1) return t`just now`;
+  if (minutes < 60) return t`${minutes} min ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return t`${hours} h ago`;
   return new Date(time).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function catalogLine(state: CatalogState, at: string | undefined): string {
   switch (state) {
     case "loading":
-      return "Loading the model list…";
+      return t`Loading the model list…`;
     case "refreshing":
-      return "Refreshing the model list…";
+      return t`Refreshing the model list…`;
     case "offline":
-      return "The model list can't be reached. Your choices are kept.";
+      return t`The model list can't be reached. Your choices are kept.`;
     case "empty":
-      return "The model list is empty.";
+      return t`The model list is empty.`;
     case "stale": {
       const when = ago(at, Date.now());
-      return when ? `Model list from ${when} may be out of date` : "Model list may be out of date";
+      return when
+        ? t`Model list from ${when} may be out of date`
+        : t`Model list may be out of date`;
     }
     default: {
       const when = ago(at, Date.now());
-      return when ? `Model list updated ${when}` : "Model list ready";
+      return when ? t`Model list updated ${when}` : t`Model list ready`;
     }
   }
 }
@@ -489,9 +494,9 @@ export function SettingsSheet(props: SettingsSheetProps) {
   const problems = props.dirty && props.validation?.length ? props.validation : null;
   const doneProblem = doneBlocked
     ? holding
-      ? "Save or cancel the key you are editing before finishing."
+      ? t`Save or cancel the key you are editing before finishing.`
       : props.dirty && !pending && !props.error && !problems
-        ? "Your changes have not been saved yet. Wait for settings to finish loading, then try Done again."
+        ? t`Your changes have not been saved yet. Wait for settings to finish loading, then try Done again.`
         : null
     : null;
   const footer =
@@ -504,7 +509,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
           </p>
         ) : (
           <div className="settings-footer-status" role="alert" data-error="">
-            <span>Before this can be saved:</span>
+            <span>{t`Before this can be saved:`}</span>
             <ul className="settings-problems">
               {problems?.map((problem) => (
                 <li key={problem}>{problem}</li>
@@ -514,7 +519,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
         )}
         {props.dirty && props.onReload && (
           <Revert
-            disabledReason={props.busy ? "Wait for saving to finish" : undefined}
+            disabledReason={props.busy ? t`Wait for saving to finish` : undefined}
             onRevert={props.onReload}
           />
         )}
@@ -523,10 +528,10 @@ export function SettingsSheet(props: SettingsSheetProps) {
       <div className="settings-footer">
         <p className="settings-footer-status" role="status">
           {props.loading
-            ? "Loading settings…"
+            ? t`Loading settings…`
             : saving || props.busy || pending
-              ? "Saving changes…"
-              : "Changes save automatically."}
+              ? t`Saving changes…`
+              : t`Changes save automatically.`}
         </p>
       </div>
     );
@@ -556,13 +561,13 @@ export function SettingsSheet(props: SettingsSheetProps) {
         onDone={done}
         dirty={holding || (props.dirty && !pending)}
         onDismissAttempt={close}
-        title={page ? sectionTitle(page) : "Settings"}
+        title={page ? sectionTitle(page) : t`Settings`}
         page={page ?? "root"}
         back={
           page
             ? {
                 label:
-                  stack.length > 1 ? sectionTitle(stack.at(-2) as SettingsSection) : "Settings",
+                  stack.length > 1 ? sectionTitle(stack.at(-2) as SettingsSection) : t`Settings`,
                 onBack: () => {
                   if (holding) {
                     revealUnfinished();
@@ -573,9 +578,9 @@ export function SettingsSheet(props: SettingsSheetProps) {
               }
             : undefined
         }
-        doneLabel="Done"
+        doneLabel={t`Done`}
         detents={["large"]}
-        closeLabel="Close settings"
+        closeLabel={t`Close settings`}
         className="settings-sheet"
         footer={footer}
       >
@@ -607,8 +612,8 @@ export function SettingsSheet(props: SettingsSheetProps) {
       dirty={holding || (props.dirty && !pending)}
       onDismissAttempt={close}
       modal
-      title="Settings"
-      closeLabel="Close settings"
+      title={t`Settings`}
+      closeLabel={t`Close settings`}
       className="settings-sheet"
       sidebar={<SectionIndex shown={shown} current={selected} onSelect={(id) => setStack([id])} />}
       footer={footer}
@@ -675,7 +680,7 @@ function SectionIndex({
   onSelect(id: SettingsSection): void;
 }) {
   return (
-    <nav className="settings-index" aria-label="Settings sections">
+    <nav className="settings-index" aria-label={t`Settings sections`}>
       {SECTIONS.filter((section) => shown.includes(section.id)).map((section) => (
         <SheetNavItem
           key={section.id}
@@ -708,7 +713,7 @@ function SectionList({
       )?.find((model) => model.id === main.model)?.name ?? main.model)
     : "";
   const values: Partial<Record<SettingsSection, string>> = {
-    dot: props.persona ? personaOf(props.persona.value).name : "",
+    dot: props.persona ? personaName(personaOf(props.persona.value).id) : "",
     models: props.loading ? "" : mainName,
     autonomy: props.loading ? "" : autonomyValue(props.autonomy),
     rules: countValue(props.rules?.rules.length),
@@ -726,7 +731,7 @@ function SectionList({
     keys: countValue(props.keysPanel?.keys.keys.length),
     computer:
       props.appUpdate?.status?.availableVersion || props.update?.available
-        ? "Update available"
+        ? t`Update available`
         : "",
   };
   const row = (id: SettingsSection) => {
@@ -777,13 +782,13 @@ function TaskRow({ stop, note }: { stop?: SettingsSheetProps["stop"]; note?: Sto
   return (
     <GroupRow
       leading={<IconTile icon="stop" />}
-      label="This task"
+      label={t`This task`}
       detail={note && <span role="status">{note.line}</span>}
       trailing={
         stop && (
           <Button
             size="sm"
-            disabledReason={stop.enabled ? undefined : "Not available right now"}
+            disabledReason={stop.enabled ? undefined : t`Not available right now`}
             onClick={() => stop.run()}
           >
             {stop.label}
@@ -813,7 +818,7 @@ function ShutDown({
       size={wide ? "xl" : "sm"}
       icon="power"
       className={wide ? "settings-wide" : undefined}
-      disabledReason={stop.enabled && !props.update?.busy ? undefined : "Not available right now"}
+      disabledReason={stop.enabled && !props.update?.busy ? undefined : t`Not available right now`}
       onClick={() => stop.run()}
     >
       {stop.label}
@@ -822,9 +827,9 @@ function ShutDown({
 }
 
 const STREAM_CHOICES = [
-  { value: "auto", label: "Auto" },
-  { value: "sharp", label: "Sharp" },
-  { value: "smooth", label: "Smooth" },
+  { value: "auto", label: tr("Auto") },
+  { value: "sharp", label: tr("Sharp") },
+  { value: "smooth", label: tr("Smooth") },
 ] as const;
 
 function StreamChoice({
@@ -840,7 +845,7 @@ function StreamChoice({
     <SegmentedControl
       size={size}
       className={className}
-      aria-label="Stream quality"
+      aria-label={t`Stream quality`}
       value={stream.value}
       items={STREAM_CHOICES}
       onValueChange={(next) => {
@@ -868,7 +873,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
       {props.appUpdate && <AppUpdateSettings update={props.appUpdate} />}
       {update && (
         <div>
-          <GroupHead title="Computer updates" />
+          <GroupHead title={t`Computer updates`} />
           <Group>
             <UpdateRow update={update} />
           </Group>
@@ -888,20 +893,20 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
               <Switch
                 className="ui-group-row"
                 leading={<IconTile icon="repeat" />}
-                label="Open at login"
+                label={t`Open at login`}
                 description={
                   login.state === "unavailable"
                     ? undefined
-                    : "Start localDot when you sign in to this computer"
+                    : t`Start localDot when you sign in to this computer`
                 }
                 checked={login.state === "on"}
                 disabledReason={
                   login.state === "unavailable"
-                    ? "Rerun the localDot installer on this computer to enable startup settings."
+                    ? t`Rerun the localDot installer on this computer to enable startup settings.`
                     : login.state === undefined
-                      ? "Checking…"
+                      ? t`Checking…`
                       : login.busy
-                        ? "Saving…"
+                        ? t`Saving…`
                         : undefined
                 }
                 onCheckedChange={(on) => login.set(on)}
@@ -910,7 +915,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
             {stream && (
               <GroupRow
                 leading={<IconTile icon="monitor" />}
-                label="Stream quality"
+                label={t`Stream quality`}
                 trailing={phone ? undefined : <StreamChoice stream={stream} size={24} />}
               >
                 {phone && (
@@ -922,8 +927,8 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           {stream && (
             <GroupNote>
               {stream.saved
-                ? "Auto picks for you. Sharp keeps text crisp while the screen moves, using more data. Smooth keeps motion fluid when things slow down."
-                : "Applied for this visit. This browser couldn't save it."}
+                ? t`Auto picks for you. Sharp keeps text crisp while the screen moves, using more data. Smooth keeps motion fluid when things slow down.`
+                : t`Applied for this visit. This browser couldn't save it.`}
             </GroupNote>
           )}
         </div>
@@ -933,16 +938,16 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           {stopAll && (
             <GroupRow
               leading={<IconTile icon="stop" />}
-              label="Stop everything"
-              detail="Stops every task, pauses routines and freezes your computer."
+              label={t`Stop everything`}
+              detail={t`Stops every task, pauses routines and freezes your computer.`}
               trailing={
                 <Button
                   size="sm"
                   busy={stopAll.running}
-                  aria-label="Stop everything"
+                  aria-label={t`Stop everything`}
                   onClick={() => stopAll.run()}
                 >
-                  Stop
+                  {t`Stop`}
                 </Button>
               }
             />
@@ -965,11 +970,11 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
       label={
         <span className="settings-update-label" role="status">
           {failure && !update.busy ? (
-            <span data-shown="">Not updated</span>
+            <span data-shown="">{t`Not updated`}</span>
           ) : (
             <>
-              <span data-shown={update.busy ? undefined : ""}>New version ready</span>
-              <span data-shown={update.busy ? "" : undefined}>Updating…</span>
+              <span data-shown={update.busy ? undefined : ""}>{t`New version ready`}</span>
+              <span data-shown={update.busy ? "" : undefined}>{t`Updating…`}</span>
             </>
           )}
         </span>
@@ -978,7 +983,7 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
         update.error && !update.busy ? (
           <span className="settings-computer-error">{update.error}</span>
         ) : (
-          "Restarts your computer once, usually within a few minutes. Your files, apps and sign-ins are kept."
+          t`Restarts your computer once, usually within a few minutes. Your files, apps and sign-ins are kept.`
         )
       }
       trailing={
@@ -990,7 +995,7 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
             disabledReason={update.busy ? undefined : update.waitReason}
             onClick={update.run}
           >
-            {retry ? "Retry" : "Update"}
+            {retry ? t`Retry` : t`Update`}
           </Button>
         )
       }
@@ -998,7 +1003,7 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
       {stage && (
         <div className="settings-update-progress">
           <Progress
-            label="Update progress"
+            label={t`Update progress`}
             value={update.value ?? undefined}
             valueText={update.line ?? undefined}
           />
@@ -1035,12 +1040,12 @@ function FreshStartRow({
   return (
     <GroupRow
       leading={<IconTile icon="history" />}
-      label="Start fresh"
+      label={t`Start fresh`}
       detail={
         freshStart.error && !freshStart.busy ? (
           <span className="settings-computer-error">{freshStart.error}</span>
         ) : (
-          "Erases your computer's files. Your sign\u2011ins stay."
+          t`Erases your computer's files. Your sign\u2011ins stay.`
         )
       }
       trailing={
@@ -1051,7 +1056,7 @@ function FreshStartRow({
           disabledReason={freshStart.busy ? undefined : freshStart.waitReason}
           run={freshStart.run}
         >
-          Erase…
+          {t`Erase…`}
         </FreshStartButton>
       }
     />
@@ -1068,20 +1073,20 @@ function ThisLocalDot({
 }) {
   return (
     <div>
-      <GroupHead title="This localDot" />
+      <GroupHead title={t`This localDot`} />
       <Group>
-        <Field label="Name" inline className="ui-group-row" error={look.problem}>
+        <Field label={t`Name`} inline className="ui-group-row" error={look.problem}>
           <TextField
             size="sm"
             value={look.name}
             maxLength={40}
-            placeholder="Studio Mac"
+            placeholder={t`Studio Mac`}
             autoComplete="off"
             onChange={(event) => look.onName(event.target.value)}
           />
         </Field>
       </Group>
-      <GroupNote>A name and an accessory tell this localDot apart from your others.</GroupNote>
+      <GroupNote>{t`A name and an accessory tell this localDot apart from your others.`}</GroupNote>
       <div className="settings-accessories">
         <AccessoryPicker persona={persona} value={look.accessory} onChange={look.onAccessory} />
       </div>
@@ -1125,15 +1130,15 @@ function SectionContent({
   switch (id) {
     case "models": {
       if (props.loading)
-        return <DotLoader className="settings-loading" label="Loading your settings" />;
+        return <DotLoader className="settings-loading" label={t`Loading your settings`} />;
       const main = props.choices.main?.provider;
       // A plan's own app runs only its own models: no local model beside either, and the ChatGPT
       // plan's app can't answer a fast model while a task holds it.
       const inactive = (role: ModelRole) =>
         (role === "local" || role === "fast") && main === CHATGPT
-          ? "Off while the main model uses the ChatGPT plan."
+          ? t`Off while the main model uses the ChatGPT plan.`
           : role === "local" && main === CLAUDE_CODE
-            ? "Off while the main model uses Claude Code."
+            ? t`Off while the main model uses Claude Code.`
             : undefined;
       return (
         <>
@@ -1147,8 +1152,8 @@ function SectionContent({
             <Group>
               <Switch
                 className="ui-group-row"
-                label="Continue when a plan's limit resets"
-                description="When your Claude or ChatGPT plan reaches its limit, a paused task carries on by itself once the limit resets."
+                label={t`Continue when a plan's limit resets`}
+                description={t`When your Claude or ChatGPT plan reaches its limit, a paused task carries on by itself once the limit resets.`}
                 checked={props.autoContinue.on}
                 onCheckedChange={props.autoContinue.change}
               />
@@ -1186,10 +1191,10 @@ function SectionContent({
                 variant="quiet"
                 size="sm"
                 busy={props.catalog === "refreshing"}
-                disabledReason={props.busy ? "Wait for saving to finish" : undefined}
+                disabledReason={props.busy ? t`Wait for saving to finish` : undefined}
                 onClick={props.onRefresh}
               >
-                {props.catalog === "offline" ? "Try again" : "Refresh"}
+                {props.catalog === "offline" ? t`Try again` : t`Refresh`}
               </Button>
             )}
           </div>
@@ -1197,8 +1202,8 @@ function SectionContent({
             <Group>
               <GroupRow
                 leading={<IconTile icon="continue" />}
-                label="Set up step by step"
-                detail="How dot thinks, its model and permissions"
+                label={t`Set up step by step`}
+                detail={t`How dot thinks, its model and permissions`}
                 onSelect={() => props.onSetup?.()}
               />
             </Group>
@@ -1211,7 +1216,7 @@ function SectionContent({
       return (
         <>
           <p className="settings-lede">
-            How often dot stops to ask. Routine work on its own computer always just runs.
+            {t`How often dot stops to ask. Routine work on its own computer always just runs.`}
           </p>
           <AutonomyMatrix
             value={props.autonomy}
@@ -1245,12 +1250,12 @@ function SectionContent({
       if (props.loading || !props.spending) return wait(120);
       return (
         <>
-          <p className="settings-lede">dot never stops for cost unless you set a limit.</p>
+          <p className="settings-lede">{t`dot never stops for cost unless you set a limit.`}</p>
           {planOnly(props.choices) ? (
             <Group>
               <GroupRow
-                label="Spending limit"
-                detail="Your plan's own limits apply, so no limit is needed."
+                label={t`Spending limit`}
+                detail={t`Your plan's own limits apply, so no limit is needed.`}
               />
             </Group>
           ) : (
@@ -1263,22 +1268,21 @@ function SectionContent({
           {props.spent && (
             <div>
               <GroupHead
-                title="So far"
-                aside={props.spent.estimated ? "≈ means estimated" : undefined}
+                title={t`So far`}
+                aside={props.spent.estimated ? t`≈ means estimated` : undefined}
               />
               <Group>
                 <GroupRow
-                  label="This task"
+                  label={t`This task`}
                   trailing={spendText(props.spent.taskUSD, props.spent.estimated)}
                 />
                 <GroupRow
-                  label="Today"
+                  label={t`Today`}
                   trailing={spendText(props.spent.dayUSD, props.spent.estimated)}
                 />
               </Group>
               <GroupNote>
-                Spend also shows in {PANEL_NAME} and in each conversation's summary. It never
-                interrupts you.
+                {t`Spend also shows in ${PANEL_NAME} and in each conversation's summary. It never interrupts you.`}
               </GroupNote>
             </div>
           )}
@@ -1289,8 +1293,7 @@ function SectionContent({
       return (
         <>
           <p className="settings-lede">
-            Each dot brings the skills and habits for one kind of work, so a task carries only what
-            it needs. Your choice applies from the next task.
+            {t`Each dot brings the skills and habits for one kind of work, so a task carries only what it needs. Your choice applies from the next task.`}
           </p>
           <Group>
             <AutoDot className="ui-group-row" {...props.persona.auto} />
@@ -1299,7 +1302,7 @@ function SectionContent({
             value={props.persona.value}
             accessory={props.look?.accessory}
             onChange={props.persona.onChange}
-            aria-label={props.persona.auto.on ? "When Auto can't pick" : "Your dot"}
+            aria-label={props.persona.auto.on ? t`When Auto can't pick` : t`Your dot`}
           />
           {props.look && <ThisLocalDot look={props.look} persona={props.persona.value} />}
         </>
@@ -1350,7 +1353,7 @@ function Revert({ disabledReason, onRevert }: { disabledReason?: string; onRever
       disabledReason={disabledReason}
       onClick={() => confirmDiscard(onRevert)}
     >
-      Revert
+      {t`Revert`}
     </Button>
   );
 }
@@ -1364,51 +1367,44 @@ function Appearance({
   showDot?: ShowDotControl;
   view?: Pick<ViewStyleControl, "value" | "recommended" | "saved" | "change">;
 }) {
+  const unsaved = t`Applied for this visit. This browser couldn't save it.`;
   return (
     <>
+      <LanguageSetting />
       {view && (
         <div>
-          <GroupHead title="View" />
+          <GroupHead title={t`View`} />
           <ViewStylePicker
-            aria-label="View"
+            aria-label={t`View`}
             value={view.value}
             recommended={view.recommended}
             onChange={view.change}
           />
-          <GroupNote>
-            {view.saved
-              ? "Just for this device."
-              : "Applied for this visit. This browser couldn't save it."}
-          </GroupNote>
+          <GroupNote>{view.saved ? t`Just for this device.` : unsaved}</GroupNote>
         </div>
       )}
       <div>
-        {view && <GroupHead title="Theme" />}
-        <AppearancePicker appearance={appearance} aria-label="Theme" />
+        {view && <GroupHead title={t`Theme`} />}
+        <AppearancePicker appearance={appearance} aria-label={t`Theme`} />
         {appearance.value === "system" && (
           <GroupNote>
-            Daylight while this device is light, {APPEARANCE_NAMES[appearance.dark]} while it's
-            dark.
+            {t`Daylight while this device is light, ${APPEARANCE_NAMES[appearance.dark]} while it's dark.`}
           </GroupNote>
         )}
-        {!appearance.saved && (
-          <GroupNote>Applied for this visit. This browser couldn't save it.</GroupNote>
-        )}
+        {!appearance.saved && <GroupNote>{unsaved}</GroupNote>}
       </div>
       {showDot && (
         <div>
           <Group>
             <Switch
               className="ui-group-row"
-              label="Show dot"
-              description="dot's face on the curtain and beside the computer"
+              label={t`Show dot`}
+              description={t`dot's face on the curtain and beside the computer`}
               checked={showDot.value}
               onCheckedChange={(checked) => showDot.change(checked)}
             />
           </Group>
-          {!showDot.saved && (
-            <GroupNote>Applied for this visit. This browser couldn't save it.</GroupNote>
-          )}
+          {!showDot.saved && <GroupNote>{unsaved}</GroupNote>}
         </div>
       )}
     </>

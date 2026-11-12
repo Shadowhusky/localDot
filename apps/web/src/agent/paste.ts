@@ -1,4 +1,5 @@
 import { keyLikeMatches } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 
 // The daemon takes 8,000 characters for a message, the names of its files included, and 16 files
 // take up to about 2,000 of them. Text past what is left goes with the message as a file, leaving
@@ -55,6 +56,14 @@ export function pastedFiles(files: readonly File[], taken: Set<string>, at = new
 export type LongText = "pasted" | "typed";
 const LONG_NAMES = { pasted: "Pasted text", typed: "Long message" } as const;
 
+// The chip's name for it, in the words on show; the file keeps its English name for dot.
+function longLabel(kind: LongText, count: number): string {
+  const n = count.toLocaleString("en-US");
+  if (kind === "pasted")
+    return count === 1 ? t`Pasted text · ${n} line` : t`Pasted text · ${n} lines`;
+  return count === 1 ? t`Long message · ${n} line` : t`Long message · ${n} lines`;
+}
+
 const lines = (text: string) => {
   let count = 1;
   for (let at = text.indexOf("\n"); at >= 0; at = text.indexOf("\n", at + 1)) count += 1;
@@ -74,6 +83,6 @@ export function longTextFile(
   const count = lines(text);
   return {
     file: new File([text], name, { type: "text/plain" }),
-    label: `${LONG_NAMES[kind]} · ${count.toLocaleString("en-US")} ${count === 1 ? "line" : "lines"}`,
+    label: longLabel(kind, count),
   };
 }

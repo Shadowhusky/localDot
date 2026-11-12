@@ -1,5 +1,6 @@
 import type { KeyMetadata } from "@localdot/protocol";
 import { useState } from "react";
+import { rich, t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { Field } from "../ui/Field.tsx";
@@ -22,7 +23,7 @@ export function KeyMetadataEditor({
     <Card>
       <form
         className="keys-form"
-        aria-label={`Details for ${record.id}`}
+        aria-label={t`Details for ${record.id}`}
         onSubmit={async (e) => {
           e.preventDefault();
           if (busy) return;
@@ -38,14 +39,13 @@ export function KeyMetadataEditor({
         }}
       >
         <p>
-          Help dot choose when to use <strong>{record.id}</strong>. Its value and permitted uses
-          stay the same.
+          {rich`Help dot choose when to use ${<strong>{record.id}</strong>}. Its value and permitted uses stay the same.`}
         </p>
         {(
           [
-            ["label", "Name", 80],
-            ["service", "Service", 80],
-            ["description", "Use for", 600],
+            ["label", tr("Name"), 80],
+            ["service", tr("Service"), 80],
+            ["description", tr("Use for"), 600],
           ] as const
         ).map(([key, label, max]) => (
           <Field key={key} label={label}>
@@ -69,11 +69,11 @@ export function KeyMetadataEditor({
         ))}
         {error && <p role="alert">{error}</p>}
         <div className="keys-actions">
-          <Button variant="quiet" onClick={close} disabledReason={busy ? "Saving" : undefined}>
-            Cancel
+          <Button variant="quiet" onClick={close} disabledReason={busy ? t`Saving` : undefined}>
+            {t`Cancel`}
           </Button>
           <Button type="submit" busy={busy}>
-            Save details
+            {t`Save details`}
           </Button>
         </div>
       </form>

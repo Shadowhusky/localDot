@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { tr } from "../i18n/index.ts";
 import { VisuallyHidden } from "./VisuallyHidden.tsx";
 
 interface Spelling {
@@ -38,10 +39,35 @@ const NAMED: Record<string, { mac: Spelling; other: Spelling }> = {
     other: { label: "Backspace", spoken: "Backspace", aria: "Backspace" },
   },
   " ": same({ label: "Space", spoken: "Space", aria: "Space" }),
-  ArrowLeft: same({ label: "←", spoken: "Left arrow", aria: "ArrowLeft" }),
-  ArrowRight: same({ label: "→", spoken: "Right arrow", aria: "ArrowRight" }),
-  ArrowUp: same({ label: "↑", spoken: "Up arrow", aria: "ArrowUp" }),
-  ArrowDown: same({ label: "↓", spoken: "Down arrow", aria: "ArrowDown" }),
+  // Read when spoken, not as the module loads: this loads before the language's words do.
+  ArrowLeft: same({
+    label: "←",
+    get spoken() {
+      return tr("Left arrow");
+    },
+    aria: "ArrowLeft",
+  }),
+  ArrowRight: same({
+    label: "→",
+    get spoken() {
+      return tr("Right arrow");
+    },
+    aria: "ArrowRight",
+  }),
+  ArrowUp: same({
+    label: "↑",
+    get spoken() {
+      return tr("Up arrow");
+    },
+    aria: "ArrowUp",
+  }),
+  ArrowDown: same({
+    label: "↓",
+    get spoken() {
+      return tr("Down arrow");
+    },
+    aria: "ArrowDown",
+  }),
 };
 
 function same(spelling: Spelling) {

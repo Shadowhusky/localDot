@@ -1,6 +1,7 @@
 import { CONVERSATION_NAME_CHARS, type Wearable } from "@localdot/protocol";
 import { useState } from "react";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import type { IconName } from "../ui/icons.ts";
 import { Sheet } from "../ui/Sheet.tsx";
@@ -47,9 +48,9 @@ export function ConversationDetails({
         finish();
         onClose();
       }}
-      title="Details"
+      title={t`Details`}
       side="bottom"
-      doneLabel="Done"
+      doneLabel={t`Done`}
     >
       <div className="phone-details">
         <div className="phone-details-hero">
@@ -58,8 +59,8 @@ export function ConversationDetails({
             <strong>{title}</strong>
           ) : (
             <TextField
-              aria-label="New name"
-              placeholder="Automatic name"
+              aria-label={t`New name`}
+              placeholder={t`Automatic name`}
               maxLength={CONVERSATION_NAME_CHARS}
               autoComplete="off"
               enterKeyHint="done"
@@ -84,7 +85,7 @@ export function ConversationDetails({
             className="phone-details-row"
             onClick={() => setRenaming(title)}
           >
-            Rename
+            {t`Rename`}
           </Button>
         )}
         {rows.map((row) => (

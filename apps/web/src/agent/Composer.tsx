@@ -33,6 +33,7 @@ import {
   prefill,
   type ReviseDraft,
 } from "../deliverables/revise-draft.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
@@ -135,15 +136,24 @@ export interface ComposerProps {
 export type DotWait = "question" | "private" | "approval" | "computer" | "fix" | "private-fix";
 // A secret field is up, and a secret typed here by mistake would be a message: it takes one more step.
 const WAITS_FOR_A_SECRET: ReadonlySet<DotWait | undefined> = new Set(["private", "private-fix"]);
-const HELD = "Not sent. dot reads what you send here, and it stays in the conversation.";
-const SEND_HELD = "Send as a message — dot will read this";
+const HELD = t`Not sent. dot reads what you send here, and it stays in the conversation.`;
+const SEND_HELD = t`Send as a message — dot will read this`;
 const MOVES_ON: Readonly<Record<DotWait, string>> = {
-  question: "Sending moves on from dot's question",
-  private: "Sending moves on from dot's question. Messages aren't kept secret",
-  approval: "Sending moves on without approving",
-  computer: "Sending hands the computer back",
-  fix: "Sending moves on without fixing this",
-  "private-fix": "Sending moves on without fixing this. Messages aren't kept secret",
+  question: tr("Sending moves on from dot's question"),
+  private: tr("Sending moves on from dot's question. Messages aren't kept secret"),
+  approval: tr("Sending moves on without approving"),
+  computer: tr("Sending hands the computer back"),
+  fix: tr("Sending moves on without fixing this"),
+  "private-fix": tr("Sending moves on without fixing this. Messages aren't kept secret"),
+};
+// The same, while a field for a secret is up elsewhere: the message itself isn't kept secret.
+const MOVES_ON_UNSECRET: Readonly<Record<DotWait, string>> = {
+  question: tr("Sending moves on from dot's question. Messages aren't kept secret"),
+  private: tr("Sending moves on from dot's question. Messages aren't kept secret"),
+  approval: tr("Sending moves on without approving. Messages aren't kept secret"),
+  computer: tr("Sending hands the computer back. Messages aren't kept secret"),
+  fix: tr("Sending moves on without fixing this. Messages aren't kept secret"),
+  "private-fix": tr("Sending moves on without fixing this. Messages aren't kept secret"),
 };
 export interface Delivery {
   readonly id: number;
@@ -189,15 +199,15 @@ function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageM
 }
 // Why nothing can be sent to the computer now, in the order someone would fix it.
 function computerReason(props: ComposerProps): string | undefined {
-  if (!props.known) return "Checking your computer…";
-  if (props.pending) return "Wait for your computer.";
+  if (!props.known) return t`Checking your computer…`;
+  if (props.pending) return t`Wait for your computer.`;
   const state = props.cell?.state;
-  if (state === "starting") return "Your computer is starting.";
-  if (state === "stopping") return "Your computer is shutting down.";
+  if (state === "starting") return t`Your computer is starting.`;
+  if (state === "stopping") return t`Your computer is shutting down.`;
   if (state !== "ready" || !props.cell || !ULID_PATTERN.test(props.cell.id))
-    return "Turn on your computer first.";
-  if (props.cell.paused) return "Resume your computer first.";
-  if (props.controlBlocked) return "You can send once the task is ready.";
+    return t`Turn on your computer first.`;
+  if (props.cell.paused) return t`Resume your computer first.`;
+  if (props.controlBlocked) return t`You can send once the task is ready.`;
   return undefined;
 }
 // Why nothing can be sent now, as Send says it.
@@ -207,7 +217,7 @@ function blockedReason(props: ComposerProps, mode: MessageMode) {
   return (
     computerReason(props) ??
     props.link?.reason ??
-    (mode !== "new" && !props.agent.fresh ? "Reconnecting to the task…" : undefined)
+    (mode !== "new" && !props.agent.fresh ? t`Reconnecting to the task…` : undefined)
   );
 }
 const userIds = (props: ComposerProps) =>
@@ -511,8 +521,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     if (secretNow.current && !sendConfirmed.current) {
       setProblem(
         kind === "pasted"
-          ? "Long text isn't taken while a field for a secret is up. Nothing was pasted."
-          : "Long text isn't taken while a field for a secret is up. The message stops here.",
+          ? t`Long text isn't taken while a field for a secret is up. Nothing was pasted.`
+          : t`Long text isn't taken while a field for a secret is up. The message stops here.`,
       );
       return true;
     }
@@ -520,13 +530,13 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     if (removed)
       setProblem(
         kind === "pasted"
-          ? "Keys were taken out of the pasted text. Paste keys straight into Keys."
-          : "Keys were taken out of your text. Paste keys straight into Keys.",
+          ? t`Keys were taken out of the pasted text. Paste keys straight into Keys.`
+          : t`Keys were taken out of your text. Paste keys straight into Keys.`,
       );
     if (!clean.trim()) return false;
     const { file, label } = longTextFile(clean, kind, pasteNames.current);
     uploads.addText(file, label, clean);
-    announce("composer", "The long text is attached as a file.");
+    announce("composer", t`The long text is attached as a file.`);
     return false;
   };
   const addLongNow = useRef(addLongText);
@@ -648,7 +658,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         measure(box);
       }
     } catch {
-      if (mounted.current) setProblem("That didn't work. Try again.");
+      if (mounted.current) setProblem(t`That didn't work. Try again.`);
     } finally {
       actionRunning.current = false;
     }
@@ -731,8 +741,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       announce(
         "composer",
         fresh.length > 1
-          ? "Messages moved to the composer. Edit them, then send when ready."
-          : "Message moved to the composer. Edit it, then send when ready.",
+          ? t`Messages moved to the composer. Edit them, then send when ready.`
+          : t`Message moved to the composer. Edit it, then send when ready.`,
       );
       return true;
     },
@@ -769,8 +779,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           if (!lifetime.signal.aborted)
             setProblem(
               stopped
-                ? "Couldn't move your message here. Try again."
-                : "Couldn't move your queued message here. It may have started already.",
+                ? t`Couldn't move your message here. Try again.`
+                : t`Couldn't move your queued message here. It may have started already.`,
             );
           return false;
         },
@@ -805,7 +815,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           input.focus();
           input.setSelectionRange(caret, caret);
         }
-        announce("composer", "Your words are in the message.");
+        announce("composer", t`Your words are in the message.`);
       }
       measure(input);
       if (caret === undefined)
@@ -862,7 +872,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         revision.current += 1;
         measure(box);
         setProblem(
-          "What you typed during that wait was cleared, as it held the secret you entered.",
+          t`What you typed during that wait was cleared, as it held the secret you entered.`,
         );
       }
     };
@@ -873,10 +883,10 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     announce(
       "composer",
       record.request.research
-        ? "Research started."
+        ? t`Research started.`
         : record.request.mode === "new"
-          ? "Task started."
-          : "Sent to dot.",
+          ? t`Task started.`
+          : t`Sent to dot.`,
     );
     // Research is for the task it starts; the next message is an ordinary one again.
     if (record.request.research) setResearch(false);
@@ -960,7 +970,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           current.current.onSending?.(false);
           setDelivery(null);
           setProblem(
-            "The task changed while sending. Check the current task before sending again.",
+            t`The task changed while sending. Check the current task before sending again.`,
           );
         }
         return;
@@ -984,7 +994,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       const phase = failure.uncertain ? "uncertain" : "refused";
       setDelivery({ ...record, phase });
       current.current.onSending?.(false);
-      announce("composer", failure.uncertain ? "Not sure dot got that." : "Not sent.");
+      announce("composer", failure.uncertain ? t`Not sure dot got that.` : t`Not sent.`);
       if (failure.uncertain) pending.current = { ...record, phase };
     } finally {
       if (pending.current === record) pending.current = null;
@@ -1030,8 +1040,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       const why = blockedReason(now, chosen);
       setProblem(
         why
-          ? `${why} Your message stays here.`
-          : "Reconnect and check the computer before sending.",
+          ? t`${why} Your message stays here.`
+          : t`Reconnect and check the computer before sending.`,
       );
       return;
     }
@@ -1048,7 +1058,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       !text.isWellFormed() ||
       text.includes("\0")
     ) {
-      setProblem("Write a message or attach a file.");
+      setProblem(t`Write a message or attach a file.`);
       return;
     }
     // A revision goes to the revise route when the task has ended, or when it revises an older
@@ -1057,7 +1067,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     const link = linkFor(text, draft);
     const elsewhere = !!link && (!draft?.newest || link.sessionId !== now.agent.sessionId);
     if (elsewhere && chosen !== "new" && now.agent.snapshot?.status !== "idle") {
-      setProblem(`Wait for dot to finish, then revise v${draft?.label}.`);
+      setProblem(t`Wait for dot to finish, then revise v${String(draft?.label)}.`);
       return;
     }
     if (link && (chosen === "new" || elsewhere)) {
@@ -1097,7 +1107,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     const now = current.current;
     const attached = uploads.forMessage();
     if (!attached) {
-      setProblem("Wait for your files to finish uploading, or retry a paused upload.");
+      setProblem(t`Wait for your files to finish uploading, or retry a paused upload.`);
       return;
     }
     const sent = withAttachments(
@@ -1112,11 +1122,11 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       return;
     }
     if (sent.length > LIMIT || keyLikePresent(sent)) {
-      setProblem("Shorten the attachment names before sending.");
+      setProblem(t`Shorten the attachment names before sending.`);
       return;
     }
     if (revise && sent.length > 7500) {
-      setProblem("Shorten the message to 7,500 characters to revise a file.");
+      setProblem(t`Shorten the message to 7,500 characters to revise a file.`);
       return;
     }
     void perform(
@@ -1137,9 +1147,9 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         revising: revisingNow.current,
         tag:
           chosen === "steer"
-            ? "Sent while working"
+            ? t`Sent while working`
             : chosen === "followup" && now.agent.snapshot?.status !== "idle"
-              ? "After this task"
+              ? t`After this task`
               : undefined,
       },
     );
@@ -1175,7 +1185,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     if (pending.current?.phase !== "uncertain" || pending.current.id !== delivery?.id) return;
     pending.current = null;
     setDelivery(null);
-    setProblem("dot may already have that message. Sending again could repeat it.");
+    setProblem(t`dot may already have that message. Sending again could repeat it.`);
   };
   // From the menu, focus goes back to the message once it is on its way; on a phone that would
   // bring up the keyboard, so focus stays on the menu's button.
@@ -1310,27 +1320,27 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const unavailable = props.keysOpen;
   const reason = blockedReason(props, mode);
   const sendReason = voiceSubmitting
-    ? "Sending after transcription…"
+    ? t`Sending after transcription…`
     : sending
-      ? "Sending…"
+      ? t`Sending…`
       : uncertain
-        ? "Choose what to do with your last message first."
+        ? t`Choose what to do with your last message first.`
         : guard.notice
-          ? "Discard the key or move it to Keys first."
+          ? t`Discard the key or move it to Keys first.`
           : connect
-            ? "Choose a model first"
+            ? t`Choose a model first`
             : (reason ??
               (uploads.blocked
-                ? "Wait for your files to finish uploading."
+                ? t`Wait for your files to finish uploading.`
                 : empty && !talking
-                  ? "Write a message first."
+                  ? t`Write a message first.`
                   : undefined));
   const attachReason = props.link
-    ? "Files can't be attached on a shared link."
+    ? t`Files can't be attached on a shared link.`
     : guard.notice
-      ? "Discard the key or move it to Keys first."
+      ? t`Discard the key or move it to Keys first.`
       : sending || uncertain
-        ? "Wait until your message is sent."
+        ? t`Wait until your message is sent.`
         : reason;
   attach.current = (files) => {
     if (attachReason || !files.length) return false;
@@ -1349,23 +1359,23 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   const switching =
     !!props.modelChanged && mode === "followup" && props.agent.snapshot?.status === "idle";
   const sendLabel = researching
-    ? "Start research"
+    ? t`Start research`
     : newConversation
-      ? "Start task"
+      ? t`Start task`
       : mode === "new" || switching
-        ? "Send"
+        ? t`Send`
         : mode === "followup"
-          ? "Send follow-up"
+          ? t`Send follow-up`
           : props.modelAfter && !props.waitingOn
-            ? "Send after this task"
-            : "Send now";
+            ? t`Send after this task`
+            : t`Send now`;
   const note =
     mode === "new" || takeover || props.waitingOn
       ? undefined
       : props.agent.snapshot?.status === "paused"
         ? TRIES_AGAIN.has(props.agent.model.state?.reason)
-          ? "Sending tries the model again"
-          : "Sending won't resume the task"
+          ? t`Sending tries the model again`
+          : t`Sending won't resume the task`
         : undefined;
   const notices = [
     problem && { text: problem, alert: true },
@@ -1373,12 +1383,12 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     uploads.notice && { text: uploads.notice, alert: false },
     choosing &&
       props.modelAfter &&
-      !empty && { text: `Runs on ${props.modelAfter} after this task`, alert: false },
+      !empty && { text: t`Runs on ${props.modelAfter} after this task`, alert: false },
     props.waitingOn &&
       !empty && {
         text:
           props.secretField && !WAITS_FOR_A_SECRET.has(props.waitingOn)
-            ? `${MOVES_ON[props.waitingOn]}. Messages aren't kept secret`
+            ? MOVES_ON_UNSECRET[props.waitingOn]
             : MOVES_ON[props.waitingOn],
         alert: false,
       },
@@ -1404,9 +1414,9 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       retryReason={
         uncertain && props.agent.sessionId === delivery.request.sessionId && permitted
           ? guard.notice
-            ? "Discard the key or move it to Keys first."
+            ? t`Discard the key or move it to Keys first.`
             : undefined
-          : "Check the current task first."
+          : t`Check the current task first.`
       }
     />
   );
@@ -1420,7 +1430,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         data-layout={pill ? "pill" : undefined}
         data-voice={talking || voice.notice ? "" : undefined}
         data-compact={fold.compact ? "" : undefined}
-        aria-label="Message dot"
+        aria-label={t`Message dot`}
         data-dragging={dragging || undefined}
         onFocus={fold.onFocus}
         onBlur={fold.onBlur}
@@ -1487,15 +1497,15 @@ export const Composer = memo(function Composer(props: ComposerProps) {
           </Collapse>
         )}
         <ComposerField
-          label={newConversation ? "New task" : "Message"}
+          label={newConversation ? t`New task` : t`Message`}
           placeholder={
             researching
-              ? "What should dot research?"
+              ? t`What should dot research?`
               : newConversation && !pill
-                ? "Ask dot to do something"
+                ? t`Ask dot to do something`
                 : props.waitingOn
-                  ? "Or message dot"
-                  : (props.placeholder ?? "Message dot")
+                  ? t`Or message dot`
+                  : (props.placeholder ?? t`Message dot`)
           }
           unavailable={!!unavailable}
           listening={talking}
@@ -1508,7 +1518,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         <div className="composer-bar">
           {!props.link && (
             <FileButton
-              label="Attach files"
+              label={t`Attach files`}
               icon="paperclip"
               size={pill ? 36 : 28}
               round={pill}
@@ -1541,7 +1551,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
               className="composer-more"
               icon="more-horizontal"
               size={24}
-              label="Message options"
+              label={t`Message options`}
               data-shown={offersMenu || undefined}
               aria-hidden={offersMenu ? undefined : true}
               inert={!offersMenu}
@@ -1555,14 +1565,14 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             anchor={more}
             side="top"
             align="end"
-            label="Message options"
+            label={t`Message options`}
           >
             <MenuItem
               disabledReason={sendReason}
               kbd={touch ? undefined : ["Alt", "Enter"]}
               onSelect={sendAfter}
             >
-              Send after this task
+              {t`Send after this task`}
             </MenuItem>
           </Menu>
           <IconButton
@@ -1572,18 +1582,20 @@ export const Composer = memo(function Composer(props: ComposerProps) {
             }}
             onClick={talking ? () => void sendVoice() : taskAction?.run}
             className="composer-send"
+            // What the phone's styles go by, as the label is in the reader's language.
+            data-stop={!talking && taskAction?.kind === "stop" ? "" : undefined}
             variant="primary"
             size={32}
             icon={taskAction?.kind === "stop" ? "stop" : "arrow-up"}
             label={
               talking
-                ? "Send voice message"
+                ? t`Send voice message`
                 : taskAction?.kind === "stop"
-                  ? "Stop task"
+                  ? t`Stop task`
                   : taskAction
-                    ? "Continue task"
+                    ? t`Continue task`
                     : command
-                      ? `Run /${command.command}`
+                      ? t`Run /${command.command ?? ""}`
                       : sendLabel
             }
             kbd={touch || taskAction || talking ? undefined : ["Enter"]}
@@ -1598,7 +1610,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         <div className="composer-window-drop" data-shown={dragging || undefined} aria-hidden="true">
           <div className="composer-window-drop-card">
             <Icon name="paperclip" />
-            {attachReason ?? "Drop files to attach"}
+            {attachReason ?? t`Drop files to attach`}
           </div>
         </div>,
         document.body,

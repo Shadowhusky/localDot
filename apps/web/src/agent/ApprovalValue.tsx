@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { hiddenWarning, plainReveal, type RevealPart, revealText } from "./reveal-text.ts";
 
 const count = (n: number) => n.toLocaleString("en-US");
@@ -68,13 +69,15 @@ export const ApprovalValue = memo(function ApprovalValue({
   const facts =
     total === undefined
       ? [
-          value.lines > 1 ? `${count(value.lines)} lines` : "",
-          value.lines > 1 || text.length > 120 || scrolls ? `${count(text.length)} characters` : "",
-          scrolls ? "scroll to read all" : "",
+          value.lines > 1 ? t`${count(value.lines)} lines` : "",
+          value.lines > 1 || text.length > 120 || scrolls
+            ? t`${count(text.length)} characters`
+            : "",
+          scrolls ? t`scroll to read all` : "",
         ]
           .filter(Boolean)
           .join(" · ")
-      : `Showing the first ${count(text.length)} of ${count(total)} characters.`;
+      : t`Showing the first ${count(text.length)} of ${count(total)} characters.`;
   return (
     <>
       <pre

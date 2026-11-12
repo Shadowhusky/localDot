@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo } from "react";
 import { SafeMarkdown } from "../../agent/SafeMarkdown.tsx";
+import { t } from "../../i18n/index.ts";
 import { CodeLines } from "./CodeLines.tsx";
 import { ViewerBar, ViewSwitch } from "./states.tsx";
 import { useViewChoice, type ViewChoice, viewItems } from "./views.ts";
@@ -33,12 +34,12 @@ export function MarkdownView({
       </ViewerBar>
       {shown.value === "source" ? (
         <div className="viewer-stage viewer-text">
-          <CodeLines lines={lines} name={name} wrap label={label ?? `Source of ${name}`} />
+          <CodeLines lines={lines} name={name} wrap label={label ?? t`Source of ${name}`} />
         </div>
       ) : (
         <div className="viewer-stage viewer-doc">
-          <section className="viewer-doc-page" aria-label={`Rendered ${name}`}>
-            <SafeMarkdown text={text} shortened="Showing the start of this file." />
+          <section className="viewer-doc-page" aria-label={t`Rendered ${name}`}>
+            <SafeMarkdown text={text} shortened={t`Showing the start of this file.`} />
           </section>
         </div>
       )}

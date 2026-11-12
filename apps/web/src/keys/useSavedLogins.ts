@@ -1,5 +1,6 @@
 import type { LoginImport, SavedLogin } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   importLogins,
@@ -53,7 +54,7 @@ export function useSavedLogins(api: ApiClient, open: boolean, epoch: string): Sa
         setFailure(null);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setFailure(loginProblem(err, "Couldn't load your saved logins."));
+        if (!cancelled) setFailure(loginProblem(err, t`Couldn't load your saved logins.`));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -97,7 +98,7 @@ export function useSavedLogins(api: ApiClient, open: boolean, epoch: string): Sa
       try {
         setSummary(await change(() => importLogins(api, file)));
       } catch (err) {
-        setImportProblem(loginProblem(err, "The import didn't finish. Try again."));
+        setImportProblem(loginProblem(err, t`The import didn't finish. Try again.`));
       } finally {
         setImporting(false);
       }

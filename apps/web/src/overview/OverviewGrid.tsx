@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import type { ConversationRow } from "../agent/conversation-list.ts";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
@@ -43,25 +44,25 @@ const AHEAD = `${AHEAD_PX}px 0px`;
 const SETTLE_MS = 150;
 
 const FILTER_ITEMS = (counts: Record<OverviewFilter, number>) => [
-  { value: "all", label: "All", count: counts.all },
-  { value: "working", label: "Working", count: counts.working },
+  { value: "all", label: t`All`, count: counts.all },
+  { value: "working", label: t`Working`, count: counts.working },
   {
     value: "needs-you",
-    label: "Needs you",
+    label: t`Needs you`,
     count: counts["needs-you"],
     attention: counts["needs-you"] > 0,
   },
 ];
 
 const DENSITY_ITEMS = [
-  { value: "s", label: "S", hint: "Small tiles" },
-  { value: "m", label: "M", hint: "Medium tiles" },
-  { value: "l", label: "L", hint: "Large tiles" },
+  { value: "s", label: tr("S"), hint: tr("Small tiles") },
+  { value: "m", label: tr("M"), hint: tr("Medium tiles") },
+  { value: "l", label: tr("L"), hint: tr("Large tiles") },
 ];
 
 const EMPTY_FILTER: Record<Exclude<OverviewFilter, "all">, string> = {
-  working: "No dot is working right now",
-  "needs-you": "No dot needs you right now",
+  working: tr("No dot is working right now"),
+  "needs-you": tr("No dot needs you right now"),
 };
 
 export interface OverviewGridProps {
@@ -259,7 +260,7 @@ export function OverviewGrid({
 
   const filters = (
     <SegmentedControl
-      aria-label="Show"
+      aria-label={t`Show`}
       size={28}
       fit
       className="overview-filter"
@@ -270,7 +271,7 @@ export function OverviewGrid({
   );
   const sizes = (
     <SegmentedControl
-      aria-label="Tile size"
+      aria-label={t`Tile size`}
       size={28}
       className="overview-density"
       items={DENSITY_ITEMS}
@@ -282,8 +283,8 @@ export function OverviewGrid({
   let body: ReactNode = null;
   if (ordered.length === 0)
     body = (
-      <EmptyState icon="layout-dashboard" title="Nothing to show yet">
-        Conversations under way, and those from today, show here with their screens.
+      <EmptyState icon="layout-dashboard" title={t`Nothing to show yet`}>
+        {t`Conversations under way, and those from today, show here with their screens.`}
       </EmptyState>
     );
   else if (filter !== "all" && listed.length === 0)
@@ -293,14 +294,14 @@ export function OverviewGrid({
         title={EMPTY_FILTER[filter]}
         actions={
           <Button size="sm" variant="quiet" onClick={() => onFilter("all")}>
-            Show all
+            {t`Show all`}
           </Button>
         }
       />
     );
 
   return (
-    <section className="overview" aria-label="Overview" data-density={density}>
+    <section className="overview" aria-label={t`Overview`} data-density={density}>
       <header className="overview-bar" data-page={heading ? "" : undefined}>
         {heading}
         {filters}
@@ -311,7 +312,7 @@ export function OverviewGrid({
         <ul
           ref={list}
           className="overview-grid"
-          aria-label="Conversations"
+          aria-label={t`Conversations`}
           hidden={!!body}
           style={
             {

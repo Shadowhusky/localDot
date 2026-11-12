@@ -1,5 +1,6 @@
 import type { ComputerSize, ComputerSizeView } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t, tc } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Group, GroupHead, GroupNote } from "../ui/Group.tsx";
 import { SliderKey, StepSlider } from "../ui/StepSlider.tsx";
@@ -66,8 +67,8 @@ export function useComputerSize(api: ApiClient | null, everyMs?: number) {
 export function tooSmall(view: ComputerSizeView): string | null {
   if (recommendedSize(view)) return null;
   return view.max.memoryBytes < view.min.memoryBytes
-    ? `Docker can't hold dot's computer beside what else runs: it needs at least ${gigabytes(view.min.memoryBytes)}. ${dockerTip(view.docker, "memory")}`
-    : `Docker can't give dot's computer the ${cpuCount(view.min.cpus)} it needs beside the other dots. ${dockerTip(view.docker, "cpus")}`;
+    ? t`Docker can't hold dot's computer beside what else runs: it needs at least ${gigabytes(view.min.memoryBytes)}. ${dockerTip(view.docker, "memory")}`
+    : t`Docker can't give dot's computer the ${cpuCount(view.min.cpus)} it needs beside the other dots. ${dockerTip(view.docker, "cpus")}`;
 }
 
 export function SizeSlider({
@@ -88,7 +89,7 @@ export function SizeSlider({
   return (
     <StepSlider
       {...model}
-      label={memory ? "Memory" : "CPUs"}
+      label={memory ? tc("RAM", "Memory") : t`CPUs`}
       valueText={memory ? (value) => gigabytes(value * GIB) : cpuCount}
       onValueChange={(value) =>
         onChange(
@@ -138,8 +139,8 @@ export function ComputerSizeSettings({ api }: { api: ApiClient }) {
   if (view === null)
     return (
       <div>
-        <GroupHead title="Memory and CPUs" />
-        <GroupNote>Docker isn't answering, so the computer's size can't be shown now.</GroupNote>
+        <GroupHead title={t`Memory and CPUs`} />
+        <GroupNote>{t`Docker isn't answering, so the computer's size can't be shown now.`}</GroupNote>
       </div>
     );
   const size = draft ?? view.size;
@@ -150,7 +151,7 @@ export function ComputerSizeSettings({ api }: { api: ApiClient }) {
   };
   return (
     <div>
-      <GroupHead title="Memory and CPUs" />
+      <GroupHead title={t`Memory and CPUs`} />
       <Group>
         <div className="ui-group-row settings-size-row">
           <SizeSlider kind="memory" view={view} size={size} onChange={change} />
@@ -168,8 +169,8 @@ export function ComputerSizeSettings({ api }: { api: ApiClient }) {
           <span role="status">
             {tooSmall(view) ??
               (view.pending && !draft
-                ? "Saved. The computer is using more memory than that right now, so the smaller size applies when it next starts."
-                : `${browserLine(size)} Changes apply at once.`)}
+                ? t`Saved. The computer is using more memory than that right now, so the smaller size applies when it next starts.`
+                : t`${browserLine(size)} Changes apply at once.`)}
           </span>
         )}
       </GroupNote>

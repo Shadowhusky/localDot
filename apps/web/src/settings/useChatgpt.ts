@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   ChatgptFailure,
@@ -98,7 +99,7 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
       unverify();
       setUncertain(true);
       setError(
-        "The view closed before the action was verified. Check account status before continuing.",
+        t`The view closed before the action was verified. Check account status before continuing.`,
       );
     }
     clearMaterial();
@@ -113,7 +114,7 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
     clearMaterial();
     setExpired(true);
     unverify();
-    setError("This sign-in attempt has expired. Cancel or check account status.");
+    setError(t`This sign-in attempt has expired. Cancel or check account status.`);
     return false;
   }, [clearMaterial, unverify]);
   const paint = useCallback(
@@ -322,7 +323,7 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
       clearMaterial();
       setExpired(true);
       unverify();
-      setError("This attempt exceeded its waiting time. Cancel or check account status.");
+      setError(t`This attempt exceeded its waiting time. Cancel or check account status.`);
       return;
     }
     const delay = Math.min(8000, 1000 * 2 ** Math.min(poll.failures, 3), until - Date.now());
@@ -480,10 +481,10 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
       return;
     try {
       await navigator.clipboard.writeText(value);
-      if (usable() && owner.current.epoch === epoch) setNotice("Sign-in code copied.");
+      if (usable() && owner.current.epoch === epoch) setNotice(t`Sign-in code copied.`);
     } catch {
       if (usable() && owner.current.epoch === epoch)
-        setNotice("Select the code and copy it manually.");
+        setNotice(t`Select the code and copy it manually.`);
     }
   };
   return {

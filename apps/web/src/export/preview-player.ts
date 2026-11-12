@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { readTheme } from "../stage/theme.ts";
 import type { ExportContext } from "./export-context.ts";
 import type { ExportPlan, ExportRequest } from "./export-plan.ts";
@@ -47,7 +48,7 @@ export class PreviewPlayer {
     this.#plan = plan;
     this.#change = change;
     this.#canvas = document.createElement("canvas");
-    this.#canvas.setAttribute("aria-label", "Video preview");
+    this.#canvas.setAttribute("aria-label", t`Video preview`);
     this.#canvas.setAttribute("role", "img");
     this.#canvas.width = Math.min(960, request.size.w);
     this.#canvas.height = Math.round((this.#canvas.width * request.size.h) / request.size.w);

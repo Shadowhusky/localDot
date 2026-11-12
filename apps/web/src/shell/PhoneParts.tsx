@@ -4,6 +4,7 @@ import { sendAfter } from "../agent/queued-draft.ts";
 import { requestResearch } from "../agent/research.ts";
 import type { HudActionKind } from "../cells/hud-state.ts";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
+import { t } from "../i18n/index.ts";
 import { useGuest } from "../remote/guest.ts";
 import type { HudAction } from "../session/status.ts";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
@@ -16,7 +17,7 @@ import type { PauseSlot, TakeSlot } from "./island.ts";
 import { PANEL_NAME } from "./panel-name.ts";
 import { type DisplayControl, StreamMenu } from "./StreamMenu.tsx";
 
-const NO_RECORDINGS = "No recordings yet";
+const NO_RECORDINGS = t`No recordings yet`;
 
 export interface SwitchView {
   label: string;
@@ -24,7 +25,7 @@ export interface SwitchView {
 }
 
 const stopReason = (stop: HudAction) =>
-  stop.busy ? "Stopping…" : stop.enabled ? undefined : "Reconnecting to the task…";
+  stop.busy ? t`Stopping…` : stop.enabled ? undefined : t`Reconnecting to the task…`;
 
 // What the computer's state asks of the user while the conversation or the list is on show, with
 // its way out. Its screen says all of it.
@@ -44,24 +45,24 @@ export function ComputerNotice({
   const offered = action && action.kind !== "stop" ? action : undefined;
   return (
     <div className="phone-notice" role="status">
-      <p>{caption || "Your computer isn't on."}</p>
+      <p>{caption || t`Your computer isn't on.`}</p>
       {offered && (
         <Button
           size="sm"
           variant="primary"
-          disabledReason={offered.enabled ? undefined : "Wait a moment"}
+          disabledReason={offered.enabled ? undefined : t`Wait a moment`}
           onClick={() => onAction(offered.kind)}
         >
           {offered.kind === "start"
-            ? "Turn on"
+            ? t`Turn on`
             : offered.kind === "resume"
-              ? "Resume"
-              : "Try again"}
+              ? t`Resume`
+              : t`Try again`}
         </Button>
       )}
       {(!offered || failed) && (
         <Button size="sm" variant="quiet" onClick={onDetails}>
-          Details
+          {t`Details`}
         </Button>
       )}
     </div>
@@ -90,7 +91,7 @@ export function PhoneAdd({ researchReason }: { researchReason?: string }) {
         round
         variant="filled"
         icon="plus"
-        label="Add"
+        label={t`Add`}
         {...triggerProps("menu", open)}
         onClick={() => setOpen(true)}
       />
@@ -100,7 +101,7 @@ export function PhoneAdd({ researchReason }: { researchReason?: string }) {
         anchor={button}
         side="top"
         align="start"
-        label="Add"
+        label={t`Add`}
       >
         <MenuItem
           icon="paperclip"
@@ -110,13 +111,13 @@ export function PhoneAdd({ researchReason }: { researchReason?: string }) {
               ?.click()
           }
         >
-          Photo or file
+          {t`Photo or file`}
         </MenuItem>
         <MenuItem icon="globe" disabledReason={researchReason} onSelect={requestResearch}>
-          Research a question
+          {t`Research a question`}
         </MenuItem>
         <MenuItem icon="list" onSelect={() => typeInComposer("/")}>
-          Commands
+          {t`Commands`}
         </MenuItem>
       </Menu>
     </>
@@ -184,7 +185,7 @@ export function ConversationMenuItems({
             }
             onSelect={onShowDot}
           >
-            Show dot
+            {t`Show dot`}
           </MenuItem>
           <MenuSeparator />
         </>
@@ -200,12 +201,12 @@ export function ConversationMenuItems({
           disabledReason={hasRecordings ? undefined : NO_RECORDINGS}
           onSelect={onReplay}
         >
-          Replay
+          {t`Replay`}
         </MenuItem>
       )}
       {onChatSettings && (
         <MenuItem icon="settings" onSelect={onChatSettings}>
-          Chat settings
+          {t`Chat settings`}
         </MenuItem>
       )}
       {model && (
@@ -215,31 +216,31 @@ export function ConversationMenuItems({
       )}
       {entry && !guest && (
         <MenuItem icon={entry.pinned ? "pin-off" : "pin"} onSelect={onPin}>
-          {entry.pinned ? "Unpin" : "Pin to top"}
+          {entry.pinned ? t`Unpin` : t`Pin to top`}
         </MenuItem>
       )}
       {entry && !guest && (
         <MenuItem icon="type" onSelect={onRename}>
-          Rename
+          {t`Rename`}
         </MenuItem>
       )}
       {!guest && (
         <MenuItem icon="globe" disabledReason={researchReason} onSelect={requestResearch}>
-          Research a question
+          {t`Research a question`}
         </MenuItem>
       )}
       {sendsAfter && (
         <MenuItem icon="arrow-down" onSelect={sendAfter}>
-          Send after this task
+          {t`Send after this task`}
         </MenuItem>
       )}
       {!guest && (
         <MenuItem icon="search" onSelect={onSearch}>
-          Search actions
+          {t`Search actions`}
         </MenuItem>
       )}
       <MenuItem icon="compose" disabledReason={newReason} onSelect={onNew}>
-        New conversation
+        {t`New conversation`}
       </MenuItem>
       {!guest && (
         <MenuItem icon="layout-grid" onSelect={switchView.run}>
@@ -250,7 +251,7 @@ export function ConversationMenuItems({
         <>
           <MenuSeparator />
           <MenuItem icon="stop" disabledReason={stopReason(stop)} onSelect={onStop}>
-            Stop
+            {t`Stop`}
           </MenuItem>
         </>
       )}
@@ -294,28 +295,28 @@ export function ComputerMenuItems({
       </MenuItem>
       {others.map((other) => (
         <MenuItem key={other.id} icon="monitor" onSelect={other.open}>
-          {`Switch to ${other.name}`}
+          {t`Switch to ${other.name}`}
         </MenuItem>
       ))}
       <MenuSeparator />
       <MenuItem icon="repeat" onSelect={onRoutines}>
-        Routines
+        {t`Routines`}
       </MenuItem>
       <MenuItem
         icon="history"
         disabledReason={hasRecordings ? undefined : NO_RECORDINGS}
         onSelect={onReplay}
       >
-        Replay
+        {t`Replay`}
       </MenuItem>
       <MenuItem icon="settings" onSelect={onSettings}>
-        Settings
+        {t`Settings`}
       </MenuItem>
       <MenuItem icon="key-round" onSelect={onKeys}>
-        Keys
+        {t`Keys`}
       </MenuItem>
       <MenuItem icon="search" onSelect={onSearch}>
-        Search actions
+        {t`Search actions`}
       </MenuItem>
       <MenuItem icon="layout-grid" onSelect={switchView.run}>
         {switchView.label}
@@ -323,10 +324,10 @@ export function ComputerMenuItems({
       <MenuSeparator />
       <MenuItem
         icon="stop"
-        disabledReason={stoppingAll ? "Stopping…" : undefined}
+        disabledReason={stoppingAll ? t`Stopping…` : undefined}
         onSelect={onStopAll}
       >
-        Stop everything
+        {t`Stop everything`}
       </MenuItem>
     </>
   );
@@ -363,7 +364,7 @@ export function TaskControls({
   shutDown?: HudAction;
   onShutDown(): void;
 }) {
-  const wait = (action: HudAction) => (action.enabled ? undefined : "Wait a moment");
+  const wait = (action: HudAction) => (action.enabled ? undefined : t`Wait a moment`);
   return (
     <>
       {stop && (
@@ -381,7 +382,7 @@ export function TaskControls({
             round
             size={44}
             icon="stop"
-            label={stop.busy ? "Stopping" : "Stop"}
+            label={stop.busy ? t`Stopping` : t`Stop`}
             data-testid="hud-stop-session"
             disabledReason={stopReason(stop)}
             onClick={onStop}
@@ -394,7 +395,7 @@ export function TaskControls({
           round
           size={44}
           icon="power"
-          label="Shut down"
+          label={t`Shut down`}
           disabledReason={wait(shutDown)}
           onClick={onShutDown}
         />
@@ -409,7 +410,7 @@ export function TaskControls({
           disabledReason={wait(resume)}
           onClick={onResume}
         >
-          Resume
+          {t`Resume`}
         </Button>
       ) : (
         <Button
@@ -420,7 +421,7 @@ export function TaskControls({
           disabledReason={take.reason}
           onClick={onTake}
         >
-          Take control
+          {t`Take control`}
         </Button>
       )}
     </>

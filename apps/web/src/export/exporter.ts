@@ -1,5 +1,6 @@
 import type { ActivitySpan, RecordingGap } from "@localdot/protocol";
 import type { SessionModel } from "@localdot/stage";
+import { t } from "../i18n/index.ts";
 import { readTheme } from "../stage/theme.ts";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
 import type { ExportRequest } from "./export-plan.ts";
@@ -57,7 +58,7 @@ export function startExport(options: {
       }
     } catch {
       await options.sink.abort().catch(() => {});
-      result = { type: "error", message: "The export file could not be saved. Please try again." };
+      result = { type: "error", message: t`The export file could not be saved. Please try again.` };
     }
     state = "finished";
     resolveDone(result);
@@ -68,7 +69,7 @@ export function startExport(options: {
       message:
         error instanceof ExportTooLongError
           ? LONG_EXPORT
-          : "The export could not finish. Please try again.",
+          : t`The export could not finish. Please try again.`,
     });
   const post = (message: ExportIn) => worker?.postMessage(message);
   const writeChunk = (message: Extract<ExportOut, { type: "chunk" }>) => {

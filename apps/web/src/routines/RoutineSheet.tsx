@@ -1,5 +1,6 @@
 import type { Routine, RoutineDraft, RoutineRun } from "@localdot/protocol";
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -110,12 +111,12 @@ export function RoutineSheet({
 
   const title =
     target?.mode === "new"
-      ? "New routine"
+      ? t`New routine`
       : target?.mode === "confirm"
-        ? "Save this routine"
+        ? t`Save this routine`
         : editing
-          ? "Edit routine"
-          : (routine?.name ?? "Routine");
+          ? t`Edit routine`
+          : (routine?.name ?? t`Routine`);
   const footer = editing ? (
     <div className="routine-sheet-footer">
       {routines.problem && (
@@ -127,10 +128,10 @@ export function RoutineSheet({
         variant="quiet"
         onClick={() => (target?.mode === "detail" ? setEditing(false) : onClose())}
       >
-        Cancel
+        {t`Cancel`}
       </Button>
       <Button variant="primary" busy={saving} onClick={() => void save()}>
-        Save routine
+        {t`Save routine`}
       </Button>
     </div>
   ) : routine ? (
@@ -141,17 +142,17 @@ export function RoutineSheet({
         icon="trash"
         onClick={() => setDeleting(true)}
       >
-        Delete…
+        {t`Delete…`}
       </Button>
       <span className="routine-sheet-gap" />
-      <Button onClick={() => setEditing(true)}>Edit</Button>
+      <Button onClick={() => setEditing(true)}>{t`Edit`}</Button>
       <Button
         variant="primary"
         icon="play"
-        disabledReason={routine.state === "proposed" ? "Save it first" : undefined}
+        disabledReason={routine.state === "proposed" ? t`Save it first` : undefined}
         onClick={() => void routines.act((api) => api.runNow(routine.id))}
       >
-        Run now
+        {t`Run now`}
       </Button>
     </div>
   ) : undefined;
@@ -166,13 +167,13 @@ export function RoutineSheet({
         page={editing ? "form" : "detail"}
         back={
           editing && target?.mode === "detail"
-            ? { label: routine?.name ?? "Routine", onBack: () => setEditing(false) }
+            ? { label: routine?.name ?? t`Routine`, onBack: () => setEditing(false) }
             : undefined
         }
         dirty={dirty}
         modal
         returnFocus={returnFocus}
-        closeLabel="Close routine"
+        closeLabel={t`Close routine`}
         detents={["large"]}
         className="routine-sheet"
         footer={footer}
@@ -187,7 +188,7 @@ export function RoutineSheet({
             onConversation={onConversation}
           />
         ) : (
-          <EmptyState title="This routine was deleted" icon="repeat" />
+          <EmptyState title={t`This routine was deleted`} icon="repeat" />
         )}
       </Sheet>
       <DeleteRoutine
@@ -246,7 +247,7 @@ function RoutineDetail({
       {routine.keepAsked && (
         <Banner
           tone="attention"
-          title={`Keep running ${routine.name}?`}
+          title={t`Keep running ${routine.name}?`}
           actions={
             <>
               <Button
@@ -254,7 +255,7 @@ function RoutineDetail({
                 variant="primary"
                 onClick={() => void routines.act((each) => each.seen(routine.id))}
               >
-                Keep running
+                {t`Keep running`}
               </Button>
               <Button
                 size="sm"
@@ -264,24 +265,24 @@ function RoutineDetail({
                   )
                 }
               >
-                Pause
+                {t`Pause`}
               </Button>
             </>
           }
         >
-          Nobody has opened what it found for two weeks.
+          {t`Nobody has opened what it found for two weeks.`}
         </Banner>
       )}
       <p className="routine-instruction">{routine.instruction}</p>
       <Group>
         <Switch
           className="ui-group-row"
-          label="Runs on schedule"
+          label={t`Runs on schedule`}
           description={
             routine.pausedReason === "stop_all"
-              ? "Paused by Stop everything"
+              ? t`Paused by Stop everything`
               : routine.pausedReason === "absence"
-                ? "Paused: nobody answered Keep running"
+                ? t`Paused: nobody answered Keep running`
                 : nextRunText(routine, Date.now())
           }
           checked={on}
@@ -289,8 +290,8 @@ function RoutineDetail({
             switchable
               ? undefined
               : routine.state === "proposed"
-                ? "Save it first"
-                : "Finished. Change when it runs to use it again."
+                ? t`Save it first`
+                : t`Finished. Change when it runs to use it again.`
           }
           onCheckedChange={(checked) =>
             void routines.act((each) =>
@@ -301,20 +302,23 @@ function RoutineDetail({
             )
           }
         />
-        <GroupRow label="While you're away" trailing={AWAY[routine.profile].label} />
-        <GroupRow label="Tell me" trailing={NOTIFY[routine.notify]} />
-        <GroupRow label="If a run is missed" trailing={MISSED[routine.missedPolicy]} />
-        <GroupRow label="Wait for my answer" trailing={waitText(routine.approvalWindowMinutes)} />
-        <GroupRow label="Spending limit per run" trailing={budgetText(routine.budgetUSD)} />
+        <GroupRow label={t`While you're away`} trailing={AWAY[routine.profile].label} />
+        <GroupRow label={t`Tell me`} trailing={NOTIFY[routine.notify]} />
+        <GroupRow label={t`If a run is missed`} trailing={MISSED[routine.missedPolicy]} />
+        <GroupRow
+          label={t`Wait for my answer`}
+          trailing={waitText(routine.approvalWindowMinutes)}
+        />
+        <GroupRow label={t`Spending limit per run`} trailing={budgetText(routine.budgetUSD)} />
       </Group>
       <div>
         <GroupHead
-          title="Recent runs"
+          title={t`Recent runs`}
           aside={
             conversation &&
             onConversation && (
               <Button variant="quiet" size="sm" onClick={() => onConversation(conversation)}>
-                Open conversation
+                {t`Open conversation`}
               </Button>
             )
           }

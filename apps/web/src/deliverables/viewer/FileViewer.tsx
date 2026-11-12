@@ -23,6 +23,7 @@ import {
 } from "react";
 import { FileName } from "../../agent/ResultFiles.tsx";
 import { bytes } from "../../copy/format.ts";
+import { t, tr } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
@@ -88,7 +89,7 @@ interface Item {
 }
 const metaOf = (item: Item, size: number | null) =>
   [
-    isFrameEntry(item.entry) ? "Recorded screenshot" : kindLabel(item.name),
+    isFrameEntry(item.entry) ? t`Recorded screenshot` : kindLabel(item.name),
     size === null ? null : bytes(size),
     item.label ? `v${item.label}` : null,
   ]
@@ -140,9 +141,9 @@ function itemOf(entry: AnyEntry, shown?: ShownVersion & { key: string }): Item {
 }
 type About = ComputerFileReply | "failed";
 const UNREACHABLE: Partial<Record<string, string>> = {
-  computer_off: "Turn on your computer to get this file.",
-  busy: "Your computer is busy. Try again in a moment.",
-  missing: "This file is no longer on the computer.",
+  computer_off: tr("Turn on your computer to get this file."),
+  busy: tr("Your computer is busy. Try again in a moment."),
+  missing: tr("This file is no longer on the computer."),
 };
 // What the computer says of a file on it: its size now, or why it can't be read.
 function useAbout(api: ApiClient, file: FileRef, attempt: number): About | null {
@@ -376,7 +377,7 @@ export function FileViewer<E extends AnyEntry>({
         )
       }
     >
-      Download
+      {t`Download`}
     </Button>
   );
   const openMac = onMac && !frame && !onComputer(item.file) && canOpenOnMac(item.name) && (
@@ -388,7 +389,7 @@ export function FileViewer<E extends AnyEntry>({
         void openHere(api, item.file.sessionId, item.name, item.file.version)
       }
     >
-      Open on Mac
+      {t`Open on Mac`}
     </Button>
   );
   const actions = (
@@ -397,6 +398,7 @@ export function FileViewer<E extends AnyEntry>({
       {download}
     </>
   );
+  const pictures = noun === "picture";
   const footer = (
     <div className="viewer-footer">
       {total > 1 ? (
@@ -404,20 +406,30 @@ export function FileViewer<E extends AnyEntry>({
           <IconButton
             icon="chevron-left"
             size={32}
-            label={`Previous ${noun}`}
+            label={pictures ? t`Previous picture` : t`Previous file`}
             kbd={paged ? undefined : ["←"]}
-            disabledReason={index === 0 ? `This is the first ${noun}` : undefined}
+            disabledReason={
+              index === 0
+                ? pictures
+                  ? t`This is the first picture`
+                  : t`This is the first file`
+                : undefined
+            }
             onClick={() => go(-1)}
           />
-          <span className="viewer-count num">
-            {index + 1} of {total}
-          </span>
+          <span className="viewer-count num">{t`${index + 1} of ${total}`}</span>
           <IconButton
             icon="chevron-right"
             size={32}
-            label={`Next ${noun}`}
+            label={pictures ? t`Next picture` : t`Next file`}
             kbd={paged ? undefined : ["→"]}
-            disabledReason={index === total - 1 ? `This is the last ${noun}` : undefined}
+            disabledReason={
+              index === total - 1
+                ? pictures
+                  ? t`This is the last picture`
+                  : t`This is the last file`
+                : undefined
+            }
             onClick={() => go(1)}
           />
         </div>
@@ -535,9 +547,9 @@ function useChanges(api: ApiClient, item: Item): Changes | null {
 }
 
 const ABOUT_TITLES: Record<string, string> = {
-  computer_off: "Turn on your computer to see this file",
-  busy: "Your computer is busy",
-  missing: "This file is no longer on the computer",
+  computer_off: tr("Turn on your computer to see this file"),
+  busy: tr("Your computer is busy"),
+  missing: tr("This file is no longer on the computer"),
 };
 
 function ViewBody({
@@ -585,7 +597,7 @@ function ViewBody({
       </>
     );
   if (url === "failed")
-    return <ViewerMessage name={name} title="Couldn't load the preview" retry={retry} />;
+    return <ViewerMessage name={name} title={t`Couldn't load the preview`} retry={retry} />;
   const source = choice.value === "source";
   if (kind === "text" || kind === "details" || (source && (kind === "table" || kind === "svg")))
     return <TextView api={api} file={file} choice={choice} />;
@@ -594,7 +606,7 @@ function ViewBody({
     return onComputer(file) || choice.value !== "pages" ? (
       <TableView api={api} file={file} lead={lead} />
     ) : (
-      <Suspense fallback={<ViewerLoading label="Loading the pages" />}>
+      <Suspense fallback={<ViewerLoading label={t`Loading the pages`} />}>
         <OfficePages api={api} file={file} lead={lead} />
       </Suspense>
     );
@@ -602,15 +614,15 @@ function ViewBody({
     return onComputer(file) ? (
       <ViewerMessage name={name} />
     ) : (
-      <Suspense fallback={<ViewerLoading label="Loading the pages" />}>
+      <Suspense fallback={<ViewerLoading label={t`Loading the pages`} />}>
         <OfficePages api={api} file={file} />
       </Suspense>
     );
   if (kind === "html") return <PageView api={api} url={url} file={file} choice={choice} />;
-  if (url === null) return <ViewerLoading label="Loading the preview" />;
+  if (url === null) return <ViewerLoading label={t`Loading the preview`} />;
   if (kind === "pdf")
     return (
-      <Suspense fallback={<ViewerLoading label="Loading the PDF" />}>
+      <Suspense fallback={<ViewerLoading label={t`Loading the PDF`} />}>
         <PdfFile key={url} api={api} url={url} name={name} />
       </Suspense>
     );
@@ -640,21 +652,21 @@ function Unreachable({
         </ViewerBar>
       )}
       {about === null ? (
-        <ViewerLoading label="Reading the file on your computer" />
+        <ViewerLoading label={t`Reading the file on your computer`} />
       ) : (
         <ViewerMessage
           name={name}
           title={
             reason === "too_large"
               ? undefined
-              : (reason && ABOUT_TITLES[reason]) || "Couldn't read this file"
+              : (reason && ABOUT_TITLES[reason]) || t`Couldn't read this file`
           }
           retry={reason === "too_large" || reason === "missing" ? undefined : retry}
         >
           {reason === "missing"
-            ? "It was moved or deleted after the task listed it."
+            ? t`It was moved or deleted after the task listed it.`
             : reason === "computer_off"
-              ? "The file stays on your computer while it is off."
+              ? t`The file stays on your computer while it is off.`
               : undefined}
         </ViewerMessage>
       )}

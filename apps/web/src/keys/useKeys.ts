@@ -1,5 +1,6 @@
 import type { KeyMetadata, SecretBinding } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   deleteKey,
@@ -44,26 +45,31 @@ export type KeyStatus = {
 // user sees as every keyed request failing, so that is said too, as is a key to enter again; and
 // network protection that does not know the public address is never silent (the sheet says why).
 function attentionText({ reenter = 0, rebound = 0 }: KeydHealth): string {
-  if (reenter && rebound) return "keys need your attention";
+  if (reenter && rebound) return t`Keys, keys need your attention`;
   if (rebound)
     return rebound === 1
-      ? "a key was changed outside localDot"
-      : "keys were changed outside localDot";
-  return reenter === 1 ? "a key needs re-entering" : "keys need re-entering";
+      ? t`Keys, a key was changed outside localDot`
+      : t`Keys, keys were changed outside localDot`;
+  return reenter === 1 ? t`Keys, a key needs re-entering` : t`Keys, keys need re-entering`;
 }
 
 export function keyStatus(health: KeydHealth | null): KeyStatus {
-  if (!health) return { label: "Keys", state: "unknown" };
-  if (!health.online) return { label: "Key protection off", state: "offline" };
-  if (health.audit && !health.audit.ok) return { label: "Keys held", state: "audit" };
-  if (vaultLocked(health)) return { label: "Keys locked", state: "locked" };
+  if (!health) return { label: t`Keys`, state: "unknown" };
+  if (!health.online) return { label: t`Key protection off`, state: "offline" };
+  if (health.audit && !health.audit.ok) return { label: t`Keys held`, state: "audit" };
+  if (vaultLocked(health)) return { label: t`Keys locked`, state: "locked" };
   if (health.reenter || health.rebound)
-    return { label: "Keys", state: "reenter", spoken: `Keys, ${attentionText(health)}` };
-  if (health.hairpin?.state !== "active") {
-    const guard = health.hairpin?.state === "off" ? "off" : "checking";
-    return { label: "Keys", state: "guard", spoken: `Keys, network protection ${guard}` };
-  }
-  return { label: "Keys", state: "ok" };
+    return { label: t`Keys`, state: "reenter", spoken: attentionText(health) };
+  if (health.hairpin?.state !== "active")
+    return {
+      label: t`Keys`,
+      state: "guard",
+      spoken:
+        health.hairpin?.state === "off"
+          ? t`Keys, network protection off`
+          : t`Keys, network protection checking`,
+    };
+  return { label: t`Keys`, state: "ok" };
 }
 
 export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
@@ -140,7 +146,7 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
   // Locked before the health lookup or sealing starts: a later removal must not reach keyd before an
   // earlier save, which would then recreate the key.
   const change = useCallback(async <T>(operation: () => Promise<T>): Promise<T> => {
-    if (changing.current) throw new KeyProblem("Another key change is in progress.");
+    if (changing.current) throw new KeyProblem(t`Another key change is in progress.`);
     changing.current = true;
     setBusy(true);
     try {

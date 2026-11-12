@@ -1,5 +1,6 @@
 import type { SubagentStop } from "@localdot/protocol";
 import { useMemo } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -9,21 +10,21 @@ import { SafeMarkdown } from "./SafeMarkdown.tsx";
 
 const key = (child: AgentChild) => child.id;
 const labels = {
-  running: "Running",
-  completed: "Finished",
-  interrupted: "Interrupted",
-  failed: "Failed",
+  running: tr("Running"),
+  completed: tr("Finished"),
+  interrupted: tr("Interrupted"),
+  failed: tr("Failed"),
 };
 const reasons: Record<SubagentStop, string> = {
-  limit: "Usage limit reached",
-  error: "Stopped by an error",
-  restarted: "localDot restarted",
-  control: "You took the computer",
-  stopped: "Task stopped",
-  cancelled: "Stopped by dot",
+  limit: tr("Usage limit reached"),
+  error: tr("Stopped by an error"),
+  restarted: tr("localDot restarted"),
+  control: tr("You took the computer"),
+  stopped: tr("Task stopped"),
+  cancelled: tr("Stopped by dot"),
 };
 const label = (run: Pick<AgentRun, "state" | "resumed">) =>
-  run.state === "running" && run.resumed ? "Resumed" : labels[run.state];
+  run.state === "running" && run.resumed ? t`Resumed` : labels[run.state];
 const glyph = (state: AgentRun["state"]) =>
   state === "running"
     ? "doing"
@@ -35,10 +36,10 @@ const glyph = (state: AgentRun["state"]) =>
 export function SubagentList({ agents }: { agents: ReadonlyMap<string, AgentChild> }) {
   const children = useMemo(() => [...agents.values()].reverse(), [agents]);
   return (
-    <ScrollArea className="activity-scroll" aria-label="Delegated agents" tabIndex={0}>
+    <ScrollArea className="activity-scroll" aria-label={t`Delegated agents`} tabIndex={0}>
       <div className="activity-content subagent-list">
         {!children.length && (
-          <p className="activity-empty">Delegated agents appear here when dot starts them.</p>
+          <p className="activity-empty">{t`Delegated agents appear here when dot starts them.`}</p>
         )}
         <VirtualList items={children} itemKey={key}>
           {(child) => (
@@ -50,12 +51,12 @@ export function SubagentList({ agents }: { agents: ReadonlyMap<string, AgentChil
               </div>
               {child.reason && <p className="subagent-reason">{reasons[child.reason]}</p>}
               {child.summary && (
-                <Disclosure summary="Result">
+                <Disclosure summary={t`Result`}>
                   <SafeMarkdown text={child.summary} compact />
                 </Disclosure>
               )}
               {child.earlier.length > 0 && (
-                <Disclosure summary="Earlier runs" meta={child.earlier.length}>
+                <Disclosure summary={t`Earlier runs`} meta={child.earlier.length}>
                   <ol className="subagent-runs">
                     {child.earlier.map((run) => (
                       <li key={run.runId}>

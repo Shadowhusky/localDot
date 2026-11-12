@@ -1,4 +1,5 @@
 import type { AgentSettingsDocument } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import { providerName, type RoleChoice, type SubscriptionModel } from "./choices.ts";
 import { CHATGPT, CLAUDE_CODE, isCustomFormat } from "./chooser.ts";
 import type { ModelNames } from "./model-names.ts";
@@ -29,9 +30,9 @@ export function modelGroupLabel(choice: RoleChoice, index: ProviderIndex | null)
   if (!isCustomFormat(choice.provider)) return providerName(choice.provider);
   const url = index?.keys.find((key) => key.id === choice.key)?.baseURL;
   try {
-    return url ? new URL(url).host : "Custom endpoint";
+    return url ? new URL(url).host : t`Custom endpoint`;
   } catch {
-    return "Custom endpoint";
+    return t`Custom endpoint`;
   }
 }
 

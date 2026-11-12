@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { ActivityRow } from "./ActivityRow.tsx";
 import { changeView, memoryUndoEligible } from "./activity.ts";
@@ -10,10 +11,10 @@ import { useStepPreviewEnvironment } from "./StepPreview.tsx";
 export type UndoStatus = "ready" | "pending" | "conflict" | "uncertain" | "failed" | "undone";
 
 const STATUS: Partial<Record<UndoStatus, string>> = {
-  pending: "Undoing this change…",
-  conflict: "Memory changed since this update. Read it again before deciding.",
-  uncertain: "The undo wasn't confirmed. Read memory and the task history before trying again.",
-  failed: "This change couldn't be undone. Read memory to check it.",
+  pending: tr("Undoing this change…"),
+  conflict: tr("Memory changed since this update. Read it again before deciding."),
+  uncertain: tr("The undo wasn't confirmed. Read memory and the task history before trying again."),
+  failed: tr("This change couldn't be undone. Read memory to check it."),
 };
 
 // Mutation ownership lives in the controller; these callbacks always name this durable change.
@@ -58,12 +59,12 @@ export function ChangeRow({
           <div className="activity-detail-actions">
             <Button
               size="sm"
-              aria-label={`Open ${change.path}`}
+              aria-label={t`Open ${change.path}`}
               onClick={(event) =>
                 preview.open({ kind: "files", entries: files, index: at }, event.currentTarget)
               }
             >
-              Open
+              {t`Open`}
             </Button>
             {!gone && (
               <Button
@@ -71,11 +72,11 @@ export function ChangeRow({
                 size="sm"
                 icon={state === "done" ? "check" : "download"}
                 busy={state === "busy"}
-                aria-label={`Download ${change.path}`}
+                aria-label={t`Download ${change.path}`}
                 disabledReason={preview.downloads.blocked(file)}
                 onClick={() => preview.downloads.request(file)}
               >
-                Download
+                {t`Download`}
               </Button>
             )}
           </div>
@@ -87,22 +88,22 @@ export function ChangeRow({
                 size="sm"
                 disabledReason={
                   !onUndo
-                    ? "Undo isn't available while dot is waiting on you or the computer is busy."
+                    ? t`Undo isn't available while dot is waiting on you or the computer is busy.`
                     : status !== "ready"
-                      ? (message ?? "Undo isn't available right now.")
+                      ? (message ?? t`Undo isn't available right now.`)
                       : undefined
                 }
                 onClick={() => {
                   if (onUndo && change.changeId && status === "ready") onUndo(change.changeId);
                 }}
               >
-                Undo this change
+                {t`Undo this change`}
               </Button>
             ) : (
               <p className="activity-detail-note">
                 {change.changeId
-                  ? "This change has already been undone."
-                  : "This change can't be undone."}
+                  ? t`This change has already been undone.`
+                  : t`This change can't be undone.`}
               </p>
             )}
             {(status === "conflict" || status === "uncertain" || status === "failed") &&
@@ -112,7 +113,7 @@ export function ChangeRow({
                   size="sm"
                   onClick={(event) => onReread(event.currentTarget)}
                 >
-                  Read memory again
+                  {t`Read memory again`}
                 </Button>
               )}
           </div>

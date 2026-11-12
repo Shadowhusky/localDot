@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
+import { t, tr } from "../i18n/index.ts";
 import type { HudAction, Status } from "../session/status.ts";
 import { targetRingBox } from "../stage/geometry.ts";
 import type { FieldMark } from "../stage/worker-protocol.ts";
@@ -32,10 +33,10 @@ import "./hud.css";
 type ComputerKind = Exclude<HudAction["kind"], "stop-task">;
 
 const COMPUTER: Record<ComputerKind, { label: string; icon?: IconName }> = {
-  start: { label: "Turn on", icon: "power" },
-  stop: { label: "Shut down", icon: "power" },
-  resume: { label: "Resume", icon: "play" },
-  retry: { label: "Try again" },
+  start: { label: tr("Turn on"), icon: "power" },
+  stop: { label: tr("Shut down"), icon: "power" },
+  resume: { label: tr("Resume"), icon: "play" },
+  retry: { label: tr("Try again") },
 };
 const STOP_KEYS = ["Mod", "Shift", "."] as const;
 // The decision the island grows into: at least this wide, its header the island's own row 2 px
@@ -232,15 +233,15 @@ export function HudIsland({
                   variant="glass"
                   size={control}
                   icon="stop"
-                  label={stop?.busy ? "Stopping" : "Stop"}
+                  label={stop?.busy ? t`Stopping` : t`Stop`}
                   kbd={STOP_KEYS}
                   data-testid="hud-stop-session"
                   disabledReason={
                     stop?.busy
-                      ? "Stopping…"
+                      ? t`Stopping…`
                       : stop?.enabled
                         ? undefined
-                        : "Reconnecting to the task…"
+                        : t`Reconnecting to the task…`
                   }
                   onClick={onStopTask}
                 />
@@ -259,7 +260,7 @@ export function HudIsland({
                 disabledReason={declining.reason}
                 onClick={onDecline}
               >
-                Not now
+                {t`Not now`}
               </Button>
             )}
             {yours && handSlot && (
@@ -273,7 +274,7 @@ export function HudIsland({
                 disabledReason={handBack.reason}
                 onClick={onHandBack}
               >
-                Hand back
+                {t`Hand back`}
               </Button>
             )}
             {(shape === "task" || shape === "ready") &&
@@ -283,7 +284,7 @@ export function HudIsland({
                   round
                   size={control}
                   icon="hand"
-                  label="Take control"
+                  label={t`Take control`}
                   aria-busy={take.busy || undefined}
                   disabledReason={take.reason}
                   onClick={take.busy ? undefined : onTake}
@@ -298,13 +299,13 @@ export function HudIsland({
                   disabledReason={take.reason}
                   onClick={onTake}
                 >
-                  Take control
+                  {t`Take control`}
                 </Button>
               ))}
             {shape === "computer" &&
               computerActions.map((action) => {
                 const { label, icon } = COMPUTER[action.kind];
-                const reason = action.enabled ? undefined : "Wait a moment";
+                const reason = action.enabled ? undefined : t`Wait a moment`;
                 // A phone's island is one short line: its buttons are glyphs, as Take control is.
                 return phone && icon ? (
                   <IconButton
@@ -338,7 +339,7 @@ export function HudIsland({
                 variant="glass"
                 size={control}
                 icon="shrink"
-                label="Exit full screen"
+                label={t`Exit full screen`}
                 kbd={["Escape"]}
                 onClick={onExitFull}
               />
@@ -425,7 +426,7 @@ export function PauseButton({
       round={round}
       size={size}
       icon="pause"
-      label="Pause"
+      label={t`Pause`}
       disabledReason={slot.reason}
       onClick={onPause}
     />
@@ -435,7 +436,7 @@ export function PauseButton({
       round={round}
       size={size}
       icon="play"
-      label="Continue"
+      label={t`Continue`}
       disabledReason={slot.reason}
       onClick={onContinue}
     />

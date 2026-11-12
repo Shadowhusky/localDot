@@ -1,4 +1,5 @@
 import { type ReactNode, type RefObject, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import type { IconName } from "../ui/icons.ts";
@@ -56,7 +57,7 @@ export function PhoneBar({
         <Button
           variant="quiet"
           className="phone-title"
-          aria-label={`${title}. Conversation details`}
+          aria-label={t`${title}. Conversation details`}
           onClick={onDetails}
         >
           <span className="phone-title-text">{title}</span>
@@ -78,7 +79,7 @@ export function PhoneBar({
             round
             variant="filled"
             icon="monitor"
-            label={lamp ? "Open the computer. This task has it now" : "Open the computer"}
+            label={lamp ? t`Open the computer. This task has it now` : t`Open the computer`}
             onClick={onComputer}
           />
           <span className="phone-lamp" aria-hidden="true" />
@@ -89,7 +90,7 @@ export function PhoneBar({
           round
           variant="filled"
           icon="more-horizontal"
-          label="More"
+          label={t`More`}
           {...triggerProps("menu", open)}
           onClick={() => {
             onMore?.();
@@ -102,7 +103,7 @@ export function PhoneBar({
           anchor={anchor}
           side="bottom"
           align="end"
-          label="More"
+          label={t`More`}
         >
           {menu}
         </Menu>

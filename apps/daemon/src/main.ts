@@ -1071,6 +1071,7 @@ const app = createApp({
   dock: {
     cells: orchestrator,
     registry,
+    dockItems: (id) => orchestrator.dockItems(id),
     browserRunning: async (id) =>
       ["ready", "starting", "restarting"].includes((await browser.status(id)).state),
   },

@@ -1,4 +1,5 @@
 import type { ReviseDraft } from "../deliverables/revise-draft.ts";
+import { t } from "../i18n/index.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { FileName } from "./ResultFiles.tsx";
@@ -10,14 +11,14 @@ export function RevisingChip({ draft, onClear }: { draft: ReviseDraft; onClear()
       <p className="file-chips">
         <span className="file-chip" data-revising="">
           <Icon name="compose" size={12} className="file-chip-icon" />
-          <span className="file-chip-meta">Revising</span>
+          <span className="file-chip-meta">{t`Revising`}</span>
           <FileName name={draft.link.name} />
           <span className="file-chip-meta num">v{draft.label}</span>
           <IconButton
             className="file-chip-remove"
             icon="x"
             size={24}
-            label={`Stop revising ${draft.link.name}`}
+            label={t`Stop revising ${draft.link.name}`}
             onClick={onClear}
           />
         </span>

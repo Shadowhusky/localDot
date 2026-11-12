@@ -46,6 +46,7 @@ import {
   DONE_TOOL_DESCRIPTION,
   HUMAN_INPUT_GUIDANCE,
   REQUEST_FIX_DESCRIPTION,
+  TAKEOVER_LAST,
 } from "@localdot/protocol/guidance";
 import { asSchema, jsonSchema, type ToolSet, tool } from "ai";
 
@@ -158,7 +159,7 @@ export function toolSet(
     request_takeover: tool({
       description:
         BROWSER_VERIFICATION_GUIDANCE +
-        " For passwords and codes, ask with ask_user fields instead. Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
+        ` For passwords and codes, ask with ask_user fields instead. Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept. ${TAKEOVER_LAST}`,
       inputSchema: RequestTakeoverInput,
     }),
     request_fix: tool({ description: REQUEST_FIX_DESCRIPTION, inputSchema: RequestFixInput }),

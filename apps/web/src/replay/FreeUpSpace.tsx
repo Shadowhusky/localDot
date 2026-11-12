@@ -1,6 +1,7 @@
 import type { DeleteSessionsResult, SessionCard } from "@localdot/protocol";
 import { type RefObject, useRef, useState } from "react";
 import { bytes } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -46,14 +47,14 @@ export function FreeUpSpace({
           setOpenedAt(open ? null : new Date());
         }}
       >
-        Free up space
+        {t`Free up space`}
         <Icon name="chevron-down" size={14} />
       </Button>
       <Menu
         open={open}
         onClose={() => setOpenedAt(null)}
         anchor={anchor}
-        label="Free up space"
+        label={t`Free up space`}
         align="end"
       >
         {CLEANUPS.map((cleanup) => {
@@ -63,7 +64,7 @@ export function FreeUpSpace({
               key={cleanup.label}
               textValue={cleanup.label}
               disabledReason={
-                counting ? "Counting recordings…" : picks.length === 0 ? cleanup.none : undefined
+                counting ? t`Counting recordings…` : picks.length === 0 ? cleanup.none : undefined
               }
               onSelect={() => onChoose(cleanup, picks)}
             >
@@ -117,13 +118,13 @@ export function DeleteRecordings({
       anchor={anchor}
       title={cleanup ? cleanup.title(n) : deleteTitle(n)}
       description={deleteBody(n)}
-      facts={n > 0 ? [["Frees", bytes(totalBytes(cards ?? []))]] : undefined}
+      facts={n > 0 ? [[t`Frees`, bytes(totalBytes(cards ?? []))]] : undefined}
     >
       <Button variant="quiet" onClick={onClose}>
-        Cancel
+        {t`Cancel`}
       </Button>
       <Button variant="destructive" onClick={remove}>
-        Delete
+        {t`Delete`}
       </Button>
     </Dialog>
   );

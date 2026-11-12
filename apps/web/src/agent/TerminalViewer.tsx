@@ -1,4 +1,5 @@
 import { type ReactNode, useMemo } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { PreviewChips } from "../previews/PreviewChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import type { AgentStep } from "./model.ts";
@@ -8,11 +9,26 @@ import { emptyTerminal, terminalDisplayed } from "./terminal-text.ts";
 import "./output.css";
 
 const STREAMS = {
-  stdout: { name: "Output", region: "Standard output text", copy: "Copy output" },
-  stderr: { name: "Errors", region: "Standard error text", copy: "Copy errors" },
-} as const;
+  stdout: {
+    name: tr("Output"),
+    preview: tr("Preview output"),
+    region: tr("Standard output text"),
+    copy: tr("Copy output"),
+  },
+  stderr: {
+    name: tr("Errors"),
+    preview: tr("Preview errors"),
+    region: tr("Standard error text"),
+    copy: tr("Copy errors"),
+  },
+};
 // A command that succeeded still writes warnings and notes to its error stream.
-const NOTES = { ...STREAMS.stderr, name: "Messages", copy: "Copy messages" };
+const NOTES = {
+  ...STREAMS.stderr,
+  name: tr("Messages"),
+  preview: tr("Preview messages"),
+  copy: tr("Copy messages"),
+};
 
 export function TerminalViewer({ step, children }: { step: AgentStep; children?: ReactNode }) {
   const display = useMemo(() => {
@@ -26,9 +42,9 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
   const shortened = display.stdout.truncated || display.stderr.truncated || step.outputTruncated;
   const exit = step.tool?.exitCode;
   const notes = [
-    shortened && "Shortened to the kept text.",
-    display.terminal.controlsRemoved && "Terminal control codes removed.",
-    display.terminal.nonprintable && "Binary output left out.",
+    shortened && t`Shortened to the kept text.`,
+    display.terminal.controlsRemoved && t`Terminal control codes removed.`,
+    display.terminal.nonprintable && t`Binary output left out.`,
   ].filter(Boolean);
   const streams = (["stdout", "stderr"] as const).filter((stream) => display[stream].text);
   const failed = step.tool?.ok === false || (exit !== undefined && exit !== 0);
@@ -38,7 +54,7 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
   const named = (stream: "stdout" | "stderr") =>
     stream === "stderr" && !failed ? NOTES : STREAMS[stream];
   return (
-    <section className="terminal-viewer" aria-label="Command output">
+    <section className="terminal-viewer" aria-label={t`Command output`}>
       <div className="terminal-well">
         {streams.map((stream) => (
           <section
@@ -50,7 +66,7 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
           >
             {!captions && (
               <StepPreviewButton
-                label={`Preview ${named(stream).name.toLowerCase()}`}
+                label={named(stream).preview}
                 resource={{ kind: "text", name: named(stream).name, text: display[stream].text }}
               />
             )}
@@ -67,11 +83,11 @@ export function TerminalViewer({ step, children }: { step: AgentStep; children?:
         />
         <PreviewChips text={`${display.stdout.text}\n${display.stderr.text}`} />
         {children}
-        {!streams.length && !children && <p className="terminal-empty">No output.</p>}
+        {!streams.length && !children && <p className="terminal-empty">{t`No output.`}</p>}
       </div>
       <div className="terminal-foot">
         {exit !== undefined && (
-          <Badge tone={exit === 0 ? "neutral" : "danger"}>{`Exit ${exit}`}</Badge>
+          <Badge tone={exit === 0 ? "neutral" : "danger"}>{t`Exit ${exit}`}</Badge>
         )}
         {notes.length > 0 && <span className="terminal-notes">{notes.join(" ")}</span>}
         {streams.map((stream) => (

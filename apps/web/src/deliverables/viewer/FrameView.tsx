@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { releaseThumbnail, thumbnailUrl } from "../../session/thumbnails.ts";
 import { PictureView } from "./PictureView.tsx";
@@ -25,10 +26,10 @@ export function FrameView({ api, frame }: { api: ApiClient; frame: FrameEntry })
       releaseThumbnail(api, sessionId, frameId);
     };
   }, [api, sessionId, frameId, key]);
-  if (state?.key !== key) return <ViewerLoading label="Loading screenshot" />;
+  if (state?.key !== key) return <ViewerLoading label={t`Loading screenshot`} />;
   return state.url ? (
     <PictureView key={key} src={state.url} name={name} />
   ) : (
-    <ViewerMessage name={name} title="Screenshot unavailable" />
+    <ViewerMessage name={name} title={t`Screenshot unavailable`} />
   );
 }

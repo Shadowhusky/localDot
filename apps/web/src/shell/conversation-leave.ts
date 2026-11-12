@@ -1,5 +1,6 @@
 import type { Organize } from "../agent/conversation-list.ts";
 import { CLOSES_AT, MOST_POPS, type PoppingDot, popDots, rippleDelays } from "../dot/pop.ts";
+import { t } from "../i18n/index.ts";
 import { leaveRows } from "../ui/leave.ts";
 import { matches, REDUCED_MOTION } from "../ui/media.ts";
 
@@ -10,7 +11,7 @@ const SCROLLS = ".sessions-scroll, .conversations-body, .phone-list-scroll";
 // What a row hands the keys to: where the arrows go on from, or its menu where a field takes them.
 const TAKES_FOCUS = ".sessions-row, .conversations-more, .phone-row, .phone-rail-button";
 // Where the keys go in a list left with no rows.
-const FIRST_RESORT = '[aria-label="New conversation"], input';
+const firstResort = () => `[aria-label="${t`New conversation`}"], input`;
 const HEADING = ".sessions-group-label, .conversations-day";
 
 function rowsOf(ids: readonly string[]): HTMLElement[] {
@@ -71,7 +72,7 @@ export function landingAfter(ids: readonly string[]): () => HTMLElement | null {
     const row = id && list.querySelector(`${ROWS}[data-conversation="${CSS.escape(id)}"]`);
     return (
       (row && row.querySelector<HTMLElement>(TAKES_FOCUS)) ||
-      list.querySelector<HTMLElement>(FIRST_RESORT)
+      list.querySelector<HTMLElement>(firstResort())
     );
   };
 }

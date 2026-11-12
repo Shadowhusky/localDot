@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { showToast } from "../ui/Toast.tsx";
 import { markdownToPlain } from "./markdown.ts";
 import type { AgentTakeover } from "./model.ts";
@@ -19,7 +20,7 @@ export interface HandOffInput {
 export function sayHandedOver(offered: AgentTakeover): void {
   showToast({
     id: "handoff",
-    title: "dot handed you the computer",
+    title: t`dot handed you the computer`,
     ...(offered.note ? { description: markdownToPlain(offered.note) } : {}),
     icon: "hand",
   });

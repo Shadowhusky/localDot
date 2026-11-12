@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import type { AskFormProps } from "./AskForm.tsx";
 import { useAskState } from "./ask-draft.ts";
@@ -19,23 +20,26 @@ export function AppConnectRequest({ draft, answer, reason, connectApi: api }: As
     },
   });
   if (!app || !field)
-    return <p role="alert">This offer is incomplete. Ask dot to check the app's settings.</p>;
-  const verb = app.reconnect ? "Reconnect" : "Connect";
+    return <p role="alert">{t`This offer is incomplete. Ask dot to check the app's settings.`}</p>;
+  const verb = app.reconnect ? t`Reconnect` : t`Connect`;
   return (
-    <section aria-label={`${verb} ${app.name}`} className="private-key-request keys-form">
+    <section
+      aria-label={app.reconnect ? t`Reconnect ${app.name}` : t`Connect ${app.name}`}
+      className="private-key-request keys-form"
+    >
       <p className="private-key-title">{app.name}</p>
       <p className="private-key-destination">{app.host}</p>
       <p>
         {waiting
           ? waiting.remote
-            ? "The sign-in opened in the browser on your Mac, where your accounts are. It can't be finished from this device."
-            : `Approve ${app.name} in your browser. dot carries on when you're done.`
-          : "You approve it in your browser. dot gets the app's tools and never sees this sign-in."}
+            ? t`The sign-in opened in the browser on your Mac, where your accounts are. It can't be finished from this device.`
+            : t`Approve ${app.name} in your browser. dot carries on when you're done.`
+          : t`You approve it in your browser. dot gets the app's tools and never sees this sign-in.`}
       </p>
       {waiting?.page && (
         <p>
           <a href={waiting.page} target="_blank" rel="noopener noreferrer">
-            Open the sign-in page
+            {t`Open the sign-in page`}
           </a>
         </p>
       )}
@@ -43,25 +47,25 @@ export function AppConnectRequest({ draft, answer, reason, connectApi: api }: As
       <div className="keys-actions">
         <Button
           variant="quiet"
-          disabledReason={state.sending ? "Continuing task" : reason}
+          disabledReason={state.sending ? t`Continuing task` : reason}
           onClick={() => {
             cancel();
             void draft.decline(answer);
           }}
         >
-          Not now
+          {t`Not now`}
         </Button>
         <Button
           variant="primary"
           busy={starting}
           disabledReason={
             reason ??
-            (state.sending ? "Continuing task" : undefined) ??
-            (!api ? "Connecting apps is unavailable here" : undefined)
+            (state.sending ? t`Continuing task` : undefined) ??
+            (!api ? t`Connecting apps is unavailable here` : undefined)
           }
           onClick={() => void connect()}
         >
-          {waiting ? "Open again" : verb}
+          {waiting ? t`Open again` : verb}
         </Button>
       </div>
     </section>

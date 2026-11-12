@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { Progress } from "../ui/Progress.tsx";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 import type { ToastOptions } from "../ui/toasts.ts";
@@ -15,11 +16,11 @@ function ExportCount({ job }: { job: ExportJob }) {
       <Progress
         variant="ring"
         size={16}
-        label="Export progress"
+        label={t`Export progress`}
         value={total ? done : undefined}
         max={total || 1}
       />
-      <span>Exporting…</span>
+      <span>{t`Exporting…`}</span>
       <span className="export-toast-percent num" aria-hidden={percent === null}>
         {percent === null ? "" : `${percent}%`}
       </span>
@@ -34,14 +35,14 @@ export function exportNotice(
 ): (Omit<ToastOptions, "live" | "action"> & { live?: true; save?: true }) | null {
   switch (state.phase) {
     case "exporting":
-      return { id: TOAST, title: "Exporting…", live: true };
+      return { id: TOAST, title: t`Exporting…`, live: true };
     case "ready":
-      return { id: TOAST, tone: "success", title: "Your video is ready", save: true };
+      return { id: TOAST, tone: "success", title: t`Your video is ready`, save: true };
     case "saved":
-      return { id: TOAST, tone: "success", title: "Video saved" };
+      return { id: TOAST, tone: "success", title: t`Video saved` };
     case "options":
       return state.note && state.note !== CANCELLED_NOTE
-        ? { id: TOAST, tone: "danger", title: "Couldn't make the video", description: state.note }
+        ? { id: TOAST, tone: "danger", title: t`Couldn't make the video`, description: state.note }
         : null;
     default:
       return null;
@@ -65,7 +66,7 @@ export function useExportToast(job: ExportJob): void {
     showToast({
       ...words,
       ...(live ? { live: <ExportCount job={job} /> } : {}),
-      ...(save ? { action: { label: "Save", onAction: () => job.save() } } : {}),
+      ...(save ? { action: { label: t`Save`, onAction: () => job.save() } } : {}),
     });
   }, [key, job]);
 }

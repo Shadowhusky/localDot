@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { copyBlocked, useCopy } from "./useCopy.ts";
 
@@ -17,8 +18,8 @@ export function CopyButton({
   const used = useRef(false);
   if (state !== "idle") used.current = true;
   useEffect(() => {
-    if (state === "copied") announce?.("Copied.");
-    else if (state === "failed") announce?.("Couldn't copy.");
+    if (state === "copied") announce?.(t`Copied.`);
+    else if (state === "failed") announce?.(t`Couldn't copy.`);
   }, [state, announce]);
   return (
     <IconButton
@@ -26,7 +27,7 @@ export function CopyButton({
       className={className}
       data-copy={state !== "idle" ? state : used.current ? "back" : undefined}
       icon={state === "copied" ? "check" : state === "failed" ? "x" : "copy"}
-      label={state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : label}
+      label={state === "copied" ? t`Copied` : state === "failed" ? t`Couldn't copy` : label}
       disabledReason={copyBlocked(text)}
       onClick={() => copy(text)}
     />

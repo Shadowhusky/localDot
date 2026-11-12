@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import { useResultDownloads } from "../agent/ResultFiles.tsx";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Card } from "../ui/Card.tsx";
 import { DeliverableFile } from "./DeliverableFile.tsx";
@@ -27,7 +28,7 @@ export function RecordingFiles({
   return (
     <Card variant="file">
       <FileViewerScope api={api} entries={entries} downloads={downloads} onMac={onMac}>
-        <ul className="deliverables" aria-label="Files">
+        <ul className="deliverables" aria-label={t`Files`}>
           {files.map((file) => (
             <DeliverableFile
               key={`${file.name}/${file.version ?? 0}`}

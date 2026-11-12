@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { Kbd } from "../ui/Kbd.tsx";
 import { ActionList, rowId, type ShownRow } from "./ActionList.tsx";
 import {
@@ -220,7 +221,7 @@ export function useCommandMenu(options: CommandMenuOptions) {
       armed.current = value;
       setDismissed(true);
       latest.current.problem(
-        `There's no /${now.name} command. Send again to send it to dot as you wrote it.`,
+        t`There's no /${now.name} command. Send again to send it to dot as you wrote it.`,
       );
       return "handled";
     }
@@ -232,18 +233,18 @@ export function useCommandMenu(options: CommandMenuOptions) {
   const empty = !typed
     ? ""
     : !typed.spaced || !findCommand(actions, typed.name)
-      ? `There's no /${typed.name} command. Send it twice to give it to dot as a message.`
+      ? t`There's no /${typed.name} command. Send it twice to give it to dot as a message.`
       : waiting
         ? choices?.failed
-          ? "Couldn't load the list. Try again."
-          : "Loading…"
-        : "Nothing matches.";
+          ? t`Couldn't load the list. Try again.`
+          : t`Loading…`
+        : t`Nothing matches.`;
   const view = open && (
     <div ref={box} className="ui-picker-popover command-menu" data-command-menu="">
       {rows.length > 0 ? (
         <ActionList
           id={listId}
-          label="Commands"
+          label={t`Commands`}
           compact
           rows={rows.map(shownSlashRow)}
           active={at}
@@ -261,13 +262,13 @@ export function useCommandMenu(options: CommandMenuOptions) {
       <div className="command-menu-foot" aria-hidden="true">
         <span>
           <Kbd keys={["ArrowUp"]} />
-          <Kbd keys={["ArrowDown"]} /> choose
+          <Kbd keys={["ArrowDown"]} /> {t`choose`}
         </span>
         <span>
-          <Kbd keys={["Tab"]} /> complete
+          <Kbd keys={["Tab"]} /> {t`complete`}
         </span>
         <span>
-          <Kbd keys={["Enter"]} /> run
+          <Kbd keys={["Enter"]} /> {t`run`}
         </span>
       </div>
     </div>

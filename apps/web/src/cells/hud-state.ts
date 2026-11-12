@@ -1,6 +1,7 @@
+import { t } from "../i18n/index.ts";
 import type { AwayCause, AwayLevel } from "../stage/connection.ts";
 import type { StreamPicture } from "../stage/live-stream.ts";
-import { DOCKER_DOWN, MEMORY_ADVICE } from "./errors.ts";
+import { MEMORY_ADVICE } from "./errors.ts";
 import type { CellSummary } from "./types.ts";
 
 // What useCell knows: "listing" until the daemon first answers the list, "unknown" once a list has
@@ -60,12 +61,11 @@ export interface HudState {
 // The orchestrator marks a crash restart with this note on a starting cell; the spec shows a
 // crashed cell as "Reconnecting…".
 const RESTART_NOTE = /; restarting \(attempt (\d+) of (\d+)\)$/;
-const STARTING = "Starting your computer. The first start takes about a minute.";
-const UPDATING = "Updating your computer. Your files and sign-ins stay.";
+const STARTING = t`Starting your computer. The first start takes about a minute.`;
+const UPDATING = t`Updating your computer. Your files and sign-ins stay.`;
 const UPDATE_UNFINISHED = "The update didn't finish";
 const UPDATE_RECORDS_UNREADABLE = "localDot can't read its update records";
-export const NEEDS_FRESH_START =
-  "The update couldn't be finished. Start fresh to use your computer again.";
+export const NEEDS_FRESH_START = t`The update couldn't be finished. Start fresh to use your computer again.`;
 
 export function hudFor({
   runtimeProblem,
@@ -96,12 +96,12 @@ export function hudFor({
   if (runtimeProblem)
     return hud(
       "unavailable",
-      "Unavailable",
+      t`Unavailable`,
       runtimeProblem === "docker"
-        ? "Docker is not available. Open Docker on this Mac; localDot will reconnect when it is ready."
+        ? t`Docker is not available. Open Docker on this Mac; localDot will reconnect when it is ready.`
         : runtimeProblem === "recovering"
-          ? "Docker is ready. Recovering your computer connection."
-          : "Startup recovery needs attention. Restart localDot to retry; your files are retained.",
+          ? t`Docker is ready. Recovering your computer connection.`
+          : t`Startup recovery needs attention. Restart localDot to retry; your files are retained.`,
       "retry",
     );
   // A screen this page has shown keeps its last picture through any gap, whatever the screen's own
@@ -109,17 +109,17 @@ export function hudFor({
   // reads as reconnecting, never as the computer coming up.
   if (away)
     return away.level === "blip" || away.cause === "switch"
-      ? hud("live", "Ready", "Your computer is live.", "stop")
+      ? hud("live", t`Ready`, t`Your computer is live.`, "stop")
       : hud(
           "reconnecting",
-          "Reconnecting…",
+          t`Reconnecting…`,
           away.cause === "browser"
-            ? "The web browser is starting again."
-            : "The stream paused. Reconnecting.",
+            ? t`The web browser is starting again.`
+            : t`The stream paused. Reconnecting.`,
           "stop",
         );
   if (status === "listing")
-    return hud("checking", "Checking…", "Looking for your computer.", "start", false);
+    return hud("checking", t`Checking…`, t`Looking for your computer.`, "start", false);
   if (status === "unknown") {
     if (
       viewer &&
@@ -128,52 +128,52 @@ export function hudFor({
       !cell.replacementPending &&
       (picture === "live" || picture === "held" || picture === "suspended")
     )
-      return hud("reconnecting", "Reconnecting…", "Checking the computer connection.", "retry");
+      return hud("reconnecting", t`Reconnecting…`, t`Checking the computer connection.`, "retry");
     return hud(
       "unavailable",
-      "Unavailable",
-      "localDot can't tell whether your computer is running.",
+      t`Unavailable`,
+      t`localDot can't tell whether your computer is running.`,
       "retry",
     );
   }
   // A list check on a known computer keeps showing it, its controls held until the answer.
   if (pending === "list" && !cell)
-    return hud("checking", "Checking…", "Looking for your computer.", "start");
+    return hud("checking", t`Checking…`, t`Looking for your computer.`, "start");
   if (pending === "list" && cell?.paused)
-    return hud("frozen", "Paused", "Checking your paused computer.", "resume", false);
+    return hud("frozen", t`Paused`, t`Checking your paused computer.`, "resume", false);
   if (!cell) {
     // The create's answer brings the cell id that Stop needs.
-    if (pending === "create") return hud("starting", "Starting…", STARTING, "stop", false);
-    return hud("none", "No computer", "Turn on your computer to see it here.", "start");
+    if (pending === "create") return hud("starting", t`Starting…`, STARTING, "stop", false);
+    return hud("none", t`No computer`, t`Turn on your computer to see it here.`, "start");
   }
   if (cell.fenced)
     return hud(
       "unavailable",
-      "Unavailable",
-      "Your computer needs a fresh start. Your apps, settings and files are kept.",
+      t`Unavailable`,
+      t`Your computer needs a fresh start. Your apps, settings and files are kept.`,
       "retry",
       false,
     );
   if (cell.replacementPending)
     return hud(
       "starting",
-      "Verifying…",
-      "The fresh computer is held until replacement verification completes.",
+      t`Verifying…`,
+      t`The fresh computer is held until replacement verification completes.`,
       "retry",
       false,
     );
   // The daemon stops the computer, moves it onto the new build and starts it: one step to the user.
   if (cell.updating && (cell.state === "stopping" || cell.state === "starting"))
-    return hud("starting", "Updating…", UPDATING, "stop", false);
+    return hud("starting", t`Updating…`, UPDATING, "stop", false);
   // Start still retries the update, but the curtain offers Start fresh as the way back.
-  if (cell.needsFreshStart) return hud("failed", "Failed", NEEDS_FRESH_START, "start");
+  if (cell.needsFreshStart) return hud("failed", t`Failed`, NEEDS_FRESH_START, "start");
   switch (cell.state) {
     case "starting": {
       if (cell.paused)
         return hud(
           "frozen",
-          "Paused",
-          "Your computer is paused while its connection recovers. Shut it down for a fresh start.",
+          t`Paused`,
+          t`Your computer is paused while its connection recovers. Shut it down for a fresh start.`,
           "stop",
         );
       const restart = cell.error ? RESTART_NOTE.exec(cell.error) : null;
@@ -181,26 +181,28 @@ export function hudFor({
         const memory = outOfMemory(cell.error);
         return hud(
           "restarting",
-          "Reconnecting…",
+          t`Reconnecting…`,
           memory
-            ? `Your computer ran out of memory. Restarting it (attempt ${restart[1]} of ${restart[2]}).${memory.advice ? ` ${memory.advice}` : ""}`
-            : `Your computer stopped unexpectedly. Restarting it (attempt ${restart[1]} of ${restart[2]}).`,
+            ? memory.advice
+              ? t`Your computer ran out of memory. Restarting it (attempt ${restart[1] ?? ""} of ${restart[2] ?? ""}). ${memory.advice}`
+              : t`Your computer ran out of memory. Restarting it (attempt ${restart[1] ?? ""} of ${restart[2] ?? ""}).`
+            : t`Your computer stopped unexpectedly. Restarting it (attempt ${restart[1] ?? ""} of ${restart[2] ?? ""}).`,
           "stop",
         );
       }
       // Readiness runs outside the daemon's queue, so a Stop is accepted while starting.
-      return hud("starting", "Starting…", STARTING, "stop");
+      return hud("starting", t`Starting…`, STARTING, "stop");
     }
     case "stopping":
-      return hud("stopping", "Stopping…", "Stopping your computer.", "start", false);
+      return hud("stopping", t`Stopping…`, t`Stopping your computer.`, "start", false);
     case "stopped":
     case "removed":
-      return hud("stopped", "Stopped", "Your computer is off.", "start");
+      return hud("stopped", t`Stopped`, t`Your computer is off.`, "start");
     case "failed":
       // A stop that failed left the containers up: Stop is what finishes it.
       return hud(
         "failed",
-        "Failed",
+        t`Failed`,
         describeCellError(cell.error),
         cell.error?.startsWith(STOP_FAILED) ? "stop" : "start",
       );
@@ -210,29 +212,29 @@ export function hudFor({
   if (cell.paused) {
     return hud(
       "frozen",
-      "Paused",
-      "Your computer is paused. Resume it to carry on, or shut it down for a fresh start.",
+      t`Paused`,
+      t`Your computer is paused. Resume it to carry on, or shut it down for a fresh start.`,
       "resume",
     );
   }
   if (picture === "suspended")
     return hud(
       "suspended",
-      "Ready",
-      "Your computer is running. The screen resumes when you return.",
+      t`Ready`,
+      t`Your computer is running. The screen resumes when you return.`,
       "stop",
     );
   if (viewer && picture === "none")
-    return hud("connecting", "Connecting…", "Waiting for this screen's first picture.", "stop");
+    return hud("connecting", t`Connecting…`, t`Waiting for this screen's first picture.`, "stop");
   // A stage that has shown the computer keeps its picture through a reconnect.
   const connection = cell.stream.connection;
   if (connection === "stalled" || connection === "disconnected" || picture === "held")
-    return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");
+    return hud("reconnecting", t`Reconnecting…`, t`The stream paused. Reconnecting.`, "stop");
   if (connection === "live" || picture === "live")
-    return hud("live", "Ready", "Your computer is live.", "stop");
+    return hud("live", t`Ready`, t`Your computer is live.`, "stop");
   return streamed
-    ? hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop")
-    : hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
+    ? hud("reconnecting", t`Reconnecting…`, t`The stream paused. Reconnecting.`, "stop")
+    : hud("connecting", t`Connecting…`, t`Connecting to the stream.`, "stop");
 }
 
 const SCREEN_PHASES = new Set<ComputerPhase>(["live", "connecting", "reconnecting", "suspended"]);
@@ -254,8 +256,8 @@ export function withScreenHud(parent: HudState, screen?: HudState): HudState {
   if (SCREEN_PHASES.has(screen.phase)) return { ...screen, action: parent.action };
   return {
     phase: "connecting",
-    label: "Connecting…",
-    caption: "Waiting for this screen's first picture.",
+    label: t`Connecting…`,
+    caption: t`Waiting for this screen's first picture.`,
     action: parent.action,
     live: false,
   };
@@ -277,33 +279,37 @@ const DOCKER_ERROR = /^docker (unreachable|\d+) on /;
 // The orchestrator's failure notes (apps/daemon/src/cells/orchestrator.ts) in plain words. They can
 // carry Docker's own text, which stays out of the caption.
 function describeCellError(error: string | undefined): string {
-  if (!error) return "Your computer could not start.";
+  if (!error) return t`Your computer could not start.`;
   const memory = outOfMemory(error);
-  if (memory) return `Your computer ran out of memory. ${memory.advice ?? "Turn it on again."}`;
+  if (memory)
+    return memory.advice
+      ? t`Your computer ran out of memory. ${memory.advice}`
+      : t`Your computer ran out of memory. Turn it on again.`;
   if (error.startsWith(UPDATE_UNFINISHED))
-    return "The update didn't finish. Turn on your computer to finish it.";
+    return t`The update didn't finish. Turn on your computer to finish it.`;
   if (error.startsWith(UPDATE_RECORDS_UNREADABLE))
-    return "localDot can't read its update records. Restart localDot, then turn on your computer.";
+    return t`localDot can't read its update records. Restart localDot, then turn on your computer.`;
   if (error.startsWith(STOP_FAILED)) {
     return DOCKER_ERROR.test(error.slice(STOP_FAILED.length))
-      ? `Your computer didn't stop: ${DOCKER_DOWN}, then stop it again.`
-      : "Your computer didn't stop. Stop it again.";
+      ? t`Your computer didn't stop: Docker isn't answering. Check that Docker Desktop is running, then stop it again.`
+      : t`Your computer didn't stop. Stop it again.`;
   }
   if (/; gave up after \d+ restarts$/.test(error)) {
-    return "Your computer kept stopping unexpectedly. Turn it on again when you're ready.";
+    return t`Your computer kept stopping unexpectedly. Turn it on again when you're ready.`;
   }
   if (error.startsWith("not ready after ")) {
-    return "Your computer didn't finish starting. Turn it on again.";
+    return t`Your computer didn't finish starting. Turn it on again.`;
   }
   if (error.endsWith("removed outside localDot")) {
-    return "Your computer's containers were removed outside localDot.";
+    return t`Your computer's containers were removed outside localDot.`;
   }
-  if (DOCKER_ERROR.test(error)) return `${DOCKER_DOWN}, then turn on your computer again.`;
+  if (DOCKER_ERROR.test(error))
+    return t`Docker isn't answering. Check that Docker Desktop is running, then turn on your computer again.`;
   if (/container exited with \d+/.test(error)) {
-    return "Your computer stopped unexpectedly. Turn it on again.";
+    return t`Your computer stopped unexpectedly. Turn it on again.`;
   }
   if (error.startsWith("background check stopped")) {
-    return "localDot lost track of your computer. Turn it on again.";
+    return t`localDot lost track of your computer. Turn it on again.`;
   }
-  return "Your computer could not start.";
+  return t`Your computer could not start.`;
 }

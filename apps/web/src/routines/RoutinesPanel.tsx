@@ -1,6 +1,7 @@
 import type { Routine } from "@localdot/protocol";
 import { memo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Group } from "../ui/Group.tsx";
@@ -46,11 +47,11 @@ export const RoutinesPanel = memo(function RoutinesPanel({
           {routines.reply === undefined ? (
             routines.failed ? (
               <EmptyState
-                title="Routines can't be read right now"
+                title={t`Routines can't be read right now`}
                 icon="circle-alert"
                 actions={
                   <Button size="sm" onClick={routines.reload}>
-                    Try again
+                    {t`Try again`}
                   </Button>
                 }
               />
@@ -70,36 +71,35 @@ export const RoutinesPanel = memo(function RoutinesPanel({
             )
           ) : list.length === 0 ? (
             <EmptyState
-              title="Nothing runs on its own yet"
+              title={t`Nothing runs on its own yet`}
               icon="repeat"
               actions={
                 <Button icon="plus" onClick={(event) => onNew(event.currentTarget)}>
-                  New routine
+                  {t`New routine`}
                 </Button>
               }
             >
-              Tell dot something like "Every weekday at 9, check my inbox and tell me what needs a
-              reply". It shows you the routine to save. Or set one up here.
+              {t`Tell dot something like "Every weekday at 9, check my inbox and tell me what needs a reply". It shows you the routine to save. Or set one up here.`}
             </EmptyState>
           ) : (
             <>
               <div className="routines-head">
                 <p className="routines-count">
                   {count(list.length, "routine", "routines")}
-                  {active < list.length && ` · ${active} on`}
+                  {active < list.length && ` · ${t`${active} on`}`}
                 </p>
                 <Button size="sm" icon="plus" onClick={(event) => onNew(event.currentTarget)}>
-                  New routine
+                  {t`New routine`}
                 </Button>
               </div>
               {login !== undefined && login !== "unavailable" && (
                 <Group>
                   <Switch
                     className="ui-group-row"
-                    label="Start localDot at login"
-                    description="Routines run only while it's running"
+                    label={t`Start localDot at login`}
+                    description={t`Routines run only while it's running`}
                     checked={login === "on"}
-                    disabledReason={routines.busy ? "Saving…" : undefined}
+                    disabledReason={routines.busy ? t`Saving…` : undefined}
                     onCheckedChange={(on) => void routines.act((api) => api.setStartAtLogin(on))}
                   />
                 </Group>
@@ -161,26 +161,26 @@ function RoutineRow({
             ) : last ? (
               <StatusGlyph state={outcomeGlyph(last.outcome)} label={OUTCOME_WORDS[last.outcome]} />
             ) : (
-              <StatusGlyph state="todo" label="Not run yet" />
+              <StatusGlyph state="todo" label={t`Not run yet`} />
             )}
             <span>
               {routine.keepAsked
-                ? "Keep running it? Open to answer"
+                ? t`Keep running it? Open to answer`
                 : `${routine.summary.split(" · ")[0]} · ${rowState(routine, now)}`}
             </span>
           </>
         }
         actions={
-          <RowMenu ref={more} label={`More for ${routine.name}`} size={compact ? 44 : 28}>
+          <RowMenu ref={more} label={t`More for ${routine.name}`} size={compact ? 44 : 28}>
             <MenuItem
               icon="play"
-              disabledReason={runnable ? undefined : "Save it first"}
+              disabledReason={runnable ? undefined : t`Save it first`}
               onSelect={() => void routines.act((api) => api.runNow(routine.id))}
             >
-              Run now
+              {t`Run now`}
             </MenuItem>
             <MenuItem icon="file-text" onSelect={() => onOpen(routine)}>
-              Details
+              {t`Details`}
             </MenuItem>
             {(routine.state === "active" || routine.state === "paused") && (
               <MenuItem
@@ -194,12 +194,12 @@ function RoutineRow({
                   )
                 }
               >
-                {on ? "Pause" : "Turn back on"}
+                {on ? t`Pause` : t`Turn back on`}
               </MenuItem>
             )}
             <MenuSeparator />
             <MenuItem icon="trash" onSelect={() => setDeleting(true)}>
-              Delete…
+              {t`Delete…`}
             </MenuItem>
           </RowMenu>
         }

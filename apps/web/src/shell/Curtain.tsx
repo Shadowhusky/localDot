@@ -9,6 +9,7 @@ import {
 } from "../cells/operation-clock.ts";
 import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
+import { t, tr } from "../i18n/index.ts";
 import type { HudAction } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
@@ -82,10 +83,10 @@ const STARTING = new Set<ComputerPhase>(["starting", "connecting"]);
 const ATTEMPT = /attempt (\d+) of (\d+)/;
 
 const STEP_WORDS: Partial<Record<ComputerOperationStep, string>> = {
-  network: "Preparing the network…",
-  desktop: "Starting the desktop…",
-  ready: "Waiting for the desktop…",
-  screen: "Connecting the screen…",
+  network: tr("Preparing the network…"),
+  desktop: tr("Starting the desktop…"),
+  ready: tr("Waiting for the desktop…"),
+  screen: tr("Connecting the screen…"),
 };
 
 // The stage while there is no picture (design-v2 §11 A, B): dot asleep in a pool of light over one
@@ -123,33 +124,33 @@ export function Curtain({
     ? {
         title:
           runtimeProblem === "docker"
-            ? "Docker isn't available"
+            ? t`Docker isn't available`
             : runtimeProblem === "recovering"
-              ? "Restoring your computer"
-              : "Startup needs attention",
+              ? t`Restoring your computer`
+              : t`Startup needs attention`,
         sub:
           runtimeProblem === "docker"
-            ? "Open Docker on the Mac running localDot. We'll reconnect when it's ready. Your files are kept."
+            ? t`Open Docker on the Mac running localDot. We'll reconnect when it's ready. Your files are kept.`
             : runtimeProblem === "recovering"
-              ? "Docker is ready. Checking your existing computer and connections."
-              : "Restart localDot to retry recovery. Your files are retained.",
+              ? t`Docker is ready. Checking your existing computer and connections.`
+              : t`Restart localDot to retry recovery. Your files are retained.`,
         progress: false,
-        button: { label: "Check again" },
+        button: { label: t`Check again` },
       }
     : fresh
       ? freshStartCopy(fresh)
       : recovering
         ? {
-            title: replace.busy ? "Replacing your computer" : "Your computer needs a fresh start",
+            title: replace.busy ? t`Replacing your computer` : t`Your computer needs a fresh start`,
             sub:
               replace.note ??
               (replace.busy
-                ? "Saving the old computer. Your files are kept."
-                : "An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files."),
+                ? t`Saving the old computer. Your files are kept.`
+                : t`An earlier step couldn't be confirmed. Recovery preserves your installed apps, settings and files.`),
             clock: replace.busy,
             progress: replace.busy,
             kind: "first-start",
-            button: { label: "Replace computer" },
+            button: { label: t`Replace computer` },
           }
         : noPicture
           ? noPictureCopy(noPicture)
@@ -179,11 +180,11 @@ export function Curtain({
     <section
       className="curtain"
       data-dot={showDot ? "" : undefined}
-      aria-label={copy ? copy.title : "Your computer"}
+      aria-label={copy ? copy.title : t`Your computer`}
     >
       <div className="curtain-col" data-checking={(!copy && !onReload) || undefined}>
         {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
-        {!copy && <VisuallyHidden role="status">Loading current state</VisuallyHidden>}
+        {!copy && <VisuallyHidden role="status">{t`Loading current state`}</VisuallyHidden>}
         {copy ? (
           <h2 className="curtain-title">{copy.title}</h2>
         ) : (
@@ -201,7 +202,7 @@ export function Curtain({
           {(copy?.steps && step && STEP_WORDS[step]) ||
             copy?.sub ||
             (onReload
-              ? "Still loading your current task. Check your connection or try again."
+              ? t`Still loading your current task. Check your connection or try again.`
               : "\u00a0")}
         </p>
         <div
@@ -216,7 +217,7 @@ export function Curtain({
             now={now}
             done={ready}
           />
-          {!copy && onReload && <Button onClick={onReload}>Try again</Button>}
+          {!copy && onReload && <Button onClick={onReload}>{t`Try again`}</Button>}
           {fresh ? (
             <FreshStartButton
               variant="primary"
@@ -236,7 +237,7 @@ export function Curtain({
                 icon={copy.button.icon}
                 className="curtain-button"
                 busy={recovering && replace.busy}
-                disabledReason={enabled ? undefined : "Wait a moment"}
+                disabledReason={enabled ? undefined : t`Wait a moment`}
                 aria-hidden={copy?.progress || undefined}
                 tabIndex={copy?.progress ? -1 : undefined}
                 onClick={
@@ -251,7 +252,7 @@ export function Curtain({
                           : (anyway ?? onAction)
                 }
               >
-                {anyway ? "Start anyway" : copy.button.label}
+                {anyway ? t`Start anyway` : copy.button.label}
               </Button>
             )
           )}
@@ -276,14 +277,14 @@ interface Copy {
 function freshStartCopy({ busy, note }: FreshStartAction): Copy {
   return busy
     ? {
-        title: "Starting fresh",
-        sub: "Setting up a clean computer. Your sign-ins stay.",
+        title: t`Starting fresh`,
+        sub: t`Setting up a clean computer. Your sign-ins stay.`,
         clock: true,
         progress: true,
         kind: "first-start",
       }
     : {
-        title: "Your computer needs a fresh start",
+        title: t`Your computer needs a fresh start`,
         sub: note ?? NEEDS_FRESH_START,
         progress: false,
       };
@@ -292,16 +293,16 @@ function freshStartCopy({ busy, note }: FreshStartAction): Copy {
 function noPictureCopy({ browser }: ScreenStuck): Copy {
   return browser
     ? {
-        title: "The web browser isn't ready",
-        sub: "Your computer is running, and its web browser hasn't come up yet.",
+        title: t`The web browser isn't ready`,
+        sub: t`Your computer is running, and its web browser hasn't come up yet.`,
         progress: false,
-        button: { label: "Show the desktop" },
+        button: { label: t`Show the desktop` },
       }
     : {
-        title: "Can't show your screen yet",
-        sub: "Your computer is running, and localDot keeps trying. You can also try again now.",
+        title: t`Can't show your screen yet`,
+        sub: t`Your computer is running, and localDot keeps trying. You can also try again now.`,
         progress: false,
-        button: { label: "Try again" },
+        button: { label: t`Try again` },
       };
 }
 
@@ -330,12 +331,16 @@ function curtainCopy(
     | "action"
   >,
 ): Copy | null {
-  const turnOn = { label: "Turn on", icon: "power" as const };
+  const turnOn = { label: t`Turn on`, icon: "power" as const };
   if (phase === "checking") return null;
   if (updating && (STARTING.has(phase) || phase === "stopping"))
     return {
-      title: "Updating your computer",
-      sub: updateNote ?? `${updateLine ? `${updateLine}. ` : ""}Your files and sign-ins stay.`,
+      title: t`Updating your computer`,
+      sub:
+        updateNote ??
+        (updateLine
+          ? t`${updateLine}. Your files and sign-ins stay.`
+          : t`Your files and sign-ins stay.`),
       clock: true,
       progress: true,
       kind: "update",
@@ -344,8 +349,10 @@ function curtainCopy(
   if (phase === "restarting") {
     const attempt = ATTEMPT.exec(caption);
     return {
-      title: "Restarting your computer",
-      sub: attempt ? `Attempt ${attempt[1]} of ${attempt[2]}` : "It stopped unexpectedly.",
+      title: t`Restarting your computer`,
+      sub: attempt
+        ? t`Attempt ${attempt[1] ?? ""} of ${attempt[2] ?? ""}`
+        : t`It stopped unexpectedly.`,
       clock: true,
       progress: true,
       kind: "restart",
@@ -354,8 +361,8 @@ function curtainCopy(
   }
   if (phase === "connecting")
     return {
-      title: "Connecting your screen",
-      sub: "Your computer is ready. Waiting for its picture…",
+      title: t`Connecting your screen`,
+      sub: t`Your computer is ready. Waiting for its picture…`,
       clock: true,
       progress: true,
       kind: first ? "first-start" : "start",
@@ -363,8 +370,8 @@ function curtainCopy(
     };
   if (waking || STARTING.has(phase))
     return {
-      title: "Starting your computer",
-      sub: "The first start takes about a minute.",
+      title: t`Starting your computer`,
+      sub: t`The first start takes about a minute.`,
       clock: true,
       progress: true,
       kind: first ? "first-start" : "start",
@@ -373,50 +380,50 @@ function curtainCopy(
     };
   if (phase === "stopping")
     return {
-      title: "Shutting down your computer",
-      sub: "Your files are kept.",
+      title: t`Shutting down your computer`,
+      sub: t`Your files are kept.`,
       progress: true,
       kind: "stop",
       button: turnOn,
     };
   if (updateFailure && (phase === "failed" || phase === "stopped"))
     return {
-      title: "Your computer wasn't updated",
+      title: t`Your computer wasn't updated`,
       sub: updateFailure,
       progress: false,
-      button: phase === "failed" ? { label: "Start again" } : turnOn,
+      button: phase === "failed" ? { label: t`Start again` } : turnOn,
     };
   if (phase === "failed")
     return action?.kind === "stop"
       ? {
-          title: "Your computer didn't shut down",
+          title: t`Your computer didn't shut down`,
           sub: caption,
           progress: false,
-          button: { label: "Shut down" },
+          button: { label: t`Shut down` },
         }
       : {
-          title: "Couldn't start your computer",
+          title: t`Couldn't start your computer`,
           sub: caption,
           progress: false,
-          button: { label: "Start again" },
+          button: { label: t`Start again` },
         };
   if (phase === "unavailable")
     return {
-      title: "Your computer isn't available",
+      title: t`Your computer isn't available`,
       sub: caption,
       progress: false,
-      button: action?.enabled ? { label: "Try again" } : undefined,
+      button: action?.enabled ? { label: t`Try again` } : undefined,
     };
   // Presence can retain this component during a transition. Only confirmed absence/off
   // states may claim the computer is off; live/reconnecting/suspended never do.
   if (phase !== "stopped" && phase !== "none") return null;
   return {
-    title: "Your computer is off",
+    title: t`Your computer is off`,
     sub:
       notice ||
       (first
-        ? "Turn it on to start your first task."
-        : "Your files are kept. Turn it on to pick up where you left off."),
+        ? t`Turn it on to start your first task.`
+        : t`Your files are kept. Turn it on to pick up where you left off.`),
     progress: false,
     button: turnOn,
   };

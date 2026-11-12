@@ -1,5 +1,6 @@
 import type { ConnectorView } from "@localdot/protocol";
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   cancelSignIn,
@@ -68,7 +69,7 @@ export function useAppConnect({
       } else if (waited.current) {
         waited.current = false;
         setWaiting(undefined);
-        setProblem(view.problem ?? "It didn't finish connecting. Try again.");
+        setProblem(view.problem ?? t`It didn't finish connecting. Try again.`);
         gaveUp.current?.();
       }
     };
@@ -90,7 +91,7 @@ export function useAppConnect({
         setWaiting({ remote: started.remote, ...(started.url ? { page: started.url } : {}) });
     } catch (error) {
       gaveUp.current?.();
-      if (alive.current) setProblem(problemOf(error, "Couldn't open the sign-in. Try again."));
+      if (alive.current) setProblem(problemOf(error, t`Couldn't open the sign-in. Try again.`));
     } finally {
       if (alive.current) setStarting(false);
     }

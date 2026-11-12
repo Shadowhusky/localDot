@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
 
 // Whether the line on show runs past the lines the band gives it, measured as it lays out and
@@ -43,7 +44,7 @@ export function useFullLine(text: string, content: ReactNode) {
     title: text,
     role: "button",
     tabIndex: 0,
-    "aria-label": "Show the whole line",
+    "aria-label": t`Show the whole line`,
     ...triggerProps("dialog", opened !== null),
     onClick: open,
     onKeyDown: (event: KeyboardEvent) => {
@@ -83,7 +84,7 @@ function FullLine({
       side="top"
       align="start"
       size="lg"
-      label="The whole line"
+      label={t`The whole line`}
       className="narration-full"
     >
       <p>{children}</p>

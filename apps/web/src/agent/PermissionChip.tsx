@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
@@ -6,21 +7,23 @@ import { triggerProps } from "../ui/Popover.tsx";
 
 const modes = {
   custom: {
-    name: "Custom",
+    name: tr("Custom"),
     icon: "sliders-horizontal",
-    detail: "Follow your permissions in Settings.",
+    detail: tr("Follow your permissions in Settings."),
   },
   auto: {
-    name: "Auto",
+    name: tr("Auto"),
     icon: "shield",
-    detail:
+    detail: tr(
       "Jev approves routine actions, including cleanup inside the computer. You decide when it’s unsure.",
+    ),
   },
   full: {
-    name: "Full access",
+    name: tr("Full access"),
     icon: "bolt",
-    detail:
+    detail: tr(
       "Local work and downloads run without asking. Purchases and online deletes still ask. Purpose check is bypassed.",
+    ),
   },
 } as const;
 
@@ -43,8 +46,8 @@ export function PermissionChip({
         size={28}
         className="composer-permissions"
         data-mode={value}
-        label={`Permission mode: ${modes[value].name}`}
-        disabledReason={busy ? "Saving permissions…" : undefined}
+        label={t`Permission mode: ${modes[value].name}`}
+        disabledReason={busy ? t`Saving permissions…` : undefined}
         {...triggerProps("menu", open)}
         onClick={() => setOpen(true)}
       />
@@ -53,11 +56,11 @@ export function PermissionChip({
         onClose={() => setOpen(false)}
         anchor={anchor}
         side="top"
-        label="Permission mode"
+        label={t`Permission mode`}
         className="permission-menu"
       >
         <p className="permission-menu-heading" role="none">
-          Permissions
+          {t`Permissions`}
         </p>
         {(Object.keys(modes) as (keyof typeof modes)[]).map((mode) => (
           <MenuItem

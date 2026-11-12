@@ -138,6 +138,11 @@ const declined = (what: string) =>
 export const REQUEST_FIX_DESCRIPTION =
   "For something only the user can fix inside localDot, by kind: keys_locked (HTTP 423 vault-locked), key (a saved key refused), app (a connected app's sign-in ended), computer (off or paused) or runtime (Docker not running). localDot checks it is so, then shows the user its own card in the conversation, in its own words: nothing you write appears on it, and any secret goes straight to localDot's key service. This waits until it is fixed; then retry what failed. If the user says not now, carry on without it or finish and say what is left. Never tell the user to go to Settings or Keys, ask them to confirm or tap Done, or ask for a passphrase: this replaces all of that. For a key that doesn't exist yet use credentials action request, and for an app not yet connected credentials action connect.";
 
+// Handing the computer over is for what only the user's own hands can do, never a sign-in dot can
+// finish itself.
+export const TAKEOVER_LAST =
+  "Before handing over a sign-in, finish it yourself where you can: ask_user with purpose sign_in fills a saved login privately, and a code the user can read out comes back through ask_user with purpose verification. Hand over only what needs the user's own hands, such as scanning a QR code, approving on their phone or a CAPTCHA.";
+
 // Said with a page read on a sign-in page that turns away a browser under agent control.
 export const OWN_BROWSER_SIGN_IN_NOTE =
   "This is Google's sign-in page, which turns away a browser under your control. Don't type into it: request a login takeover now. It opens without agent control, the user signs in there, and the sign-in stays in this browser.";

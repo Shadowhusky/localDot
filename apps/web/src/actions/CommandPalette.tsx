@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { isApple, Kbd } from "../ui/Kbd.tsx";
@@ -181,10 +182,10 @@ function PaletteLayer({
     if (!query.trim()) {
       const byId = new Map(actions.map((action) => [action.id, action]));
       const picked = [
-        ...recent.flatMap((id) => (byId.get(id) ? [{ id, section: "Recent" }] : [])),
+        ...recent.flatMap((id) => (byId.get(id) ? [{ id, section: t`Recent` }] : [])),
         ...suggested
           .filter((id) => !recent.includes(id) && byId.has(id))
-          .map((id) => ({ id, section: "Suggested" })),
+          .map((id) => ({ id, section: t`Suggested` })),
       ];
       const own = picked.map(({ id }) => actionRow(byId.get(id) as Action));
       return {
@@ -246,7 +247,7 @@ function PaletteLayer({
       (said) => {
         if (typeof said === "string" && said) showToast({ title: said, tone: "danger" });
       },
-      () => showToast({ title: "That didn't work. Try again.", tone: "danger" }),
+      () => showToast({ title: t`That didn't work. Try again.`, tone: "danger" }),
     );
   };
   const key = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -271,7 +272,7 @@ function PaletteLayer({
     ...group,
     rows: group.rows.filter((row) => row.label.toLowerCase().includes(shortcutQuery)),
   })).filter((group) => group.rows.length);
-  const title = page === "shortcuts" ? "Keyboard shortcuts" : (live?.title ?? "Search actions");
+  const title = page === "shortcuts" ? t`Keyboard shortcuts` : (live?.title ?? t`Search actions`);
 
   return (
     <LayerPortal kind="dialog" closing={closing} rootRef={root}>
@@ -291,7 +292,7 @@ function PaletteLayer({
         {page && (
           <div className="command-palette-page">
             <Button variant="quiet" size="sm" icon="chevron-left" onClick={back}>
-              All actions
+              {t`All actions`}
             </Button>
             <span aria-hidden="true">{title}</span>
           </div>
@@ -304,9 +305,9 @@ function PaletteLayer({
             prefix={<Icon name="search" size={16} />}
             placeholder={
               page === "shortcuts"
-                ? "Search shortcuts"
+                ? t`Search shortcuts`
                 : (live?.placeholder ??
-                  (live ? `Search ${live.title.toLowerCase()}` : "Search actions"))
+                  (live ? t`Search ${live.title.toLowerCase()}` : t`Search actions`))
             }
             aria-label={title}
             role={page === "shortcuts" ? undefined : "combobox"}
@@ -358,10 +359,10 @@ function PaletteLayer({
         ) : (
           <p className="command-palette-empty" role="status">
             {live && typeof live.choices === "function" && !loaded.has(live.id)
-              ? "Loading…"
+              ? t`Loading…`
               : live?.input && !query.trim()
                 ? (live.description ?? "")
-                : "Nothing matches."}
+                : t`Nothing matches.`}
           </p>
         )}
         {problem && (
@@ -374,15 +375,15 @@ function PaletteLayer({
             <>
               <span>
                 <Kbd keys={["ArrowUp"]} />
-                <Kbd keys={["ArrowDown"]} /> choose
+                <Kbd keys={["ArrowDown"]} /> {t`choose`}
               </span>
               <span>
-                <Kbd keys={["Enter"]} /> run
+                <Kbd keys={["Enter"]} /> {t`run`}
               </span>
             </>
           )}
           <span>
-            <Kbd keys={["Escape"]} /> {page ? "back" : "close"}
+            <Kbd keys={["Escape"]} /> {page ? t`back` : t`close`}
           </span>
         </div>
       </section>

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 import type { ToastOptions } from "../ui/toasts.ts";
 import type { StopStatus } from "./useTaskControls.ts";
@@ -8,14 +9,18 @@ const PAUSE_FAILED = "pause: could not confirm completion";
 
 // The kill switch's cleanup notes (StopOutcome.errors), in plain words.
 const NOTES: Record<string, string> = {
-  "keyd: could not confirm completion": "Couldn't confirm that dot's use of your keys was cut off.",
-  [PAUSE_FAILED]: "Your computer didn't pause, so it was shut down instead.",
-  "keyd close: could not confirm completion": "Couldn't confirm that your keys were locked away.",
-  "stop: could not confirm completion": "Couldn't confirm that your computer shut down.",
+  "keyd: could not confirm completion": tr(
+    "Couldn't confirm that dot's use of your keys was cut off.",
+  ),
+  [PAUSE_FAILED]: tr("Your computer didn't pause, so it was shut down instead."),
+  "keyd close: could not confirm completion": tr(
+    "Couldn't confirm that your keys were locked away.",
+  ),
+  "stop: could not confirm completion": tr("Couldn't confirm that your computer shut down."),
 };
 
 export function cleanupNote(error: string): string {
-  return NOTES[error] ?? "Part of the cleanup couldn't be confirmed.";
+  return NOTES[error] ?? t`Part of the cleanup couldn't be confirmed.`;
 }
 
 // What a Stop's outcome says as it drops from the island. While it is on its way the island's own
@@ -39,21 +44,21 @@ export function stopNotice(
     case "sending":
       return null;
     case "paused":
-      return { id: TOAST, icon: "stop", title: "Stopped. Your computer is paused.", ...notes };
+      return { id: TOAST, icon: "stop", title: t`Stopped. Your computer is paused.`, ...notes };
     case "stopped":
       return {
         id: TOAST,
         icon: "stop",
         title: status.errors.includes(PAUSE_FAILED)
-          ? "Stopped. Your computer couldn't pause, so it's off."
-          : "Stopped. Your computer is off.",
+          ? t`Stopped. Your computer couldn't pause, so it's off.`
+          : t`Stopped. Your computer is off.`,
         ...notes,
       };
     case "unconfirmed":
       return {
         id: TOAST,
         tone: "danger",
-        title: "Couldn't confirm that dot stopped.",
+        title: t`Couldn't confirm that dot stopped.`,
         urgency: "assertive",
         ...notes,
       };
@@ -64,8 +69,8 @@ export function stopNotice(
 export function stoppedOff(status: StopStatus): string | null {
   if (status.phase !== "stopped") return null;
   return status.errors.includes(PAUSE_FAILED)
-    ? "dot stopped. Your computer couldn't pause, so it's off. Your files are kept."
-    : "dot stopped, and your computer is off. Your files are kept.";
+    ? t`dot stopped. Your computer couldn't pause, so it's off. Your files are kept.`
+    : t`dot stopped, and your computer is off. Your files are kept.`;
 }
 
 export function useStopToast(status: StopStatus, recheck: () => void, curtain = false) {
@@ -82,7 +87,7 @@ export function useStopToast(status: StopStatus, recheck: () => void, curtain = 
     showToast({
       ...notice,
       ...(status.phase === "unconfirmed"
-        ? { action: { label: "Check again", onAction: () => latest.current() } }
+        ? { action: { label: t`Check again`, onAction: () => latest.current() } }
         : {}),
     });
   }, [key]);

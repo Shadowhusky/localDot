@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { afterMotion } from "../ui/finished.ts";
@@ -39,7 +40,7 @@ interface Row {
 function added(at: string): string | undefined {
   const time = Date.parse(at);
   if (!Number.isFinite(time)) return undefined;
-  return `Added ${new Date(time).toLocaleDateString([], { day: "numeric", month: "short" })}`;
+  return t`Added ${new Date(time).toLocaleDateString([], { day: "numeric", month: "short" })}`;
 }
 
 function initial(record: KeyRecord): string {
@@ -120,8 +121,8 @@ export function KeyList({
   if (rows.length === 0)
     return (
       <Group>
-        <EmptyState icon="key-round" title="No keys yet">
-          Save a model key, an API key or a general secret.
+        <EmptyState icon="key-round" title={t`No keys yet`}>
+          {t`Save a model key, an API key or a general secret.`}
         </EmptyState>
       </Group>
     );
@@ -131,19 +132,23 @@ export function KeyList({
         <ul
           ref={list}
           className="keys-list"
-          aria-label="Saved keys"
+          aria-label={t`Saved keys`}
           style={{ "--_armed": `${ARMED_MS}ms` } as CSSProperties}
         >
           {rows.map(({ key: k, leaving }) => {
             const label =
-              pending === k.id ? "Removing…" : armed === k.id ? "Confirm remove" : "Remove";
+              pending === k.id
+                ? t`Removing… ${k.id}`
+                : armed === k.id
+                  ? t`Confirm remove ${k.id}`
+                  : t`Remove ${k.id}`;
             const count = uses?.[k.id] ?? 0;
             const facts = [
               k.metadata?.service,
               k.metadata?.label ? k.id : undefined,
               ...(k.kind === "http" ? [(k.hosts ?? []).join(", ")] : describeKey(k).split(" · ")),
               k.reenter || k.rebound ? undefined : added(k.createdAt),
-              count > 0 ? `Used ${count}× this task` : undefined,
+              count > 0 ? t`Used ${count}× this task` : undefined,
             ].filter((fact): fact is string => Boolean(fact));
             const stale = k.reenter && !leaving;
             // Changed outside localDot: removing and adding the key again is the only fix.
@@ -174,9 +179,9 @@ export function KeyList({
             const removeReason =
               unavailable ??
               (pending === k.id
-                ? "Removing key"
+                ? t`Removing key`
                 : busy
-                  ? "Wait for the other key change to finish"
+                  ? t`Wait for the other key change to finish`
                   : undefined);
             return (
               <li
@@ -203,7 +208,7 @@ export function KeyList({
                       {(stale || changed) && (
                         <span className="keys-row-reenter">
                           <span className="keys-row-point" aria-hidden="true" />
-                          {changed ? "Changed elsewhere" : "Needs re-entering"}
+                          {changed ? t`Changed elsewhere` : t`Needs re-entering`}
                         </span>
                       )}
                       <span className="keys-row-facts" title={facts.join(" · ")}>
@@ -217,15 +222,15 @@ export function KeyList({
                         <IconButton
                           size={phone ? 44 : 36}
                           icon="compose"
-                          label={`Edit details for ${k.id}`}
-                          disabledReason={unavailable ?? (busy ? "Saving a key" : undefined)}
+                          label={t`Edit details for ${k.id}`}
+                          disabledReason={unavailable ?? (busy ? t`Saving a key` : undefined)}
                           onClick={() => edit(k)}
                         />
                       )}
                       <IconButton
                         size={phone ? 44 : 36}
                         icon={armed === k.id ? "check" : "trash"}
-                        label={`${label} ${k.id}`}
+                        label={label}
                         disabledReason={removeReason}
                         onClick={removeKey}
                         className="keys-remove-icon"
@@ -236,8 +241,7 @@ export function KeyList({
                 >
                   {changed && (
                     <p className="keys-row-fix keys-row-why">
-                      Where this key is sent was changed outside localDot. Remove it, then add it
-                      again.
+                      {t`Where this key is sent was changed outside localDot. Remove it, then add it again.`}
                     </p>
                   )}
                   {stale && !changed && reenter && (
@@ -248,12 +252,12 @@ export function KeyList({
                         icon="key-round"
                         disabledReason={
                           unavailable ??
-                          (busy ? "Wait for the other key change to finish" : undefined)
+                          (busy ? t`Wait for the other key change to finish` : undefined)
                         }
-                        aria-label={`Re-enter ${k.id}`}
+                        aria-label={t`Re-enter ${k.id}`}
                         onClick={() => reenter(k)}
                       >
-                        Re-enter
+                        {t`Re-enter`}
                       </Button>
                     </div>
                   )}

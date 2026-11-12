@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { signInSite } from "../../../../packages/protocol/src/accounts.ts";
 import { ControlFailure } from "../agent/control-api.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { signInTo } from "./accounts-api.ts";
 
@@ -20,12 +21,12 @@ export interface SignInView {
 export function signInFailure(error: unknown): string {
   const status = error instanceof ControlFailure ? error.status : undefined;
   return status === 409
-    ? "dot is using your computer. Sign in when it's done, or ask dot to open the site."
+    ? t`dot is using your computer. Sign in when it's done, or ask dot to open the site.`
     : status === 400
-      ? "That isn't a site the web browser can open."
+      ? t`That isn't a site the web browser can open.`
       : status === 502 || status === 503
-        ? "The web browser couldn't open. Try again in a moment."
-        : "Couldn't open the site. Try again.";
+        ? t`The web browser couldn't open. Try again in a moment.`
+        : t`Couldn't open the site. Try again.`;
 }
 
 // Opens a site's sign-in page in the web browser with the user in control; `opened` runs once the
@@ -47,13 +48,13 @@ export function useSignIn(
       if (!site) {
         failed(
           typed.trim()
-            ? "The web browser opens public sites only, like google.com."
-            : "Enter a site, like google.com.",
+            ? t`The web browser opens public sites only, like google.com.`
+            : t`Enter a site, like google.com.`,
         );
         return false;
       }
       if (!cellId) {
-        failed("Turn on your computer first.");
+        failed(t`Turn on your computer first.`);
         return false;
       }
       busy.current = true;

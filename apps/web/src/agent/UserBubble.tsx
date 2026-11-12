@@ -2,6 +2,7 @@ import { isComputerPath, viewerKind } from "@localdot/protocol";
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useThumbnail } from "../deliverables/useThumbnail.ts";
 import type { ComputerEntry } from "../deliverables/viewer/scope.tsx";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { HitButton } from "../ui/HitButton.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -36,7 +37,7 @@ function SentFile({
         <Icon name="file" size={12} className="file-chip-icon" />
       )}
       <FileName name={name} />
-      {onOpen && <HitButton className="file-chip-hit" label={`Open ${name}`} onClick={onOpen} />}
+      {onOpen && <HitButton className="file-chip-hit" label={t`Open ${name}`} onClick={onOpen} />}
     </li>
   );
 }
@@ -68,7 +69,7 @@ function SentFiles({ paths, sessionId }: { paths: readonly string[]; sessionId?:
     <ul
       ref={list}
       className="thread-bubble-files"
-      aria-label="Attached files"
+      aria-label={t`Attached files`}
       // A row wider than the bubble scrolls, so the keys can reach it to scroll it.
       tabIndex={scrolls ? 0 : undefined}
     >

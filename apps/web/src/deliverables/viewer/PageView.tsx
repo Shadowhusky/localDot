@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { Icon } from "../../ui/Icon.tsx";
 import { useMediaQuery } from "../../ui/media.ts";
@@ -56,12 +57,12 @@ export function PageView({
           holdsKeys && keys ? (
             <span className="viewer-hint">
               <Icon name="keyboard" size={14} />
-              Click outside the page to use Esc and the arrow keys
+              {t`Click outside the page to use Esc and the arrow keys`}
             </span>
           ) : web ? (
             <span className="viewer-hint">
               <Icon name="globe" size={14} />
-              Pictures from the web are not loaded
+              {t`Pictures from the web are not loaded`}
             </span>
           ) : undefined
         }
@@ -70,7 +71,7 @@ export function PageView({
       </ViewerBar>
       <div className="viewer-stage viewer-web" hidden={shown !== "page"}>
         {url === null ? (
-          <ViewerLoading label="Loading the page" />
+          <ViewerLoading label={t`Loading the page`} />
         ) : (
           <iframe
             ref={frame}
@@ -78,18 +79,18 @@ export function PageView({
             src={url}
             sandbox=""
             referrerPolicy="no-referrer"
-            title={`Page ${name}`}
+            title={t`Page ${name}`}
           />
         )}
       </div>
       {shown === "source" && (
         <div className="viewer-stage viewer-text">
           {source === null ? (
-            <ViewerLoading label="Loading the source" />
+            <ViewerLoading label={t`Loading the source`} />
           ) : text ? (
-            <CodeLines lines={text.lines} name={name} wrap label={`Source of ${name}`} />
+            <CodeLines lines={text.lines} name={name} wrap label={t`Source of ${name}`} />
           ) : (
-            <ViewerMessage name={name} title="Can't show the source" />
+            <ViewerMessage name={name} title={t`Can't show the source`} />
           )}
         </div>
       )}

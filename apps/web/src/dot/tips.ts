@@ -1,3 +1,4 @@
+import { t, tr } from "../i18n/index.ts";
 import type { SettingsSection } from "../settings/sections.ts";
 import { otherView, VIEW_NAMES, type ViewStyle } from "../shell/view-style.ts";
 
@@ -11,24 +12,24 @@ export type DayPart = "morning" | "afternoon" | "evening" | "night";
 // Morning 5–11, afternoon 12–17, evening 18–22, night 23–4.
 export const GREETINGS: Readonly<Record<DayPart, readonly string[]>> = {
   morning: [
-    "Morning. What are we doing today?",
-    "Good morning. I'm up, and so is my computer.",
-    "Morning. Hand me the dull jobs first.",
+    tr("Morning. What are we doing today?"),
+    tr("Good morning. I'm up, and so is my computer."),
+    tr("Morning. Hand me the dull jobs first."),
   ],
   afternoon: [
-    "Afternoon. What needs doing?",
-    "Good afternoon. Anything I can take off your hands?",
-    "Afternoon. Got something tedious for me?",
+    tr("Afternoon. What needs doing?"),
+    tr("Good afternoon. Anything I can take off your hands?"),
+    tr("Afternoon. Got something tedious for me?"),
   ],
   evening: [
-    "Evening. Anything left over from today?",
-    "Good evening. Something quick before you log off?",
-    "Evening. I'll take the boring bits.",
+    tr("Evening. Anything left over from today?"),
+    tr("Good evening. Something quick before you log off?"),
+    tr("Evening. I'll take the boring bits."),
   ],
   night: [
-    "Still up? What do you need?",
-    "Late one. Tell me what to do and get some sleep.",
-    "It's late. I don't get tired, so ask away.",
+    tr("Still up? What do you need?"),
+    tr("Late one. Tell me what to do and get some sleep."),
+    tr("It's late. I don't get tired, so ask away."),
   ],
 };
 
@@ -74,104 +75,109 @@ export interface Tip {
 export const TIPS: readonly Tip[] = [
   {
     id: "take-control",
-    text: "Press the hand to take over. I won't sulk.",
+    text: tr("Press the hand to take over. I won't sulk."),
   },
   {
     id: "routine",
-    text: "Tell me “every weekday at 9…” and I'll draft a routine.",
-    action: { label: "Try it", opens: "routine" },
+    text: tr("Tell me “every weekday at 9…” and I'll draft a routine."),
+    action: { label: tr("Try it"), opens: "routine" },
     used: (s) => (s.routines === undefined ? undefined : s.routines > 0),
   },
   {
     id: "view-style",
     text: (s) =>
       s.view === "chat"
-        ? `Want to see everything at once? Try ${VIEW_NAMES[otherView(s.view)]} view.`
-        : `Prefer texting me? Try ${VIEW_NAMES[otherView(s.view ?? "studio")]} view.`,
-    action: { label: "Try it", opens: "view" },
+        ? t`Want to see everything at once? Try ${VIEW_NAMES[otherView(s.view)]} view.`
+        : t`Prefer texting me? Try ${VIEW_NAMES[otherView(s.view ?? "studio")]} view.`,
+    action: { label: tr("Try it"), opens: "view" },
     shows: (s) => s.view !== undefined && !s.viewsTried,
     used: (s) => s.viewsTried,
   },
   {
     id: "passwords",
-    text: "Passwords I ask for go straight into the page. I never see them.",
+    text: tr("Passwords I ask for go straight into the page. I never see them."),
   },
   {
     id: "full-screen",
-    text: "Double-click my screen, or press F, for full screen.",
+    text: tr("Double-click my screen, or press F, for full screen."),
     shows: (s) => !s.touch,
   },
   {
     id: "replay-export",
-    text: "Replay keeps every task. Trim the good bit and export it.",
-    action: { label: "Open", opens: "replay" },
+    text: tr("Replay keeps every task. Trim the good bit and export it."),
+    action: { label: tr("Open"), opens: "replay" },
     shows: (s) => s.recordings,
     used: (s) => s.exported,
   },
   {
     id: "files",
-    text: "Files I make open right in the chat. No downloading to peek.",
+    text: tr("Files I make open right in the chat. No downloading to peek."),
   },
   {
     id: "stop-key",
-    text: (s) => `${s.apple ? "⌘⇧." : "Ctrl+Shift+."} stops me mid-task. No questions asked.`,
+    text: (s) => t`${s.apple ? "⌘⇧." : "Ctrl+Shift+."} stops me mid-task. No questions asked.`,
     shows: (s) => !s.touch,
   },
   {
     id: "memory",
-    text: "What I remember about you is yours to edit or delete.",
-    action: { label: "Open", opens: "settings", section: "knowledge", finds: "What dot knows" },
+    text: tr("What I remember about you is yours to edit or delete."),
+    action: { label: tr("Open"), opens: "settings", section: "knowledge", finds: "What dot knows" },
   },
   {
     id: "purpose-check",
-    text: "Purpose check keeps what I read from wandering off.",
-    action: { label: "Open", opens: "settings", section: "autonomy", finds: "Purpose check" },
+    text: tr("Purpose check keeps what I read from wandering off."),
+    action: { label: tr("Open"), opens: "settings", section: "autonomy", finds: "Purpose check" },
     used: (s) => s.purposeCheck,
   },
   {
     id: "showcase",
-    text: "Showcase puts me in the video. I'm told I'm photogenic.",
-    action: { label: "Open", opens: "replay" },
+    text: tr("Showcase puts me in the video. I'm told I'm photogenic."),
+    action: { label: tr("Open"), opens: "replay" },
     shows: (s) => s.recordings,
     used: (s) => s.exported,
   },
   {
     id: "slash",
-    text: "Press / anywhere to start typing to me.",
+    text: tr("Press / anywhere to start typing to me."),
     shows: (s) => !s.touch,
   },
   {
     id: "stop-everything",
-    text: "If it all goes sideways, Stop everything halts the lot.",
-    action: { label: "Open", opens: "settings", section: "computer", finds: "Stop everything" },
+    text: tr("If it all goes sideways, Stop everything halts the lot."),
+    action: { label: tr("Open"), opens: "settings", section: "computer", finds: "Stop everything" },
   },
   {
     id: "phone",
-    text: "Put localDot on your tailnet and I'm on your phone too.",
+    text: tr("Put localDot on your tailnet and I'm on your phone too."),
     shows: (s) => !s.touch,
   },
   {
     id: "open-at-login",
-    text: "Turn on Open at login and routines run without you.",
-    action: { label: "Open", opens: "settings", section: "computer", finds: "Open at login" },
+    text: tr("Turn on Open at login and routines run without you."),
+    action: { label: tr("Open"), opens: "settings", section: "computer", finds: "Open at login" },
     shows: (s) => s.openAtLogin === "off",
     used: () => false,
   },
   {
     id: "setup",
-    text: "Want the setup again? Settings has it, step by step.",
-    action: { label: "Open", opens: "settings", section: "models", finds: "Set up step by step" },
+    text: tr("Want the setup again? Settings has it, step by step."),
+    action: {
+      label: tr("Open"),
+      opens: "settings",
+      section: "models",
+      finds: "Set up step by step",
+    },
   },
   {
     id: "start-fresh",
-    text: "Start fresh wipes my computer clean. Sign-ins stay.",
-    action: { label: "Open", opens: "settings", section: "computer", finds: "Start fresh" },
+    text: tr("Start fresh wipes my computer clean. Sign-ins stay."),
+    action: { label: tr("Open"), opens: "settings", section: "computer", finds: "Start fresh" },
     shows: (s) => s.freshStart,
   },
   {
     id: "update",
-    text: "My computer has an update ready. It's one press in Settings.",
-    action: { label: "Open", opens: "settings", section: "computer", finds: "Update" },
+    text: tr("My computer has an update ready. It's one press in Settings."),
+    action: { label: tr("Open"), opens: "settings", section: "computer", finds: "Update" },
     shows: (s) => s.update,
     used: () => false,
   },

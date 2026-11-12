@@ -2,6 +2,7 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: A wide or long excerpt scrolls inside its well, so keyboard users can focus it.
 import { type FileKind, type PreviewReason, viewerKind } from "@localdot/protocol";
 import { type ReactNode, useState } from "react";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { FileCard } from "../ui/Card.tsx";
 import { Progress } from "../ui/Progress.tsx";
@@ -12,10 +13,10 @@ import { MediaPlayer } from "./viewer/MediaView.tsx";
 
 // A file with no preview simply gets its card; these say why one that could have had one hasn't.
 const PROBLEMS: Partial<Record<PreviewReason, string>> = {
-  computer_off: "Turn on your computer to preview this file.",
-  busy: "Your computer is busy. Try again in a moment.",
-  failed: "Couldn't make a preview.",
-  missing: "This version is no longer available.",
+  computer_off: tr("Turn on your computer to preview this file."),
+  busy: tr("Your computer is busy. Try again in a moment."),
+  failed: tr("Couldn't make a preview."),
+  missing: tr("This version is no longer available."),
 };
 const RETRY = new Set<PreviewReason>(["busy", "failed", "computer_off"]);
 
@@ -55,8 +56,8 @@ export function MediaPreview({
   };
   if (failed === "format") return <FileCard {...card} />;
   if (failed === "load" || url === "failed")
-    return <FileCard {...card} problem="Couldn't load this file." onRetry={retry} />;
-  if (url === null) return <Loading label="Loading the player" />;
+    return <FileCard {...card} problem={t`Couldn't load this file.`} onRetry={retry} />;
+  if (url === null) return <Loading label={t`Loading the player`} />;
   return (
     <div className="file-preview-media" data-kind={kind}>
       <MediaPlayer key={attempt} url={url} kind={kind} name={card.name} onFail={setFailed} />
@@ -95,13 +96,13 @@ export function FilePreview({
         <Progress
           label={
             kind === "office" || kind === "pdf"
-              ? "Making a preview on your computer"
-              : "Loading preview"
+              ? t`Making a preview on your computer`
+              : t`Loading preview`
           }
           className="file-preview-progress"
         />
         {(kind === "office" || kind === "pdf") && (
-          <span className="file-preview-caption">Making a preview on your computer…</span>
+          <span className="file-preview-caption">{t`Making a preview on your computer…`}</span>
         )}
       </div>
     );
@@ -118,9 +119,11 @@ export function FilePreview({
   if (state.state === "image")
     return (
       <figure className="file-preview-picture">
-        <img src={state.url} alt={`Preview of ${name}`} draggable={false} />
+        <img src={state.url} alt={t`Preview of ${name}`} draggable={false} />
         {state.madeBy === "computer" && (
-          <figcaption className="file-preview-caption">Preview made on your computer</figcaption>
+          <figcaption className="file-preview-caption">
+            {t`Preview made on your computer`}
+          </figcaption>
         )}
       </figure>
     );
@@ -137,11 +140,11 @@ export function FilePreview({
     );
   if (p.kind === "text")
     return (
-      <section className="file-preview-excerpt" aria-label={`First lines of ${name}`}>
+      <section className="file-preview-excerpt" aria-label={t`First lines of ${name}`}>
         <pre className="file-preview-text" tabIndex={0}>
           {p.lines.join("\n")}
         </pre>
-        {p.truncated && <p className="file-preview-caption">First {p.lines.length} lines</p>}
+        {p.truncated && <p className="file-preview-caption">{t`First ${p.lines.length} lines`}</p>}
       </section>
     );
   const [head, ...rows] = p.rows;
@@ -149,7 +152,7 @@ export function FilePreview({
     <div className="file-preview-excerpt">
       <section
         className="md-table file-preview-table"
-        aria-label={`First rows of ${name}`}
+        aria-label={t`First rows of ${name}`}
         tabIndex={0}
       >
         <table>
@@ -175,7 +178,7 @@ export function FilePreview({
           </tbody>
         </table>
       </section>
-      {p.truncated && <p className="file-preview-caption">First {p.rows.length} rows</p>}
+      {p.truncated && <p className="file-preview-caption">{t`First ${p.rows.length} rows`}</p>}
     </div>
   );
 }

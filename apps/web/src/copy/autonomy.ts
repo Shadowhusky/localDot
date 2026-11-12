@@ -1,5 +1,4 @@
 import {
-  ACTION_CLASS_LABELS,
   type ActionClass,
   type AlwaysOption,
   type AutonomyPolicy,
@@ -7,51 +6,73 @@ import {
   CAREFUL_AUTONOMY,
   EDITABLE_ACTION_CLASSES,
 } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
+import { wordList } from "./format.ts";
 
-// The daemon's hand-off copy names a class the same way.
-export const CLASS_LABELS = ACTION_CLASS_LABELS;
+// As the daemon's hand-off copy names each class (ACTION_CLASS_LABELS), in the language on show.
+export const CLASS_LABELS: Readonly<Record<ActionClass, string>> = {
+  reading: tr("Read and look"),
+  browsing: tr("Browse websites"),
+  computer: tr("Work in its computer"),
+  download_execute: tr("Run downloaded programs"),
+  memory: tr("Save to its memory"),
+  send: tr("Send as you"),
+  post: tr("Post or publish as you"),
+  delete: tr("Delete your online data"),
+  system_settings: tr("Change account settings"),
+  purchase: tr("Buy or pay"),
+  upload: tr("Upload your files"),
+  credentials: tr("Passwords, codes and card details"),
+  unknown: tr("Unclear steps on signed-in sites"),
+  network: tr("Connections beyond websites"),
+};
 
 const CLASS_WORK: Readonly<Record<ActionClass, string>> = {
-  reading: "reading and looking",
-  browsing: "browsing websites",
-  computer: "working in its computer",
-  download_execute: "running downloaded programs",
-  memory: "saving to its memory",
-  send: "sending messages",
-  post: "posting or publishing",
-  delete: "deleting your online data",
-  system_settings: "changing account settings",
-  purchase: "buying or paying",
-  upload: "uploading your files",
-  credentials: "entering passwords, codes and card details",
-  unknown: "unclear steps",
-  network: "connections beyond websites",
+  reading: tr("reading and looking"),
+  browsing: tr("browsing websites"),
+  computer: tr("working in its computer"),
+  download_execute: tr("running downloaded programs"),
+  memory: tr("saving to its memory"),
+  send: tr("sending messages"),
+  post: tr("posting or publishing"),
+  delete: tr("deleting your online data"),
+  system_settings: tr("changing account settings"),
+  purchase: tr("buying or paying"),
+  upload: tr("uploading your files"),
+  credentials: tr("entering passwords, codes and card details"),
+  unknown: tr("unclear steps"),
+  network: tr("connections beyond websites"),
 };
 
 const lower = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 
 // A connection's choice names the destination it opened, and the program when it names one.
 function connectionChoice(option: AlwaysOption): string {
-  return `${option.app ? `${option.app}'s ` : ""}connections to ${option.destination}`;
+  return option.app
+    ? t`${option.app}'s connections to ${option.destination ?? ""}`
+    : t`connections to ${option.destination ?? ""}`;
 }
 
 export function allowedLine(actionClass: ActionClass, option: AlwaysOption): string {
   if (actionClass === "network")
     return option.scope === "task"
-      ? `Allowed for this task: ${connectionChoice(option)}.`
-      : `Always allowed: ${connectionChoice(option)}.`;
-  const where = option.scope === "always" ? "Always allowed" : `Allowed ${lower(option.label)}`;
-  return `${where}: ${CLASS_WORK[actionClass]}.`;
+      ? t`Allowed for this task: ${connectionChoice(option)}.`
+      : t`Always allowed: ${connectionChoice(option)}.`;
+  const work = CLASS_WORK[actionClass];
+  if (option.scope === "always") return t`Always allowed: ${work}.`;
+  if (option.scope === "task") return t`Allowed for this task: ${work}.`;
+  return t`Allowed ${lower(option.label)}: ${work}.`;
 }
 
 export function undoAllowedLabel(actionClass: ActionClass, option: AlwaysOption): string {
   if (actionClass === "network")
     return option.scope === "task"
-      ? `Undo allowing ${connectionChoice(option)} for this task`
-      : `Undo always allowing ${connectionChoice(option)}`;
-  return option.scope === "always"
-    ? `Undo always allowing ${CLASS_WORK[actionClass]}`
-    : `Undo allowing ${CLASS_WORK[actionClass]} ${lower(option.label)}`;
+      ? t`Undo allowing ${connectionChoice(option)} for this task`
+      : t`Undo always allowing ${connectionChoice(option)}`;
+  const work = CLASS_WORK[actionClass];
+  if (option.scope === "always") return t`Undo always allowing ${work}`;
+  if (option.scope === "task") return t`Undo allowing ${work} for this task`;
+  return t`Undo allowing ${work} ${lower(option.label)}`;
 }
 
 export interface AutonomyPreset {
@@ -65,21 +86,21 @@ export interface AutonomyPreset {
 
 export const AUTONOMY_PRESETS: readonly AutonomyPreset[] = [
   {
-    name: "Balanced (recommended)",
-    label: "Balanced",
+    name: tr("Balanced (recommended)"),
+    label: tr("Balanced"),
     recommended: true,
-    summary: "Works on its own in its computer and asks before acting as you.",
+    summary: tr("Works on its own in its computer and asks before acting as you."),
     policy: BALANCED_AUTONOMY,
   },
   {
-    name: "Careful",
-    label: "Careful",
-    summary: "Asks before every step except reading and browsing.",
+    name: tr("Careful"),
+    label: tr("Careful"),
+    summary: tr("Asks before every step except reading and browsing."),
     policy: CAREFUL_AUTONOMY,
   },
 ];
 
-export const CUSTOM_SUMMARY = "Your own mix of choices.";
+export const CUSTOM_SUMMARY = t`Your own mix of choices.`;
 
 export function presetOf(policy: AutonomyPolicy): AutonomyPreset | undefined {
   return AUTONOMY_PRESETS.find((preset) =>
@@ -88,24 +109,23 @@ export function presetOf(policy: AutonomyPolicy): AutonomyPreset | undefined {
 }
 
 const CHECKED_FIRST = [
-  ["purchase", "buying"],
-  ["send", "sending"],
-  ["post", "posting"],
-  ["delete", "deleting"],
+  ["purchase", tr("buying")],
+  ["send", tr("sending")],
+  ["post", tr("posting")],
+  ["delete", tr("deleting")],
 ] as const;
 
 // What dot stops to ask about, in one line for someone who has not opened Settings yet.
 export function checksSummary(policy: AutonomyPolicy): string {
   const asks = CHECKED_FIRST.filter(([key]) => policy[key] !== "act").map(([, verb]) => verb);
-  const listed =
-    asks.length > 1 ? `${asks.slice(0, -1).join(", ")} or ${asks.at(-1)}` : (asks[0] ?? "");
+  const listed = wordList(asks, "disjunction");
   if (policy.computer !== "act") {
     return listed
-      ? `Asks before every step in its computer, and before ${listed}.`
-      : "Asks before every step in its computer.";
+      ? t`Asks before every step in its computer, and before ${listed}.`
+      : t`Asks before every step in its computer.`;
   }
-  if (listed) return `Asks before ${listed}.`;
+  if (listed) return t`Asks before ${listed}.`;
   return EDITABLE_ACTION_CLASSES.every((key) => policy[key] === "act")
-    ? "Works without asking, even when buying, sending, posting or deleting."
-    : "Asks before some steps.";
+    ? t`Works without asking, even when buying, sending, posting or deleting.`
+    : t`Asks before some steps.`;
 }

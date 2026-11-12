@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { rich, t } from "../i18n/index.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { KeysController } from "../keys/useKeys.ts";
 import type { ApiClient } from "../lib/api.ts";
@@ -56,7 +57,7 @@ import "../shell/decision.css";
 
 const TOUCH = "(hover: none) and (pointer: coarse)";
 const COARSE = "(pointer: coarse)";
-const KEY_TAKEN = "That looked like a key, so it was taken out.";
+const KEY_TAKEN = t`That looked like a key, so it was taken out.`;
 
 // Where the question is answered: under dot's message in the thread, in the island over the
 // computer, or in a phone's sheet.
@@ -105,7 +106,7 @@ const TEXT_INPUT: Partial<Record<AskField["kind"], Partial<TextFieldProps>>> = {
 
 // localDot's own words on a form dot wrote, wherever the user can type into it.
 export const DotWroteThis = () => (
-  <p className="ask-origin">dot wrote this. localDot never asks for its passphrase here.</p>
+  <p className="ask-origin">{t`dot wrote this. localDot never asks for its passphrase here.`}</p>
 );
 
 // dot's question answered in place: its fields, then Not now and dot's own verb. The same draft
@@ -133,7 +134,7 @@ function StandardAskForm({
   const form = useRef<HTMLFormElement>(null);
   const { question, fields } = draft;
   const sheet = layout === "sheet";
-  const waiting = state.sending ? "Wait a moment" : undefined;
+  const waiting = state.sending ? t`Wait a moment` : undefined;
   const optional = marksOptional(fields);
   const choice = fields.length === 1 && fields[0]?.kind === "choice" ? fields[0] : undefined;
   const plain = useMemo(() => markdownToPlain(question.question), [question.question]);
@@ -214,7 +215,7 @@ function StandardAskForm({
   if (quick && choice)
     return (
       // biome-ignore lint/a11y/useSemanticElements: a row of buttons, not a form's fieldset.
-      <div className="ask-quick" role="group" aria-label="Answer dot">
+      <div className="ask-quick" role="group" aria-label={t`Answer dot`}>
         {choice.options.map((option, index) => (
           <Chip
             key={option}
@@ -237,7 +238,7 @@ function StandardAskForm({
               if (!reason && !state.sending) void draft.decline(answer);
             }}
           >
-            {question.decline ?? "Not now"}
+            {question.decline ?? t`Not now`}
           </Chip>
         )}
         {state.failed && (
@@ -288,7 +289,7 @@ function StandardAskForm({
               if (!reason && !state.sending) void draft.decline(answer);
             }}
           >
-            {question.decline ?? "Not now"}
+            {question.decline ?? t`Not now`}
           </Button>
         )}
         <Button
@@ -298,7 +299,7 @@ function StandardAskForm({
           busy={state.sending === "answer"}
           disabledReason={reason ?? (state.sending === "decline" ? waiting : undefined)}
         >
-          {leftToDot(fields, state.draft) ? LEFT_TO_DOT : (question.submit ?? "Send answer")}
+          {leftToDot(fields, state.draft) ? LEFT_TO_DOT : (question.submit ?? t`Send answer`)}
         </Button>
       </div>
     </div>
@@ -308,7 +309,7 @@ function StandardAskForm({
       ref={form}
       className={clsx("ask", layout !== "thread" && "decision")}
       data-layout={layout}
-      aria-label={layout === "thread" ? "Answer dot" : undefined}
+      aria-label={layout === "thread" ? t`Answer dot` : undefined}
       aria-labelledby={layout === "thread" ? undefined : titleId}
       noValidate
       onSubmit={(event) => {
@@ -368,7 +369,7 @@ function AskFieldControl({
   const text = typeof raw === "string" ? raw : "";
   const filled = fieldValue(field, state.draft, fields) !== undefined;
   const named = useMemo(() => revealText(markdownToPlain(field.label)), [field.label]);
-  const label = `${plainReveal(named.parts)}${optional ? " (optional)" : ""}`;
+  const label = optional ? t`${plainReveal(named.parts)} (optional)` : plainReveal(named.parts);
   // A problem shows once the field has been left with something in it, and then as it is typed;
   // after a try at sending, every field's shows.
   const problem = state.keys.has(field.id)
@@ -458,7 +459,7 @@ function AskFieldControl({
                 );
               }}
             >
-              Paste code
+              {t`Paste code`}
             </Button>
           )}
         </Field>
@@ -576,11 +577,10 @@ function fieldNote(warning?: string, site?: string, hint?: string): ReactNode {
       {site !== undefined &&
         (site ? (
           <>
-            localDot enters this on <span className="ask-site">{site}</span> without sharing it with
-            the agent.{" "}
+            {rich`localDot enters this on ${<span className="ask-site">{site}</span>} without sharing it with the agent.`}{" "}
           </>
         ) : (
-          "localDot enters this without sharing it with the agent. "
+          `${t`localDot enters this without sharing it with the agent.`} `
         ))}
       {hint && <RevealedText text={markdownToPlain(hint)} />}
     </>
@@ -630,7 +630,7 @@ function FieldError({ children }: { children: ReactNode }) {
 }
 
 function Recommended() {
-  return <Badge className="ask-recommended">Recommended</Badge>;
+  return <Badge className="ask-recommended">{t`Recommended`}</Badge>;
 }
 
 // The row that takes the user's own words: a choice's last option, or one more pick beside a
@@ -666,9 +666,9 @@ function OwnWords({
       ref={input}
       id={`${id}other`}
       className="ask-other"
-      aria-label="Other"
+      aria-label={t`Other`}
       aria-invalid={false}
-      placeholder="Other…"
+      placeholder={t`Other…`}
       value={words}
       maxLength={2000}
       autoComplete="off"
@@ -724,7 +724,7 @@ function SecretInput({
         <IconButton
           className="ask-reveal"
           icon={shown ? "eye-off" : "eye"}
-          label={`${shown ? "Hide" : "Show"} ${label.toLowerCase()}`}
+          label={shown ? t`Hide ${label.toLowerCase()}` : t`Show ${label.toLowerCase()}`}
           size={28}
           onClick={() => setShown((now) => !now)}
         />
@@ -777,7 +777,7 @@ function ChoiceRows({
           options={field.options.map((option, index) => ({
             value: String(index),
             label: markdownToPlain(option),
-            ...(index === field.recommended ? { tag: "Recommended" } : {}),
+            ...(index === field.recommended ? { tag: t`Recommended` } : {}),
             ...(touch || field.options.length < 2
               ? {}
               : { preview: <Kbd keys={[String(index + 1)]} /> }),
@@ -822,7 +822,7 @@ function FileDrop({
   const selected = useRef<{ file: File; id: string } | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   useEffect(() => () => flight.current?.abort(), []);
-  const unavailable = reason ?? (upload ? undefined : "Turn on your computer first");
+  const unavailable = reason ?? (upload ? undefined : t`Turn on your computer first`);
   const take = async (file: File | undefined) => {
     if (!file || !upload || unavailable) return;
     flight.current?.abort();
@@ -839,8 +839,8 @@ function FileDrop({
           if (!abort.signal.aborted)
             setProgress(
               phase === "placing"
-                ? "Saving to computer…"
-                : `${Math.floor((offset / Math.max(file.size, 1)) * 100)}% uploaded`,
+                ? t`Saving to computer…`
+                : t`${Math.floor((offset / Math.max(file.size, 1)) * 100)}% uploaded`,
             );
         },
       });
@@ -855,7 +855,7 @@ function FileDrop({
         note:
           error instanceof FileTransferFailure
             ? error.message
-            : "Upload paused. Retry to continue.",
+            : t`Upload paused. Retry to continue.`,
       });
     }
   };
@@ -881,15 +881,15 @@ function FileDrop({
         <Icon name="file" size={16} />
       </span>
       <span className="ask-file-text">
-        <span className="ask-file-name">{named ? state.name : "Drop a file here"}</span>
+        <span className="ask-file-name">{named ? state.name : t`Drop a file here`}</span>
         <span className="ask-file-meta">
           {state.phase === "uploading"
-            ? (progress ?? "Adding it to your computer…")
+            ? (progress ?? t`Adding it to your computer…`)
             : state.phase === "done"
-              ? "On your computer, in Downloads"
+              ? t`On your computer, in Downloads`
               : state.phase === "failed"
                 ? state.note
-                : "or choose one"}
+                : t`or choose one`}
         </span>
       </span>
       {state.phase === "failed" && selected.current && (
@@ -898,7 +898,7 @@ function FileDrop({
           onClick={() => void take(selected.current?.file)}
           disabledReason={unavailable}
         >
-          Retry
+          {t`Retry`}
         </Button>
       )}
       <ChooseFileButton
@@ -907,7 +907,7 @@ function FileDrop({
         disabledReason={unavailable}
         onFiles={(files) => void take(files[0])}
       >
-        {named ? "Choose another" : "Choose a file"}
+        {named ? t`Choose another` : t`Choose a file`}
       </ChooseFileButton>
     </div>
   );
@@ -939,7 +939,7 @@ function QrAnswer({ value, hint }: { value: string; hint?: string }) {
           )}
           {link ? (
             <a className="ask-qr-link" href={link.href} target="_blank" rel="noopener noreferrer">
-              Open {link.host}
+              {t`Open ${link.host}`}
               <Icon name="arrow-right" size={14} />
             </a>
           ) : (
@@ -947,15 +947,15 @@ function QrAnswer({ value, hint }: { value: string; hint?: string }) {
               <p>
                 <RevealedText text={value} />
               </p>
-              <CopyButton text={value} label="Copy" />
+              <CopyButton text={value} label={t`Copy`} />
             </div>
           )}
         </div>
       ) : (
-        <QrCode value={value} label="QR code to scan with another device" />
+        <QrCode value={value} label={t`QR code to scan with another device`} />
       )}
       <Button variant="quiet" size="sm" onClick={() => setFallback((now) => !now)}>
-        {fallback ? "Show the QR code" : "On this phone? Use a code instead"}
+        {fallback ? t`Show the QR code` : t`On this phone? Use a code instead`}
       </Button>
     </div>
   );

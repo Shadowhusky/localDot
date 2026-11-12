@@ -6,6 +6,7 @@ import {
   TaskModelSelection,
   ULID_PATTERN,
 } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 export type TaskStatus = "starting" | "running" | "waiting_user" | "paused" | "idle" | "ended";
@@ -57,7 +58,7 @@ const fields = new Set([
 ]);
 export class AgentResponseError extends Error {
   constructor() {
-    super("Task status could not be verified. Reconnect to check it again.");
+    super(t`Task status could not be verified. Reconnect to check it again.`);
     this.name = "AgentResponseError";
   }
 }

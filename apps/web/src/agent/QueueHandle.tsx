@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { matches, REDUCED_MOTION } from "../ui/media.ts";
@@ -78,7 +79,7 @@ export function useQueueMoves(
         .catch(() => {
           if (signal.aborted) return;
           setMine(null);
-          setProblem("Couldn't move that message. It may have started already.");
+          setProblem(t`Couldn't move that message. It may have started already.`);
         })
         .finally(() => {
           inFlight.current -= 1;
@@ -119,7 +120,7 @@ export function QueueHandle({
     moves.refocus.current = null;
     handle.current?.focus({ preventScroll: true });
   });
-  const moved = (to: number) => announce(`Moved to place ${to + 1} of ${order.length}.`);
+  const moved = (to: number) => announce(t`Moved to place ${to + 1} of ${order.length}.`);
   const end = (commit: boolean) => {
     const now = drag.current;
     if (!now) return;
@@ -151,7 +152,7 @@ export function QueueHandle({
       className="thread-queue-handle"
       icon="grip-vertical"
       size={24}
-      label={`Move this message, place ${place + 1} of ${order.length}`}
+      label={t`Move this message, place ${place + 1} of ${order.length}`}
       aria-keyshortcuts="ArrowUp ArrowDown"
       data-queue-handle=""
       // A drag selects no text and leaves focus where the user was typing.

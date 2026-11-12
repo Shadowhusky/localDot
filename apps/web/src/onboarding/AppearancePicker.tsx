@@ -1,3 +1,4 @@
+import { tr } from "../i18n/index.ts";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import { APPEARANCE_CHOICES, type AppearanceChoice, type DarkAppearance } from "./appearance.ts";
 import "./onboarding.css";
@@ -10,10 +11,10 @@ export interface AppearanceControl {
 }
 
 export const APPEARANCE_NAMES: Record<AppearanceChoice, string> = {
-  graphite: "Graphite",
-  midnight: "Midnight",
-  daylight: "Daylight",
-  system: "System",
+  graphite: tr("Graphite"),
+  midnight: tr("Midnight"),
+  daylight: tr("Daylight"),
+  system: tr("System"),
 };
 
 export function AppearancePicker({

@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { dropConversations, holdConversations } from "../agent/conversation-list.ts";
 import { deleteConversations, removalProblem } from "../agent/conversation-selection.ts";
-import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -65,7 +65,11 @@ export function DeleteConversationDialog({
       finish();
       if (result.live.length > 0 || result.failed.length > 0)
         announce("conversation", removalProblem(result), "assertive");
-      else announce("conversation", `Deleted ${count(n, "conversation", "conversations")}.`);
+      else
+        announce(
+          "conversation",
+          n === 1 ? t`Deleted 1 conversation.` : t`Deleted ${n.toLocaleString()} conversations.`,
+        );
     });
   };
   return (
@@ -73,18 +77,18 @@ export function DeleteConversationDialog({
       open={conversations !== null}
       onClose={onClose}
       anchor={anchor}
-      title={n > 1 ? `Delete ${n.toLocaleString()} conversations?` : "Delete this conversation?"}
+      title={n > 1 ? t`Delete ${n.toLocaleString()} conversations?` : t`Delete this conversation?`}
       description={
         n > 1
-          ? "Their messages, recordings and screenshots will be removed. This can't be undone."
-          : "Its messages, recordings and screenshots will be removed. This can't be undone."
+          ? t`Their messages, recordings and screenshots will be removed. This can't be undone.`
+          : t`Its messages, recordings and screenshots will be removed. This can't be undone.`
       }
     >
       <Button variant="quiet" onClick={onClose}>
-        Cancel
+        {t`Cancel`}
       </Button>
       <Button variant="destructive" onClick={remove}>
-        Delete
+        {t`Delete`}
       </Button>
     </Dialog>
   );

@@ -7,6 +7,7 @@ import {
 } from "@localdot/protocol";
 import { PROVIDERS } from "@localdot/providers";
 import { z } from "zod";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 const identifier = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);
@@ -124,8 +125,8 @@ export class SettingsFailure extends Error {
   ) {
     super(
       uncertain
-        ? "The save reply could not be verified. Settings may already have changed; reload saved settings before another save."
-        : "Settings could not be loaded or saved. Check the connection, keys and choices, then try again.",
+        ? t`The save reply could not be verified. Settings may already have changed; reload saved settings before another save.`
+        : t`Settings could not be loaded or saved. Check the connection, keys and choices, then try again.`,
     );
     this.name = "SettingsFailure";
   }

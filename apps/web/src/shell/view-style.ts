@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { useMediaQuery } from "../ui/media.ts";
 
 // How localDot is laid out on this device: Chat, the stack of the list, the conversation and the
@@ -7,10 +8,13 @@ export type ViewStyle = "chat" | "studio";
 export const VIEW_STYLES: readonly ViewStyle[] = ["chat", "studio"];
 
 // What the two are called and what they are, the one place that says so.
-export const VIEW_NAMES: Readonly<Record<ViewStyle, string>> = { chat: "Chat", studio: "Studio" };
+export const VIEW_NAMES: Readonly<Record<ViewStyle, string>> = {
+  chat: tr("Chat"),
+  studio: tr("Studio"),
+};
 export const VIEW_LINES: Readonly<Record<ViewStyle, string>> = {
-  chat: "Text dot like a friend, with the computer a tap away.",
-  studio: "The computer, the chat and every step on one screen.",
+  chat: tr("Text dot like a friend, with the computer a tap away."),
+  studio: tr("The computer, the chat and every step on one screen."),
 };
 
 export const VIEW_STYLE_KEY = "localdot.view-style.v1";
@@ -22,7 +26,7 @@ const PHONE_DEVICE =
 
 export const otherView = (style: ViewStyle): ViewStyle => (style === "chat" ? "studio" : "chat");
 export const switchViewLabel = (style: ViewStyle) =>
-  `Switch to ${VIEW_NAMES[otherView(style)]} view`;
+  t`Switch to ${VIEW_NAMES[otherView(style)]} view`;
 
 function storedView(): ViewStyle | null {
   try {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { dismissToast, showToast } from "../ui/Toast.tsx";
 import { desktopSignIn } from "./accounts-api.ts";
@@ -59,20 +60,20 @@ export function useDesktopSignIn({
     showToast({
       id: TOAST,
       icon: "globe",
-      title: "Sign-ins here aren't kept",
+      title: t`Sign-ins here aren't kept`,
       description: offered
-        ? `Open ${site} in localDot's web browser to stay signed in.`
-        : `When you hand back, ask dot to sign in to ${site} in the web browser.`,
+        ? t`Open ${site} in localDot's web browser to stay signed in.`
+        : t`When you hand back, ask dot to sign in to ${site} in the web browser.`,
       ...(offered
         ? {
             action: {
-              label: "Open in web browser",
+              label: t`Open in web browser`,
               onAction: () =>
                 latest.current?.(site, (message) =>
                   showToast({
                     id: FAILED,
                     tone: "danger",
-                    title: `Couldn't open ${site}`,
+                    title: t`Couldn't open ${site}`,
                     description: message,
                   }),
                 ),

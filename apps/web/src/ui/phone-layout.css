@@ -1370,7 +1370,7 @@
   }
 
   /* Stop is in reach without drawing the eye from the reply. */
-  :is(.phone-thread, .phone-computer-dock) .composer-send[aria-label="Stop task"] {
+  :is(.phone-thread, .phone-computer-dock) .composer-send[data-stop] {
     --_image: none;
     --_shadow: none;
     --_face: var(--color-control);
@@ -1392,13 +1392,13 @@
   /* An empty field offers its microphone, a task at work its Stop in the microphone's place. */
   :is(.phone-thread, .phone-computer-dock)
     .composer-card[data-compact]
-    .composer-send[aria-disabled="true"]:not([aria-label="Stop task"]) {
+    .composer-send[aria-disabled="true"]:not([data-stop]) {
     display: none;
   }
 
-  .phone-thread .composer-card[data-compact]:has(.composer-send[aria-label="Stop task"]) .voice-mic,
+  .phone-thread .composer-card[data-compact]:has(.composer-send[data-stop]) .voice-mic,
   .phone-computer-bottom:not(:has([data-testid="hud-stop-session"]))
-    .composer-card[data-compact]:has(.composer-send[aria-label="Stop task"])
+    .composer-card[data-compact]:has(.composer-send[data-stop])
     .voice-mic {
     display: none;
   }
@@ -1406,7 +1406,7 @@
   /* On the computer, Stop is among the controls: the field keeps its microphone. */
   .phone-computer-bottom:has([data-testid="hud-stop-session"])
     .composer-card[data-compact]
-    .composer-send[aria-label="Stop task"] {
+    .composer-send[data-stop] {
     display: none;
   }
 

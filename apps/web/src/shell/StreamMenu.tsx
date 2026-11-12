@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { t, tr } from "../i18n/index.ts";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
@@ -12,9 +13,9 @@ export interface DisplayControl {
 }
 
 const choices = [
-  { value: "auto", label: "Auto", detail: "Adapt to your connection" },
-  { value: "sharp", label: "Sharp", detail: "Keep text crisp" },
-  { value: "smooth", label: "Smooth", detail: "Keep motion fluid" },
+  { value: "auto", label: tr("Auto"), detail: tr("Adapt to your connection") },
+  { value: "sharp", label: tr("Sharp"), detail: tr("Keep text crisp") },
+  { value: "smooth", label: tr("Smooth"), detail: tr("Keep motion fluid") },
 ] as const;
 
 export function StreamMenu({
@@ -32,7 +33,7 @@ export function StreamMenu({
       <IconButton
         ref={anchor}
         icon="settings"
-        label="Stream settings"
+        label={t`Stream settings`}
         variant="filled"
         round
         size={44}
@@ -44,15 +45,15 @@ export function StreamMenu({
         onClose={() => setOpen(false)}
         anchor={anchor}
         side={landscape ? "left" : "top"}
-        label="Stream settings"
+        label={t`Stream settings`}
         className="stream-menu"
       >
         {display && (
-          <MenuGroup label="Display view">
+          <MenuGroup label={t`Display view`}>
             {[
-              { value: "auto", label: "Auto", detail: "Follow the agent’s work" },
-              { value: "work", label: "Work", detail: "Keep the current output" },
-              { value: "screen", label: "Screen", detail: "Watch the computer" },
+              { value: "auto", label: t`Auto`, detail: t`Follow the agent’s work` },
+              { value: "work", label: t`Work`, detail: t`Keep the current output` },
+              { value: "screen", label: t`Screen`, detail: t`Watch the computer` },
             ].map((choice) => (
               <MenuItem
                 key={choice.value}
@@ -67,7 +68,7 @@ export function StreamMenu({
           </MenuGroup>
         )}
         {display && <MenuSeparator />}
-        <MenuGroup label="Stream quality">
+        <MenuGroup label={t`Stream quality`}>
           {choices.map((choice) => (
             <MenuItem
               key={choice.value}
@@ -81,11 +82,11 @@ export function StreamMenu({
           ))}
         </MenuGroup>
         <p className="stream-menu-note" role="note">
-          Full quality when your connection allows.
+          {t`Full quality when your connection allows.`}
         </p>
         {!stream.saved && (
           <p className="stream-menu-note" role="status">
-            Applied for this visit. This browser couldn’t save it.
+            {t`Applied for this visit. This browser couldn’t save it.`}
           </p>
         )}
       </Menu>

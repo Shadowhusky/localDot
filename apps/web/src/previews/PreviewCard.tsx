@@ -1,6 +1,7 @@
 import type { ResultPreview } from "@localdot/protocol";
 import { useEffect, useRef } from "react";
 import type { AgentResult } from "../agent/model.ts";
+import { t, tr } from "../i18n/index.ts";
 import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import { macAddress, openOnMac, PreviewActions } from "./OpenOnMac.tsx";
 import { type Previews, usePreviews } from "./PreviewsContext.tsx";
@@ -55,12 +56,12 @@ export function offerState(
 const shownAddress = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
 const WORDS: Record<CardState, string> = {
-  checking: "Checking…",
-  running: "Running",
-  quiet: "Not answering",
-  off: "Your computer is off",
-  stopped: "Stopped. Ask dot to start it again.",
-  unknown: "Can't be checked right now",
+  checking: tr("Checking…"),
+  running: tr("Running"),
+  quiet: tr("Not answering"),
+  off: tr("Your computer is off"),
+  stopped: tr("Stopped. Ask dot to start it again."),
+  unknown: tr("Can't be checked right now"),
 };
 
 // A web app a reply comes with, one tap from opening on this device: the whole card opens it, as
@@ -98,7 +99,7 @@ export function PreviewCard({ offer }: { offer: ResultPreview }) {
         detail={[
           offer.title ? address : offer.project,
           WORDS[state],
-          onMac && `On this Mac at ${macAddress(onMac)}`,
+          onMac && t`On this Mac at ${macAddress(onMac)}`,
         ]
           .filter(Boolean)
           .join(" · ")}

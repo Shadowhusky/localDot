@@ -24,6 +24,7 @@ import {
   whenLabel,
 } from "../agent/conversation-list.ts";
 import { type ConversationMatch, searchConversations } from "../agent/conversation-search.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Highlight } from "../replay/Highlight.tsx";
 import { useTaskSearch } from "../replay/search-api.ts";
@@ -84,11 +85,11 @@ export interface SessionRailProps {
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
 export function conversationLabel(row: ConversationRow, now: Date): string {
   const parts = [row.title];
-  if (row.entry.tag) parts.push(`${TAG_NAMES[row.entry.tag].toLowerCase()} tag`);
+  if (row.entry.tag) parts.push(t`${TAG_NAMES[row.entry.tag].toLowerCase()} tag`);
   parts.push(STATUS_LABEL[row.status].toLowerCase());
-  if (row.entry.live?.onScreen) parts.push("on screen");
+  if (row.entry.live?.onScreen) parts.push(t`on screen`);
   parts.push(whenLabel(row.since, now).toLowerCase());
-  return parts.join(", ");
+  return parts.reduce((list, part) => t`${list}, ${part}`);
 }
 
 // Names given here stand in until the list read after saving them comes back.
@@ -231,7 +232,7 @@ export const SessionRail = memo(function SessionRail({
         next.delete(id);
         return next;
       });
-      announce("conversation", "The name couldn't be saved. Try again.", "assertive");
+      announce("conversation", t`The name couldn't be saved. Try again.`, "assertive");
     }
   };
 
@@ -341,8 +342,8 @@ export const SessionRail = memo(function SessionRail({
       announce(
         "conversation",
         failure instanceof ApiError && failure.status === 409
-          ? "This conversation can't be archived while its task is under way."
-          : "That change couldn't be saved. Try again.",
+          ? t`This conversation can't be archived while its task is under way.`
+          : t`That change couldn't be saved. Try again.`,
         "assertive",
       ),
     );
@@ -382,10 +383,10 @@ export const SessionRail = memo(function SessionRail({
       <EmptyState
         layout="start"
         icon="circle-alert"
-        title="Conversations couldn't load"
+        title={t`Conversations couldn't load`}
         actions={
           <Button size="sm" variant="quiet" onClick={recent.retry}>
-            Try again
+            {t`Try again`}
           </Button>
         }
       />
@@ -393,7 +394,7 @@ export const SessionRail = memo(function SessionRail({
       <IconButton
         icon="circle-alert"
         size={32}
-        label="Conversations couldn't load. Try again"
+        label={t`Conversations couldn't load. Try again`}
         className="sessions-retry"
         onClick={recent.retry}
       />
@@ -403,17 +404,17 @@ export const SessionRail = memo(function SessionRail({
       <EmptyState
         layout="start"
         icon="search"
-        title={content.pending ? "Searching…" : `Nothing matches “${query.trim()}”`}
+        title={content.pending ? t`Searching…` : t`Nothing matches “${query.trim()}”`}
       />
     );
   else if (!recent.loading && order.length === 0 && recent.archivedCount === 0 && expanded)
-    body = <EmptyState layout="start" title="No conversations yet" />;
+    body = <EmptyState layout="start" title={t`No conversations yet`} />;
 
   return (
     <nav
       ref={rail}
       className="sessions"
-      aria-label="Conversations"
+      aria-label={t`Conversations`}
       data-expanded={expanded || undefined}
       data-selecting={selection.selecting || undefined}
     >
@@ -421,7 +422,7 @@ export const SessionRail = memo(function SessionRail({
         <IconButton
           icon="panel-left"
           size={32}
-          label={expanded ? "Collapse conversations" : "Expand conversations"}
+          label={expanded ? t`Collapse conversations` : t`Expand conversations`}
           kbd={RAIL_KEYS}
           onClick={toggle}
         />
@@ -433,7 +434,7 @@ export const SessionRail = memo(function SessionRail({
             className="sessions-select"
             onClick={() => (selection.selecting ? selection.stop() : selection.start())}
           >
-            {selection.selecting ? "Cancel" : "Select"}
+            {selection.selecting ? t`Cancel` : t`Select`}
           </Button>
         )}
       </div>
@@ -487,12 +488,12 @@ export const SessionRail = memo(function SessionRail({
           {found ? (
             <>
               {found.recent.length > 0 && (
-                <RailGroup label="Results" expanded={expanded}>
+                <RailGroup label={t`Results`} expanded={expanded}>
                   {found.recent.map((match) => item(match.row, match))}
                 </RailGroup>
               )}
               {found.archived.length > 0 && (
-                <RailGroup label="Archived" expanded={expanded}>
+                <RailGroup label={t`Archived`} expanded={expanded}>
                   {found.archived.map((match) => item(match.row, match))}
                 </RailGroup>
               )}
@@ -500,17 +501,17 @@ export const SessionRail = memo(function SessionRail({
           ) : (
             <>
               {rows.pinned.length > 0 && (
-                <RailGroup label="Pinned" expanded={expanded}>
+                <RailGroup label={t`Pinned`} expanded={expanded}>
                   {rows.pinned.map((row) => item(row))}
                 </RailGroup>
               )}
               {rows.active.length > 0 && (
-                <RailGroup label="Active" expanded={expanded}>
+                <RailGroup label={t`Active`} expanded={expanded}>
                   {rows.active.map((row) => item(row))}
                 </RailGroup>
               )}
               {rows.rest.length > 0 && (
-                <RailGroup label="Recent" expanded={expanded}>
+                <RailGroup label={t`Recent`} expanded={expanded}>
                   {rows.rest.map((row) => item(row))}
                 </RailGroup>
               )}
@@ -565,7 +566,7 @@ export const SessionRail = memo(function SessionRail({
         }}
         onLook={(entry, look) => {
           organizeConversation(api, entry.sessionId, { look }).catch(() =>
-            announce("conversation", "That change couldn't be saved. Try again.", "assertive"),
+            announce("conversation", t`That change couldn't be saved. Try again.`, "assertive"),
           );
         }}
         onDelete={() => setDeleting(action && [action.entry])}
@@ -612,10 +613,10 @@ function ArchivedGroup({
         onClick={onToggle}
       >
         <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
-        <span className="sessions-group-name">Archived</span>
+        <span className="sessions-group-name">{t`Archived`}</span>
         <span className="sessions-archived-count num">{count}</span>
       </Button>
-      <ul id={id} className="sessions-list" aria-label="Archived">
+      <ul id={id} className="sessions-list" aria-label={t`Archived`}>
         {children}
       </ul>
     </div>
@@ -659,7 +660,7 @@ function NewRow({
   onNew(): void;
 }) {
   const { triggerProps: tip, tooltip } = useTooltip({
-    content: expanded || reason ? undefined : "New conversation",
+    content: expanded || reason ? undefined : t`New conversation`,
   });
   return (
     <>
@@ -667,12 +668,12 @@ function NewRow({
         {...tip.handlers}
         variant="quiet"
         className="sessions-row"
-        aria-label="New conversation"
+        aria-label={t`New conversation`}
         disabledReason={reason}
         onClick={onNew}
       >
         <Icon name="compose" />
-        <span className="sessions-title">New conversation</span>
+        <span className="sessions-title">{t`New conversation`}</span>
       </Button>
       {tooltip}
     </>
@@ -690,7 +691,7 @@ function OverviewRow({
   onOpen(): void;
 }) {
   const { triggerProps: tip, tooltip } = useTooltip({
-    content: expanded ? undefined : "Overview",
+    content: expanded ? undefined : t`Overview`,
   });
   return (
     <>
@@ -698,13 +699,13 @@ function OverviewRow({
         {...tip.handlers}
         variant="quiet"
         className="sessions-row sessions-overview"
-        aria-label="Overview"
+        aria-label={t`Overview`}
         aria-current={open ? "page" : undefined}
         data-current={open || undefined}
         onClick={onOpen}
       >
         <Icon name="layout-dashboard" />
-        <span className="sessions-title">Overview</span>
+        <span className="sessions-title">{t`Overview`}</span>
       </Button>
       {tooltip}
     </>
@@ -819,7 +820,7 @@ function RailRow({
               size={24}
               tabIndex={-1}
               className="sessions-more"
-              label={`Actions for ${row.title}`}
+              label={t`Actions for ${row.title}`}
               {...triggerProps("menu", menuOpen)}
               onClick={(event) => onMenu(event.currentTarget)}
             />
@@ -848,7 +849,7 @@ function RenameField({
     <TextField
       size="sm"
       className="sessions-rename"
-      aria-label="Conversation name"
+      aria-label={t`Conversation name`}
       value={value}
       maxLength={200}
       autoFocus

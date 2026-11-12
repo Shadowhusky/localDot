@@ -7,6 +7,7 @@ import {
   stepAt,
   turnAt,
 } from "@localdot/stage";
+import { t } from "../i18n/index.ts";
 import { past, progressive, STATE_CAPTIONS, type StatusRow } from "../session/status.ts";
 
 // Rows where dot is at work: its words say what it is doing, never a word for its state.
@@ -142,11 +143,11 @@ const ARTICLES = new Set(["the", "a", "an", "your", "my", "this", "that", "some"
 function stillLine(item: string | undefined, line: string | undefined): string | undefined {
   if (item) {
     const first = firstWord(item);
-    if (STEP_VERBS.has(first)) return `Still working out how to ${lowerFirst(item)}`;
-    if (doingWord(first)) return `Still ${lowerFirst(item)}`;
-    return `Still working on ${ARTICLES.has(first) ? lowerFirst(item) : item}`;
+    if (STEP_VERBS.has(first)) return t`Still working out how to ${lowerFirst(item)}`;
+    if (doingWord(first)) return t`Still ${lowerFirst(item)}`;
+    return t`Still working on ${ARTICLES.has(first) ? lowerFirst(item) : item}`;
   }
-  return line && doingWord(firstWord(line)) ? `Still ${lowerFirst(line)}` : undefined;
+  return line && doingWord(firstWord(line)) ? t`Still ${lowerFirst(line)}` : undefined;
 }
 
 const firstWord = (text: string) => (/^[A-Za-z]+/.exec(text)?.[0] ?? "").toLowerCase();

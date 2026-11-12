@@ -1,6 +1,7 @@
 import { PROVIDERS, type ProviderSpec, providerById } from "@localdot/providers";
 import type { SpeechInstallStatus } from "../../../../packages/protocol/src/speech-install.ts";
 import type { DotState } from "../dot/engine/states.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { PickerModel } from "../settings/choices.ts";
 
 export type WizardStep =
@@ -51,23 +52,23 @@ export const ONBOARDING_KEY = "localdot.onboarding.v1";
 export const FRESH: WizardProgress = { step: "welcome" };
 
 const STEP_TITLES: Record<CountedStep, string> = {
-  thinks: "How dot thinks",
-  key: "Key",
-  model: "Model",
-  permissions: "Permissions",
-  dot: "Your dot",
-  view: "View",
-  browser: "Web browser",
-  speech: "Talk to dot",
-  "turn-on": "Turn on",
+  thinks: tr("How dot thinks"),
+  key: tr("Key"),
+  model: tr("Model"),
+  permissions: tr("Permissions"),
+  dot: tr("Your dot"),
+  view: tr("View"),
+  browser: tr("Web browser"),
+  speech: tr("Talk to dot"),
+  "turn-on": tr("Turn on"),
 };
 
 export function stepTitle(step: CountedStep, kind: ThinkKind | undefined): string {
   if (step !== "key") return STEP_TITLES[step];
-  if (appKind(kind)) return "Sign-in";
-  if (kind === "local") return "Server";
-  if (kind === "custom") return "Address";
-  return "Key";
+  if (appKind(kind)) return t`Sign-in`;
+  if (kind === "local") return t`Server`;
+  if (kind === "custom") return t`Address`;
+  return t`Key`;
 }
 
 // dot listens while the person chooses where its thinking comes from, and wakes at the end.
@@ -245,10 +246,10 @@ export function recommendedFast(
 }
 
 export function abilityLine(model: PickerModel): string {
-  if (model.tier === "native") return "Best at using a computer";
-  if (model.tier === "vision-tools") return "Can use the computer";
-  if (model.tier === "text-only") return "Works with files and pages, not the screen";
-  return "Can't do the work: it can't use tools";
+  if (model.tier === "native") return t`Best at using a computer`;
+  if (model.tier === "vision-tools") return t`Can use the computer`;
+  if (model.tier === "text-only") return t`Works with files and pages, not the screen`;
+  return t`Can't do the work: it can't use tools`;
 }
 
 // "Thinks with" on the summary.
@@ -260,19 +261,19 @@ export function thinksWith(
   const name = provider ? providerById(provider)?.name : undefined;
   switch (kind) {
     case "chatgpt":
-      return "ChatGPT plan";
+      return t`ChatGPT plan`;
     case "claude-code":
       return "Claude Code";
     case "local":
-      return name ?? "Local model";
+      return name ?? t`Local model`;
     case "plan":
-      return name ?? "Coding plan";
+      return name ?? t`Coding plan`;
     case "custom":
-      return address ? hostOf(address) : "Your own address";
+      return address ? hostOf(address) : t`Your own address`;
     case "api":
-      return name ? `${name} API key` : "API key";
+      return name ? t`${name} API key` : t`API key`;
     default:
-      return "Not chosen yet";
+      return t`Not chosen yet`;
   }
 }
 

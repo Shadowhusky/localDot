@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { LiveSession } from "../session/useLiveSession.ts";
 import { AgentResponseError, type AgentSnapshot, loadAgentSnapshot } from "./api.ts";
@@ -48,7 +49,7 @@ export interface AgentSessionView {
   readonly connection: ReturnType<LiveSession["agentFeed"]["read"]>["connection"];
   reconcile(): void;
 }
-const STATUS_ERROR = "Task status is unavailable. Check the connection and try again.";
+const STATUS_ERROR = t`Task status is unavailable. Check the connection and try again.`;
 const NO_FIXES: readonly AgentBlocker[] = [];
 
 // Reads snapshots from the existing event owner. No second socket, optimistic mutation or

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { NO_STREAM } from "../cells/types.ts";
 import { DesktopdError } from "./client.ts";
-import { dockCovered, dockRoutes } from "./dock.ts";
+import { DOCK_AREA, dockArea, dockCovered, dockRoutes } from "./dock.ts";
 
 const SCREEN = { w: 2560, h: 1600 };
 const frame = (x: number, y: number, w: number, h: number) => ({ frame: { x, y, w, h } });
@@ -83,6 +83,28 @@ describe("GET /api/cells/:id/dock", () => {
     expect(await reply.json()).toEqual({ covered: true, browser: true });
     expect(reply.headers.get("cache-control")).toBe("no-store");
     expect(read).toHaveBeenCalledWith({}, expect.any(AbortSignal));
+  });
+
+  it("says how many apps the computer's dock pins when its desktop says, and dodges by its own width", async () => {
+    const app = new Hono();
+    dockRoutes(app, {
+      cells: { get: () => cell() },
+      registry: { for: () => ({ client: { windows: covered } as never }) },
+      dockItems: async () => 8,
+    });
+    expect(await (await app.request(`/api/cells/${id}/dock`)).json()).toEqual({
+      covered: true,
+      browser: true,
+      items: 8,
+    });
+    // Eight apps narrow the shelf by an item, 27 px each end.
+    expect(dockArea(8)).toEqual({ ...DOCK_AREA, x: DOCK_AREA.x + 27, w: DOCK_AREA.w - 54 });
+    expect(dockArea()).toEqual(DOCK_AREA);
+    // A window over only the first app's place of a nine-app dock is clear of an eight-app one.
+    const screen = { w: 1280, h: 800 };
+    const corner = [{ frame: { x: 0, y: 700, w: 400, h: 100 } }] as never;
+    expect(dockCovered(corner, screen)).toBe(true);
+    expect(dockCovered(corner, screen, 8)).toBe(false);
   });
 
   it("says whether the web browser runs, and takes it as running when that can't be told", async () => {

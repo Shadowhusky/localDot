@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { copyIssuedLink, LinkNotCopied } from "../notify/home-screen-link.ts";
 import { Button } from "../ui/Button.tsx";
@@ -42,7 +43,7 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
       } catch (failure) {
         if (failure instanceof ApiError && failure.status === 404) unavailable = true;
         else if (!disposed && current === revision.current)
-          setLoadError("Remote access status couldn't load. Retrying…");
+          setLoadError(t`Remote access status couldn't load. Retrying…`);
       } finally {
         reading = false;
       }
@@ -77,7 +78,7 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
     try {
       setStatus(await api.put<Status>("/api/remote-access", { enabled }));
     } catch {
-      setError("Remote access couldn't be changed. Try again.");
+      setError(t`Remote access couldn't be changed. Try again.`);
     } finally {
       saving.current = false;
       setBusy(false);
@@ -99,7 +100,7 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
     } catch (failure) {
       if (failure instanceof LinkNotCopied)
         setLink({ url: failure.link, expiresAt: failure.expiresAt });
-      else setError("Couldn't create a link. Check the connection and try again.");
+      else setError(t`Couldn't create a link. Check the connection and try again.`);
     } finally {
       saving.current = false;
       setBusy(false);
@@ -108,26 +109,26 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
   if (!status) return loadError ? <GroupNote>{loadError}</GroupNote> : null;
   return (
     <div>
-      <GroupHead title="Remote access" />
+      <GroupHead title={t`Remote access`} />
       <Group>
         <Switch
           className="ui-group-row"
-          label="Allow remote access"
+          label={t`Allow remote access`}
           description={
             !status.supported
               ? status.detail
               : status.state === "online"
-                ? "Connected"
+                ? t`Connected`
                 : status.enabled
-                  ? "Connecting…"
-                  : "Off · Only on this computer"
+                  ? t`Connecting…`
+                  : t`Off · Only on this computer`
           }
           checked={status.enabled}
           disabledReason={
             !status.supported
-              ? status.detail || "Update localDot to set up remote access, then reopen Settings."
+              ? status.detail || t`Update localDot to set up remote access, then reopen Settings.`
               : busy
-                ? "Saving…"
+                ? t`Saving…`
                 : undefined
           }
           onCheckedChange={(on) => void enable(on)}
@@ -138,40 +139,44 @@ export function RemoteAccessSettings({ api }: { api: ApiClient }) {
               variant="quiet"
               icon={copiedUntil ? "check" : "copy"}
               busy={busy}
-              disabledReason={status.state !== "online" ? "Wait until connected" : undefined}
+              disabledReason={status.state !== "online" ? t`Wait until connected` : undefined}
               onClick={() => void createLink()}
             >
               <StableText
-                choices={["Copy sign-in link", "Link copied"]}
-                value={copiedUntil ? "Link copied" : "Copy sign-in link"}
+                choices={[t`Copy sign-in link`, t`Link copied`]}
+                value={copiedUntil ? t`Link copied` : t`Copy sign-in link`}
               />
             </Button>
             <span className="settings-remote-hint" role="status">
               <StableText
                 choices={[
-                  "Open on your other device within a minute.",
-                  "One device · Expires in 1 minute",
+                  t`Open on your other device within a minute.`,
+                  t`One device · Expires in 1 minute`,
                 ]}
                 value={
                   copiedUntil
-                    ? "Open on your other device within a minute."
-                    : "One device · Expires in 1 minute"
+                    ? t`Open on your other device within a minute.`
+                    : t`One device · Expires in 1 minute`
                 }
               />
             </span>
           </div>
         )}
       </Group>
-      <GroupNote>Uses localDot’s relay and Cloudflare, which can process your traffic.</GroupNote>
-      <Disclosure inline summary="Privacy details" className="settings-remote-privacy">
+      <GroupNote>
+        {t`Uses localDot’s relay and Cloudflare, which can process your traffic.`}
+      </GroupNote>
+      <Disclosure inline summary={t`Privacy details`} className="settings-remote-privacy">
         <p>
-          Encrypted in transit, but not end-to-end encrypted against the relay. Optional and off by
-          default; local access works without it. Keep this computer on while connected. Turn off to
-          disconnect remote devices and revoke their access.
+          {t`Encrypted in transit, but not end-to-end encrypted against the relay. Optional and off by default; local access works without it. Keep this computer on while connected. Turn off to disconnect remote devices and revoke their access.`}
         </p>
       </Disclosure>
       {status.state === "online" && <ShareLinkControls api={api} />}
-      <SignInLinkSheet link={link?.url} label="Remote sign-in link" onClose={() => setLink(null)} />
+      <SignInLinkSheet
+        link={link?.url}
+        label={t`Remote sign-in link`}
+        onClose={() => setLink(null)}
+      />
       {(error || loadError) && <GroupNote>{error || loadError}</GroupNote>}
     </div>
   );

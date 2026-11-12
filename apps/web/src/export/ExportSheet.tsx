@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { Glyph } from "../dot/Glyph.tsx";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { timeLabel } from "../replay/replay-view.ts";
@@ -42,7 +43,6 @@ import {
   type ExportQuality,
   type ExportRequest,
   fileSize,
-  PRIVACY_NOTE,
   planExport,
   videoLength,
 } from "./export-plan.ts";
@@ -58,6 +58,7 @@ import {
   keepChoices,
   maxFrameRate,
   optionsFor,
+  PRIVACY_NOTE,
   type PresetChoice,
   parseSpeed,
   presetOptions,
@@ -77,35 +78,46 @@ import { fitTrim, frameAt, type TrimEdge, type TrimRange, trimTimeLabel } from "
 import { useExportEnvironment } from "./useExportEnvironment.ts";
 import "./export.css";
 
-const TITLE = "Export video";
-const NO_STEP = "The playhead isn't on a step";
-const NO_SELECTION = "Press I and O on the timeline to mark a stretch";
-const NO_SELECTION_TOUCH = "On a keyboard, press I and O on the timeline to mark a stretch";
-const NOT_CUSTOM = "Set under More options";
+const TITLE = t`Export video`;
+const NO_STEP = t`The playhead isn't on a step`;
+const NO_SELECTION = t`Press I and O on the timeline to mark a stretch`;
+const NO_SELECTION_TOUCH = t`On a keyboard, press I and O on the timeline to mark a stretch`;
+const NOT_CUSTOM = t`Set under More options`;
 const SPEED_PRESETS = ["1", "2", "3"] as const;
 const QUALITY_LABEL: Record<ExportQuality, string> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
+  low: tr("Low"),
+  medium: tr("Medium"),
+  high: tr("High"),
 };
+const QUALITY_NOTE: Record<ExportQuality, string> = {
+  low: tr("low quality"),
+  medium: tr("medium quality"),
+  high: tr("high quality"),
+};
+const WITH_DOT = t`with dot`;
 const PRESET_NOTE = {
-  quality: "sharpest",
-  fast: "smallest",
-  showcase: "with dot",
+  quality: tr("sharpest"),
+  fast: tr("smallest"),
+  showcase: WITH_DOT,
 } as const;
 const PLACES = [
-  { value: "under", label: "Under the picture" },
-  { value: "over", label: "On the picture" },
+  { value: "under", label: tr("Under the picture") },
+  { value: "over", label: tr("On the picture") },
 ] as const;
 // The elapsed time and the estimate of what is left move on this beat while a video is saved.
 const TICK_MS = 500;
-const PAGE_NOTE = "This page makes the video, so keep it open until it's saved.";
-const HOST_NOTE = "It keeps going if you close this page or switch apps.";
+const PAGE_NOTE = t`This page makes the video, so keep it open until it's saved.`;
+const HOST_NOTE = t`It keeps going if you close this page or switch apps.`;
 const RESULT_TITLE = {
-  ready: "Your video is ready",
-  downloaded: "Downloaded",
-  saved: "Video saved",
+  ready: tr("Your video is ready"),
+  downloaded: tr("Downloaded"),
+  saved: tr("Video saved"),
 } as const;
+
+const cantMake = (where: "host" | "checking" | "page", what: string) =>
+  where === "page"
+    ? t`This browser can't make ${what} video`
+    : t`This computer can't make ${what} video`;
 
 function optionsText(options: ExportOptions, env: ExportEnvironment): string {
   const size = sizeOf(options.size, env, options.dot);
@@ -239,18 +251,17 @@ export function ExportSheet({
     update({ ...withOption(choices, env, { dot: place }), place });
 
   const canMake = encodable(env, options.format, options.size, options.dot);
-  const maker = where === "page" ? "This browser" : "This computer";
   const blocked =
     where === "checking"
-      ? "Checking what this computer can make"
+      ? t`Checking what this computer can make`
       : where === "page" && !support.ok
         ? support.reason
         : current === null
-          ? "Nothing was recorded in this range"
+          ? t`Nothing was recorded in this range`
           : canMake === undefined
-            ? "Checking what this browser can make"
+            ? t`Checking what this browser can make`
             : canMake === false
-              ? `${maker} can't make ${sizeLabel(options.size)} video`
+              ? cantMake(where, sizeLabel(options.size))
               : where === "page" &&
                   support.ok &&
                   support.save === "download" &&
@@ -261,7 +272,7 @@ export function ExportSheet({
     state.phase === "options" && state.note
       ? state.note
       : (blocked ??
-        `${videoLength(current?.durationS ?? 0)} video · about ${fileSize(current?.bytes ?? 0)} · ready in ${waitText(current?.ms ?? 0)}`);
+        t`${videoLength(current?.durationS ?? 0)} video · about ${fileSize(current?.bytes ?? 0)} · ready in ${waitText(current?.ms ?? 0)}`);
 
   const working = state.phase !== "options";
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -293,7 +304,7 @@ export function ExportSheet({
       label,
       description:
         preset === "custom"
-          ? `${optionsText(presets.custom, env)} · ${QUALITY_LABEL[presets.custom.quality].toLowerCase()} quality${presets.custom.dot === "off" ? "" : " · with dot"}`
+          ? `${optionsText(presets.custom, env)} · ${QUALITY_NOTE[presets.custom.quality]}${presets.custom.dot === "off" ? "" : ` · ${WITH_DOT}`}`
           : `${optionsText(presets[preset], env)} · ${PRESET_NOTE[preset]}`,
       disabledReason: unavailable ? NOT_CUSTOM : undefined,
       aside: (
@@ -372,28 +383,28 @@ export function ExportSheet({
             />
           </div>
           <RadioCards
-            aria-label="Preset"
+            aria-label={t`Preset`}
             className="export-presets"
             value={choices.preset}
             onValueChange={(value) => update(choosePreset(choices, value as PresetChoice))}
             options={[
-              presetRow("quality", "Quality"),
-              presetRow("fast", "Fast"),
-              presetRow("showcase", "Showcase"),
-              presetRow("custom", "Custom"),
+              presetRow("quality", t`Quality`),
+              presetRow("fast", t`Fast`),
+              presetRow("showcase", t`Showcase`),
+              presetRow("custom", t`Custom`),
             ]}
           />
           <Group>
             <SpeedRow speed={choices.speed} onSpeed={(speed) => choose({ speed })} />
             <Switch
               className="ui-group-row"
-              label="Show dot"
-              description="dot and what it's doing, as in the app"
+              label={t`Show dot`}
+              description={t`dot and what it's doing, as in the app`}
               checked={options.dot !== "off"}
               onCheckedChange={(on) => option({ dot: on ? choices.place : "off" })}
             />
             <Collapse open={options.dot !== "off"}>
-              <Field label="Position" inline className="ui-group-row export-row">
+              <Field label={t`Position`} inline className="ui-group-row export-row">
                 <SegmentedControl
                   size={24}
                   items={PLACES}
@@ -404,12 +415,12 @@ export function ExportSheet({
             </Collapse>
           </Group>
           <Disclosure
-            summary="More options"
+            summary={t`More options`}
             meta={`${sizeLabel(options.size)} · ${options.fps} fps · ${options.format === "webm" ? "WebM" : "MP4"}`}
             className="export-more"
           >
             <Group className="export-advanced">
-              <Field label="Resolution" inline className="ui-group-row export-row">
+              <Field label={t`Resolution`} inline className="ui-group-row export-row">
                 <SegmentedControl
                   size={24}
                   items={SIZE_CHOICES.map((size) => ({
@@ -417,14 +428,14 @@ export function ExportSheet({
                     label: sizeLabel(size),
                     disabledReason:
                       encodable(env, options.format, size, options.dot) === false
-                        ? `${maker} can't make ${sizeLabel(size)} video`
+                        ? cantMake(where, sizeLabel(size))
                         : undefined,
                   }))}
                   value={options.size}
                   onValueChange={(size) => option({ size: size as SizeChoice })}
                 />
               </Field>
-              <Field label="Frame rate" inline className="ui-group-row export-row">
+              <Field label={t`Frame rate`} inline className="ui-group-row export-row">
                 <SegmentedControl
                   size={24}
                   items={EXPORT_FRAME_RATES.map((rate) => ({
@@ -432,13 +443,13 @@ export function ExportSheet({
                     label: String(rate),
                     disabledReason: frameRateAllowed(rate, env, choices.speed)
                       ? undefined
-                      : `The recording has no more than ${cap} fps at this speed`,
+                      : t`The recording has no more than ${cap} fps at this speed`,
                   }))}
                   value={String(options.fps)}
                   onValueChange={(rate) => option({ fps: Number(rate) as ExportOptions["fps"] })}
                 />
               </Field>
-              <Field label="Quality" inline className="ui-group-row export-row">
+              <Field label={t`Quality`} inline className="ui-group-row export-row">
                 <SegmentedControl
                   size={24}
                   items={EXPORT_QUALITIES.map((quality) => ({
@@ -449,7 +460,7 @@ export function ExportSheet({
                   onValueChange={(quality) => option({ quality: quality as ExportQuality })}
                 />
               </Field>
-              <Field label="Format" inline className="ui-group-row export-row">
+              <Field label={t`Format`} inline className="ui-group-row export-row">
                 <SegmentedControl
                   size={24}
                   items={[
@@ -459,7 +470,7 @@ export function ExportSheet({
                       label: "WebM",
                       disabledReason:
                         encodable(env, "webm", options.size, options.dot) === false
-                          ? `${maker} can't make WebM video`
+                          ? cantMake(where, "WebM")
                           : undefined,
                     },
                   ]}
@@ -469,22 +480,22 @@ export function ExportSheet({
               </Field>
               <Switch
                 className="ui-group-row"
-                label="Show the current step"
-                description="A small caption on the video"
+                label={t`Show the current step`}
+                description={t`A small caption on the video`}
                 checked={options.captions}
                 onCheckedChange={(captions) => option({ captions })}
               />
               <Switch
                 className="ui-group-row"
-                label="Skip idle"
-                description="Leaves out waits where nothing happens"
+                label={t`Skip idle`}
+                description={t`Leaves out waits where nothing happens`}
                 checked={choices.skipIdle}
                 onCheckedChange={(skipIdle) => choose({ skipIdle })}
               />
               <Switch
                 className="ui-group-row"
-                label="Pointer and clicks"
-                description="dot's pointer, clicks and typing over the picture"
+                label={t`Pointer and clicks`}
+                description={t`dot's pointer, clicks and typing over the picture`}
                 checked={choices.overlays}
                 onCheckedChange={(overlays) => choose({ overlays })}
               />
@@ -513,7 +524,11 @@ export function ExportSheet({
         state={state}
         blocked={blocked}
         label={
-          where !== "page" ? "Export" : support.ok && support.save === "picker" ? "Save…" : "Save"
+          where !== "page"
+            ? t`Export`
+            : support.ok && support.save === "picker"
+              ? t`Save…`
+              : t`Save`
         }
         onSave={() => {
           const final = exportRequest(context.sessionId, range, choices, env);
@@ -555,12 +570,12 @@ function SpeedRow({ speed, onSpeed }: { speed: number; onSpeed(speed: number): v
   };
   return (
     <>
-      <Field label="Speed" inline className="ui-group-row export-row">
+      <Field label={t`Speed`} inline className="ui-group-row export-row">
         <SegmentedControl
           size={24}
           items={[
             ...SPEED_PRESETS.map((value) => ({ value, label: `${value}×` })),
-            { value: "custom", label: "Custom" },
+            { value: "custom", label: t`Custom` },
           ]}
           value={custom ? "custom" : String(speed)}
           onValueChange={(value) => {
@@ -570,14 +585,14 @@ function SpeedRow({ speed, onSpeed }: { speed: number; onSpeed(speed: number): v
         />
       </Field>
       <Collapse open={custom}>
-        <Field label="Custom speed" inline className="ui-group-row export-row">
+        <Field label={t`Custom speed`} inline className="ui-group-row export-row">
           <span className="export-stepper">
             <IconButton
               icon="minus"
               size={step}
               variant="filled"
-              label="Slower"
-              disabledReason={stepSpeed(speed, -1) === speed ? "This is the slowest" : undefined}
+              label={t`Slower`}
+              disabledReason={stepSpeed(speed, -1) === speed ? t`This is the slowest` : undefined}
               onClick={() => onSpeed(stepSpeed(speed, -1))}
             />
             <TextField
@@ -601,8 +616,8 @@ function SpeedRow({ speed, onSpeed }: { speed: number; onSpeed(speed: number): v
               icon="plus"
               size={step}
               variant="filled"
-              label="Faster"
-              disabledReason={stepSpeed(speed, 1) === speed ? "This is the fastest" : undefined}
+              label={t`Faster`}
+              disabledReason={stepSpeed(speed, 1) === speed ? t`This is the fastest` : undefined}
               onClick={() => onSpeed(stepSpeed(speed, 1))}
             />
           </span>
@@ -633,8 +648,7 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
           <>
             <p className="export-file">{file.name}</p>
             <p className="export-file-meta num">
-              {fileSize(file.bytes)} · {videoLength(file.durationS)} video · made in{" "}
-              {videoLength(file.ms / 1000)}
+              {t`${fileSize(file.bytes)} · ${videoLength(file.durationS)} video · made in ${videoLength(file.ms / 1000)}`}
             </p>
           </>
         )}
@@ -657,32 +671,31 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
   return (
     <div className="export-progress">
       <p className="export-status-title">
-        {picking ? "Choose where to save it" : "Making your video"}
+        {picking ? t`Choose where to save it` : t`Making your video`}
       </p>
       <Progress
-        label="Export progress"
+        label={t`Export progress`}
         value={picking || !state.total ? undefined : state.done}
         max={state.total || 1}
         valueText={`${percent}%`}
       />
       <p className="export-progress-line num">
         {picking
-          ? "Waiting for a place to save it"
+          ? t`Waiting for a place to save it`
           : state.waiting
-            ? "Waiting to start"
+            ? t`Waiting to start`
             : !state.total
-              ? "Getting the recording ready"
-              : `${percent}% · ${remaining === null ? "working out the time left" : `about ${timeLabel(remaining)} left`}`}
+              ? t`Getting the recording ready`
+              : `${percent}% · ${remaining === null ? t`working out the time left` : t`about ${timeLabel(remaining)} left`}`}
       </p>
       {!picking && (
         <>
           <p className="export-progress-note">{state.where === "host" ? HOST_NOTE : PAGE_NOTE}</p>
-          <Disclosure summary="Details" className="export-details">
+          <Disclosure summary={t`Details`} className="export-details">
             <p className="export-details-text num">
               {state.total
-                ? `${state.done.toLocaleString()} of ${state.total.toLocaleString()} frames · `
-                : ""}
-              {timeLabel(elapsed)} so far
+                ? t`${state.done.toLocaleString()} of ${state.total.toLocaleString()} frames · ${timeLabel(elapsed)} so far`
+                : t`${timeLabel(elapsed)} so far`}
             </p>
           </Disclosure>
         </>
@@ -712,19 +725,21 @@ function ExportActions({
       <div className="export-actions">
         <Button
           variant="quiet"
-          disabledReason={state.phase === "picking" ? "Choose a place to save it first" : undefined}
+          disabledReason={
+            state.phase === "picking" ? t`Choose a place to save it first` : undefined
+          }
           onClick={() => job.cancel()}
         >
-          Cancel
+          {t`Cancel`}
         </Button>
-        <Button onClick={onClose}>Keep working</Button>
+        <Button onClick={onClose}>{t`Keep working`}</Button>
       </div>
     );
   if (state.phase === "ready")
     return (
       <div className="export-actions">
         <Button variant="primary" icon="download" onClick={() => job.save()}>
-          Save video
+          {t`Save video`}
         </Button>
       </div>
     );
@@ -733,7 +748,7 @@ function ExportActions({
       <div className="export-actions">
         {state.phase === "downloaded" && (
           <Button variant="quiet" icon="download" onClick={() => job.save()}>
-            Save again
+            {t`Save again`}
           </Button>
         )}
         <Button
@@ -742,7 +757,7 @@ function ExportActions({
             onClose();
           }}
         >
-          Done
+          {t`Done`}
         </Button>
       </div>
     );

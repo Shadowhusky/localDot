@@ -5,6 +5,7 @@ import type {
   ReleaseNote,
 } from "../../../../packages/protocol/src/app-update.ts";
 import { SafeMarkdown } from "../agent/SafeMarkdown.tsx";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
@@ -27,11 +28,11 @@ const shown = (version: string) => (version.length === 40 ? version.slice(0, 8) 
 // What holds the update back, each named with what it is doing.
 function Holders({ holders }: { holders: readonly AppUpdateHolder[] }) {
   return (
-    <ul className="settings-update-holders" aria-label="Holding the update back">
+    <ul className="settings-update-holders" aria-label={t`Holding the update back`}>
       {holders.map((holder, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: another dot's tasks have no task id.
         <li key={holder.sessionId ?? `other-${index}`}>
-          <span className="settings-update-holder">{holder.title ?? "Untitled task"}</span>
+          <span className="settings-update-holder">{holder.title ?? t`Untitled task`}</span>
           {holder.state && <span className="settings-update-detail"> · {holder.state}</span>}
         </li>
       ))}
@@ -43,7 +44,7 @@ function UpdateProgress({ progress }: { progress: AppUpdateProgress }) {
   return (
     <div className="settings-update-progress">
       <Progress
-        label="Update progress"
+        label={t`Update progress`}
         value={progress.value ?? undefined}
         valueText={progress.detail ?? undefined}
       />
@@ -69,10 +70,10 @@ function UpdateFailure({ error, failed }: { error: string; failed: UpdateStage }
 // What's going on while localDot restarts and this page has nothing else to go on.
 export function restartWords(update: AppUpdateControl, version: string | null) {
   if (update.wait === "lost")
-    return "localDot hasn't come back. On the computer running it, run localdot up. This page keeps trying.";
-  if (update.wait === "slow") return "This is taking longer than usual. This page keeps trying.";
-  if (update.reconnecting) return `Checking localDot ${version ?? ""}`.trim();
-  return version ? `Starting localDot ${version}` : "Reconnecting to localDot";
+    return t`localDot hasn't come back. On the computer running it, run localdot up. This page keeps trying.`;
+  if (update.wait === "slow") return t`This is taking longer than usual. This page keeps trying.`;
+  if (update.reconnecting) return version ? t`Checking localDot ${version}` : t`Checking localDot`;
+  return version ? t`Starting localDot ${version}` : t`Reconnecting to localDot`;
 }
 
 // The newest version's notes open, any it skips folded under them.
@@ -82,14 +83,14 @@ function ReleaseNotes({ notes }: { notes: ReleaseNote[] }) {
   if (!first) return null;
   return (
     <section className="settings-release-notes" aria-labelledby={id}>
-      <GroupHead id={id} title={`What's new in ${first.version}`} />
+      <GroupHead id={id} title={t`What's new in ${first.version}`} />
       <Group>
         <div className="ui-group-row">
           <SafeMarkdown compact text={first.markdown} />
         </div>
         {older.map((note) => (
           <div key={note.version} className="ui-group-row">
-            <Disclosure inline summary={`What's new in ${note.version}`}>
+            <Disclosure inline summary={t`What's new in ${note.version}`}>
               <SafeMarkdown compact text={note.markdown} />
             </Disclosure>
           </div>
@@ -101,13 +102,14 @@ function ReleaseNotes({ notes }: { notes: ReleaseNote[] }) {
 
 const UNSUPPORTED = {
   "source-checkout": {
-    title: "This copy runs from source",
-    detail:
+    title: tr("This copy runs from source"),
+    detail: tr(
       "It updates from its Git checkout, not from here: pull, rebuild, then restart localDot.",
+    ),
   },
   "install-record": {
-    title: "Update localDot manually",
-    detail: "This copy can’t update itself. Run localdot update in Terminal.",
+    title: tr("Update localDot manually"),
+    detail: tr("This copy can’t update itself. Run localdot update in Terminal."),
   },
 };
 
@@ -125,43 +127,60 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
   const unsupported = UNSUPPORTED[status.unsupported ?? "install-record"];
   const holding = status.holders.length > 0;
   const stoppable = status.holders.some((each) => each.sessionId);
-  const installingTitle = `Installing localDot${displayVersion ? ` ${displayVersion}` : ""}…`;
-  const downloadingTitle = `Downloading localDot${displayVersion ? ` ${displayVersion}` : ""}…`;
+  const installingTitle = displayVersion
+    ? t`Installing localDot ${displayVersion}…`
+    : t`Installing localDot…`;
+  const downloadingTitle = displayVersion
+    ? t`Downloading localDot ${displayVersion}…`
+    : t`Downloading localDot…`;
+  const restartingTitle = t`Restarting localDot…`;
+  const reconnectingTitle = t`Reconnecting to localDot…`;
+  const checkingTitle = t`Checking for updates…`;
+  const unfinishedTitle = t`The update didn't finish`;
+  const waitingTitle = t`The update waits for your task`;
+  const upToDateTitle = t`localDot is up to date`;
+  const checkTitle = t`Check for a new version`;
+  const readyTitle = t`localDot ${displayVersion ?? ""} is ready`;
+  const availableTitle = t`localDot ${displayVersion ?? ""} is available`;
   const title = !status.supported
     ? unsupported.title
     : stage === "check"
-      ? "Checking for updates…"
+      ? checkingTitle
       : stage === "download" || stage === "verify" || stage === "images"
         ? downloadingTitle
         : stage === "install"
           ? installingTitle
           : stage === "restart"
-            ? "Restarting localDot…"
+            ? restartingTitle
             : stage === "reconnect"
-              ? "Reconnecting to localDot…"
+              ? reconnectingTitle
               : held
-                ? "The update waits for your task"
+                ? waitingTitle
                 : failed
-                  ? "The update didn't finish"
+                  ? unfinishedTitle
                   : version
-                    ? `localDot ${displayVersion} ${status.phase === "ready" ? "is ready" : "is available"}`
+                    ? status.phase === "ready"
+                      ? readyTitle
+                      : availableTitle
                     : status.checkedAt
-                      ? "localDot is up to date"
-                      : "Check for a new version";
+                      ? upToDateTitle
+                      : checkTitle;
   const titles = [
-    "Restarting localDot…",
-    "Reconnecting to localDot…",
-    "Checking for updates…",
-    "The update didn't finish",
-    "The update waits for your task",
-    "localDot is up to date",
-    "Check for a new version",
+    restartingTitle,
+    reconnectingTitle,
+    checkingTitle,
+    unfinishedTitle,
+    waitingTitle,
+    upToDateTitle,
+    checkTitle,
     downloadingTitle,
     installingTitle,
-    ...(version
-      ? [`localDot ${displayVersion} is ready`, `localDot ${displayVersion} is available`]
-      : []),
+    ...(version ? [readyTitle, availableTitle] : []),
   ];
+  const updateNow = t`Update now`;
+  const retry = t`Retry`;
+  const checkNow = t`Check now`;
+  const notChecked = t`Not checked yet`;
   // Once localDot stops answering, the restart is under way.
   const progress: AppUpdateProgress | null =
     stage === "restart" || stage === "reconnect"
@@ -177,7 +196,7 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
   const canUpdate = !!version || status.phase === "ready";
   return (
     <div>
-      <GroupHead title="localDot updates" />
+      <GroupHead title={t`localDot updates`} />
       <Group>
         <GroupRow
           leading={<IconTile icon="download" />}
@@ -188,7 +207,9 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
           }
           detail={
             status.supported
-              ? `Installed ${status.currentVersion.length === 40 ? `build ${shown(status.currentVersion)}` : `version ${status.currentVersion}`}`
+              ? status.currentVersion.length === 40
+                ? t`Installed build ${shown(status.currentVersion)}`
+                : t`Installed version ${status.currentVersion}`
               : unsupported.detail
           }
           trailing={
@@ -199,8 +220,8 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
                 onClick={failed ? update.update : canUpdate ? () => setConfirm(true) : update.check}
               >
                 <StableText
-                  choices={["Update now", "Retry", "Check now"]}
-                  value={failed ? "Retry" : canUpdate ? "Update now" : "Check now"}
+                  choices={[updateNow, retry, checkNow]}
+                  value={failed ? retry : canUpdate ? updateNow : checkNow}
                 />
               </Button>
             )
@@ -213,11 +234,11 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
               <div className="settings-update-actions">
                 {stoppable && (
                   <Button size="sm" variant="secondary" onClick={() => setConfirm(true)}>
-                    Stop all and update
+                    {t`Stop all and update`}
                   </Button>
                 )}
                 <Button size="sm" variant="quiet" onClick={update.cancel}>
-                  Cancel update
+                  {t`Cancel update`}
                 </Button>
               </div>
             </div>
@@ -238,20 +259,20 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
           <>
             <Switch
               className="ui-group-row"
-              label="Check automatically"
-              description="Quietly checks a few times a day"
+              label={t`Check automatically`}
+              description={t`Quietly checks a few times a day`}
               checked={status.preferences.automaticChecks}
-              disabledReason={busy ? "Saving…" : undefined}
+              disabledReason={busy ? t`Saving…` : undefined}
               onCheckedChange={(on) =>
                 update.preferences({ ...status.preferences, automaticChecks: on })
               }
             />
             <Switch
               className="ui-group-row"
-              label="Download updates"
-              description="Prepares updates in the background"
+              label={t`Download updates`}
+              description={t`Prepares updates in the background`}
               checked={status.preferences.automaticDownloads}
-              disabledReason={busy ? "Saving…" : undefined}
+              disabledReason={busy ? t`Saving…` : undefined}
               onCheckedChange={(on) =>
                 update.preferences({ ...status.preferences, automaticDownloads: on })
               }
@@ -259,10 +280,10 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
             {status.installOnLaunchSupported && (
               <Switch
                 className="ui-group-row"
-                label="Install at next launch"
-                description="Only after localDot has been fully stopped"
+                label={t`Install at next launch`}
+                description={t`Only after localDot has been fully stopped`}
                 checked={status.preferences.installOnLaunch}
-                disabledReason={busy ? "Saving…" : undefined}
+                disabledReason={busy ? t`Saving…` : undefined}
                 onCheckedChange={(on) =>
                   update.preferences({ ...status.preferences, installOnLaunch: on })
                 }
@@ -277,18 +298,18 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
       {status.phase === "ready" && !failed && !stage && !held && (
         <GroupNote>
           {status.currentVersion.length === 40
-            ? "The update is downloaded. Building it may take a few minutes."
-            : "The update is downloaded. Updating restarts localDot once."}
+            ? t`The update is downloaded. Building it may take a few minutes.`
+            : t`The update is downloaded. Updating restarts localDot once.`}
         </GroupNote>
       )}
       {status.supported && (
         <GroupNote>
           <StableText
-            choices={[`Last checked ${new Date().toLocaleString()}`, "Not checked yet"]}
+            choices={[t`Last checked ${new Date().toLocaleString()}`, notChecked]}
             value={
               status.checkedAt !== null
-                ? `Last checked ${new Date(status.checkedAt).toLocaleString()}`
-                : "Not checked yet"
+                ? t`Last checked ${new Date(status.checkedAt).toLocaleString()}`
+                : notChecked
             }
           />
         </GroupNote>
@@ -297,16 +318,16 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
       <Dialog
         open={confirm}
         onClose={() => setConfirm(false)}
-        title={holding ? "Stop these and update?" : "Update localDot now?"}
+        title={holding ? t`Stop these and update?` : t`Update localDot now?`}
         description={
           holding
-            ? "Updating restarts localDot, which ends what's below. Stop them all and update now, or let the update wait until they finish. Your computer, files and sign-ins stay."
-            : "localDot restarts to install the update, and this page reconnects by itself. It usually takes about a minute. Your computer, files and sign-ins stay."
+            ? t`Updating restarts localDot, which ends what's below. Stop them all and update now, or let the update wait until they finish. Your computer, files and sign-ins stay.`
+            : t`localDot restarts to install the update, and this page reconnects by itself. It usually takes about a minute. Your computer, files and sign-ins stay.`
         }
         body={holding ? <Holders holders={status.holders} /> : undefined}
       >
         <Button variant="quiet" onClick={() => setConfirm(false)}>
-          Later
+          {t`Later`}
         </Button>
         {holding && !held && (
           <Button
@@ -316,7 +337,7 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
               update.update();
             }}
           >
-            Update when they finish
+            {t`Update when they finish`}
           </Button>
         )}
         <Button
@@ -327,7 +348,7 @@ export function AppUpdateSettings({ update }: { update: AppUpdateControl }) {
             else update.update();
           }}
         >
-          {holding && stoppable ? "Stop all and update" : "Update now"}
+          {holding && stoppable ? t`Stop all and update` : updateNow}
         </Button>
       </Dialog>
     </div>
@@ -348,16 +369,16 @@ export function AppUpdateOverlay({ update }: { update: AppUpdateControl }) {
   const line =
     update.restarting || update.reconnecting
       ? restartWords(update, name)
-      : (status.progress?.detail ?? `Installing localDot ${name}`);
+      : (status.progress?.detail ?? t`Installing localDot ${name}`);
   return (
     <Dialog
       open={underway && !hidden}
       onClose={() => setHidden(true)}
-      title={`Updating localDot to ${name}`}
+      title={t`Updating localDot to ${name}`}
       body={
         <div className="settings-update-overlay" role="status">
           <Progress
-            label="Update progress"
+            label={t`Update progress`}
             value={status.progress?.value ?? undefined}
             valueText={line}
           />
@@ -367,7 +388,7 @@ export function AppUpdateOverlay({ update }: { update: AppUpdateControl }) {
       }
     >
       <Button variant="quiet" onClick={() => setHidden(true)}>
-        Hide
+        {t`Hide`}
       </Button>
     </Dialog>
   );

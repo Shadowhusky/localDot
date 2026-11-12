@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { afterMotion } from "../ui/finished.ts";
 import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
@@ -19,27 +20,27 @@ export interface PlanItem {
 }
 
 const STATES: Record<string, [GlyphState, string]> = {
-  todo: ["todo", "Next"],
-  doing: ["doing", "In progress"],
-  done: ["done", "Done"],
-  skipped: ["skipped", "Skipped"],
+  todo: ["todo", tr("Next")],
+  doing: ["doing", tr("In progress")],
+  done: ["done", tr("Done")],
+  skipped: ["skipped", tr("Skipped")],
 };
 const PHASE_LABEL: Record<PlanPhase, string> = {
   working: "",
-  waiting: "Waiting for you",
-  paused: "Paused",
-  finished: "Finished",
-  stopped: "Stopped",
-  blocked: "Blocked",
-  error: "Interrupted",
+  waiting: tr("Waiting for you"),
+  paused: tr("Paused"),
+  finished: tr("Finished"),
+  stopped: tr("Stopped"),
+  blocked: tr("Blocked"),
+  error: tr("Interrupted"),
 };
 function stateOf(status: string, phase: PlanPhase): [GlyphState, string] {
   if (phase !== "working" && (status === "doing" || status === "todo")) {
-    if (phase === "waiting") return ["ask", "Waiting for you"];
-    if (phase === "paused") return ["todo", "Paused"];
-    return ["todo", "Not marked complete"];
+    if (phase === "waiting") return ["ask", t`Waiting for you`];
+    if (phase === "paused") return ["todo", t`Paused`];
+    return ["todo", t`Not marked complete`];
   }
-  return STATES[status] ?? ["todo", "Next"];
+  return STATES[status] ?? ["todo", t`Next`];
 }
 
 // What the open list keeps clear of under it, and the least of it that shows on the shortest screen.
@@ -66,7 +67,7 @@ export function planProgress(plan: readonly PlanItem[]): {
 // steps alone: other tabs say how far dot is on the Steps tab itself.
 export function PlanStrip({
   plan,
-  label = "Task plan",
+  label = t`Task plan`,
   phase = "working",
   over,
 }: {
@@ -159,9 +160,9 @@ export function PlanStrip({
         }}
         summary={
           <span className="plan-strip-summary">
-            <span className="ui-visually-hidden">Plan: </span>
+            <span className="ui-visually-hidden">{t`Plan: `}</span>
             {open || !line || !shown ? (
-              <span className="plan-strip-title">Plan{words && ` · ${words}`}</span>
+              <span className="plan-strip-title">{words ? t`Plan · ${words}` : t`Plan`}</span>
             ) : (
               <>
                 <StatusGlyph state={shown[0]} label={shown[1]} />
@@ -176,9 +177,7 @@ export function PlanStrip({
               aria-hidden="true"
               style={{ "--_done": total ? done / total : 0 } as CSSProperties}
             />
-            <span className="plan-strip-count num">
-              {done} of {total}
-            </span>
+            <span className="plan-strip-count num">{t`${done} of ${total}`}</span>
           </span>
         }
       >

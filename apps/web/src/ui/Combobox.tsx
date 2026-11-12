@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { type KeyboardEvent, useId, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { useFieldControl } from "./Field.tsx";
 import { Icon } from "./Icon.tsx";
 import { Listbox, optionId } from "./Listbox.tsx";
@@ -35,8 +36,8 @@ export function Combobox({
   onValueChange,
   items,
   groups,
-  placeholder = "Choose…",
-  searchPlaceholder = "Search",
+  placeholder = t`Choose…`,
+  searchPlaceholder = t`Search`,
   customDescription,
   size = "md",
   appearance = "field",
@@ -64,7 +65,7 @@ export function Combobox({
     const typed = text.trim();
     if (customDescription && typed && !all.some((option) => option.value === typed)) {
       const index = flatten(found).length;
-      const label = `Use “${typed}”`;
+      const label = t`Use “${typed}”`;
       found.push({
         options: [{ value: typed, label, description: customDescription, index, custom: true }],
       });
@@ -168,7 +169,7 @@ export function Combobox({
               autoCapitalize="off"
               spellCheck={false}
               enterKeyHint="done"
-              aria-label={`Search: ${title}`}
+              aria-label={t`Search: ${title}`}
               aria-autocomplete="list"
               aria-expanded={open}
               aria-controls={listboxId}
@@ -193,7 +194,7 @@ export function Combobox({
           onCommit={picker.commit}
           onKeyDown={sheet ? onListKeyDown : undefined}
         />
-        {!options.length && <p className="ui-listbox-empty">No matches</p>}
+        {!options.length && <p className="ui-listbox-empty">{t`No matches`}</p>}
       </PickerPopup>
     </>
   );

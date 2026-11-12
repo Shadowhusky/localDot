@@ -1,4 +1,5 @@
 import type { DotPlacement } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { ExportFormat, ExportPlan, ExportQuality, ExportSize } from "./export-plan.ts";
 
 // Fitted to exports of a 2-minute recording in Chrome on an Apple silicon Mac (lane L13's notes),
@@ -109,7 +110,7 @@ export function keepCalibration(calibration: Calibration): void {
 
 // How long a wait is, in words: "a few seconds", "about 15 s", "about 2 min".
 export function waitText(ms: number): string {
-  if (!(ms >= 4500)) return "a few seconds";
-  if (ms < 57_500) return `about ${Math.max(5, Math.round(ms / 5000) * 5)} s`;
-  return `about ${Math.max(1, Math.round(ms / 60_000))} min`;
+  if (!(ms >= 4500)) return t`a few seconds`;
+  if (ms < 57_500) return t`about ${Math.max(5, Math.round(ms / 5000) * 5)} s`;
+  return t`about ${Math.max(1, Math.round(ms / 60_000))} min`;
 }

@@ -1,9 +1,10 @@
 import type { RoutineAppEvent, RoutineListReply } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { type RoutinesApi, routinesApi, subscribeRoutineEvents } from "./routines-api.ts";
 
-export const CHANGED_ELSEWHERE = "This routine changed on another device. Here's the latest.";
+export const CHANGED_ELSEWHERE = t`This routine changed on another device. Here's the latest.`;
 const RELOAD_AFTER_MS = 150;
 
 export interface RoutinesView {
@@ -24,10 +25,10 @@ function problemOf(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 409 && /another device/.test(error.message)) return CHANGED_ELSEWHERE;
     if (error.status === 400 || error.status === 409) return error.message;
-    if (error.status === 404) return "That routine was deleted.";
-    if (error.status === 503) return error.message || "That couldn't be changed right now.";
+    if (error.status === 404) return t`That routine was deleted.`;
+    if (error.status === 503) return error.message || t`That couldn't be changed right now.`;
   }
-  return "That didn't go through. Check your connection and try again.";
+  return t`That didn't go through. Check your connection and try again.`;
 }
 
 // "live" while the routines are on show: read, then kept current by every device's changes and every

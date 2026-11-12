@@ -1,10 +1,12 @@
-import { type AttentionItem, NOTIFY_COPY, notifyRouteOf, type Wearable } from "@localdot/protocol";
+import { type AttentionItem, notifyRouteOf, type Wearable } from "@localdot/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { project, rubberband } from "../ui/sheet-drag.ts";
 import { onSpringFrame, Spring, Velocity } from "./phone-spring.ts";
 import "../ui/phone-layout.css";
+import { notifyCopy } from "../notify/notify-words.ts";
 
 const SHOWN_MS = 5000;
 const AGAIN_MS = 4000;
@@ -46,7 +48,7 @@ export function PhoneBanner({ latest, viewing, quiet, nameOf, onOpen }: PhoneBan
     const now = place.current;
     if (sessionId === now.viewing || now.quiet || document.hidden) return;
     const named = now.nameOf(sessionId);
-    const copy = NOTIFY_COPY[route.kind];
+    const copy = notifyCopy(route.kind);
     setShown({
       sessionId,
       title: named?.title ?? latest.task ?? copy.title,
@@ -148,11 +150,11 @@ function Banner({ shown, onGone, onOpen }: { shown: Shown; onGone(): void; onOpe
         <strong>{shown.title}</strong>
         <span>{shown.text}</span>
       </span>
-      <small>Now</small>
+      <small>{t`Now`}</small>
       <Button
         variant="quiet"
         className="phone-banner-open"
-        aria-label={`Open ${shown.title}`}
+        aria-label={t`Open ${shown.title}`}
         onClick={onOpen}
       />
     </div>

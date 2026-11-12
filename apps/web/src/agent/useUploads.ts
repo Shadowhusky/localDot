@@ -1,5 +1,6 @@
 import { USER_UPLOAD } from "@localdot/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { fileName } from "./attachments.ts";
 import { FileTransferFailure, safeTransferName } from "./file-transfer.ts";
@@ -58,7 +59,7 @@ export function useUploads(props: Owner) {
           ? {
               ...row,
               phase: "uncertain",
-              explanation: "Upload paused. Your progress is saved; retry to continue.",
+              explanation: t`Upload paused. Your progress is saved; retry to continue.`,
             }
           : row,
       ),
@@ -96,7 +97,7 @@ export function useUploads(props: Owner) {
       );
       pumpRef.current();
       if (removed)
-        setNotice("Switched computers. Files already uploaded stay on the previous computer.");
+        setNotice(t`Switched computers. Files already uploaded stay on the previous computer.`);
     } else if (old.ready && !ready) pause();
     else if (!old.ready && ready) resume();
     // Losing task freshness, opening settings, or sending a different message is not
@@ -152,7 +153,7 @@ export function useUploads(props: Owner) {
       const failure =
         error instanceof FileTransferFailure
           ? error
-          : new FileTransferFailure(true, undefined, "Upload paused. Retry to continue.");
+          : new FileTransferFailure(true, undefined, t`Upload paused. Retry to continue.`);
       change({ phase: failure.uncertain ? "uncertain" : "refused", explanation: failure.message });
     } finally {
       if (active.current === record) {
@@ -168,11 +169,11 @@ export function useUploads(props: Owner) {
   const select = (files: FileList | readonly File[]) => {
     const owner = current.current;
     if (!owner.ready || !owner.enabled || !owner.cellId) {
-      setProblem("Reconnect and check the computer before adding files.");
+      setProblem(t`Reconnect and check the computer before adding files.`);
       return;
     }
     if (!files.length || files.length + list.current.length > USER_UPLOAD.count) {
-      setProblem("Choose at most 16 attachments in this draft.");
+      setProblem(t`Choose at most 16 attachments in this draft.`);
       return;
     }
     let bytes = list.current.reduce((total, row) => total + (row.bytes ?? 0), 0);
@@ -186,12 +187,12 @@ export function useUploads(props: Owner) {
         file.size < 0 ||
         file.size > USER_UPLOAD.bytes
       ) {
-        setProblem("Choose files with safe, visible names, each at most 10 GiB.");
+        setProblem(t`Choose files with safe, visible names, each at most 10 GiB.`);
         return;
       }
       bytes += file.size;
       if (bytes > USER_UPLOAD.totalBytes) {
-        setProblem("Attachments in one draft must total at most 20 GiB.");
+        setProblem(t`Attachments in one draft must total at most 20 GiB.`);
         return;
       }
       chosen.push(file);

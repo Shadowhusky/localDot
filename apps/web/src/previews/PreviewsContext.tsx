@@ -15,6 +15,7 @@ import {
   useState,
 } from "react";
 import type { ComputerUpdate } from "../cells/useComputerUpdate.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { copyIssuedLink, LinkNotCopied } from "../notify/home-screen-link.ts";
 import { showToast } from "../ui/Toast.tsx";
@@ -251,8 +252,8 @@ export function usePreviewsState(
         copyIssuedLink(issued, navigator.clipboard).then(
           () =>
             showToast({
-              title: "Link copied",
-              description: "It opens this app once, on any of your devices, within two minutes.",
+              title: t`Link copied`,
+              description: t`It opens this app once, on any of your devices, within two minutes.`,
               tone: "success",
             }),
           (error: unknown) => {
@@ -279,7 +280,7 @@ export function usePreviewsState(
             !(result.reason instanceof ApiError && result.reason.status === 404),
         );
         if (failed)
-          refuse(trigger, { message: "localDot couldn't sign your devices out. Try again." });
+          refuse(trigger, { message: t`localDot couldn't sign your devices out. Try again.` });
       });
     },
     [api, sessionId, run, refuse],
@@ -293,7 +294,7 @@ export function usePreviewsState(
       run(key, () =>
         stopPreview(api, sessionId, id).catch((error: unknown) => {
           if (!(error instanceof ApiError && error.status === 404))
-            refuse(trigger, { message: "localDot couldn't close it. Try again." });
+            refuse(trigger, { message: t`localDot couldn't close it. Try again.` });
         }),
       );
     },
@@ -389,12 +390,12 @@ export function unavailable(
     state,
     message:
       state === "needs-tailscale"
-        ? "Previews open over Tailscale. Turn it on in Settings → Your computer, then try again."
+        ? t`Previews open over Tailscale. Turn it on in Settings → Your computer, then try again.`
         : state === "needs-update"
-          ? "Your computer needs its newest version to open previews."
+          ? t`Your computer needs its newest version to open previews.`
           : state === "computer-off"
-            ? "Turn on your computer to open the servers dot starts in it."
-            : "Try again in a moment.",
+            ? t`Turn on your computer to open the servers dot starts in it.`
+            : t`Try again in a moment.`,
   };
 }
 

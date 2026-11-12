@@ -1,5 +1,6 @@
 import { CLAUDE_CODE_MODELS, type ClaudeCodeStatus } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { SubscriptionModel } from "./choices.ts";
 import { chooseClaudeAccount, loadClaudeCode } from "./settings-api.ts";
@@ -33,8 +34,8 @@ export function useClaudeCode(api: ApiClient, active: boolean) {
         if (flight.current === abort)
           setError(
             separate === undefined
-              ? "localDot couldn't check Claude Code. Check that localDot is running."
-              : "localDot couldn't change the Claude account. Try again.",
+              ? t`localDot couldn't check Claude Code. Check that localDot is running.`
+              : t`localDot couldn't change the Claude account. Try again.`,
           );
       } finally {
         if (flight.current === abort) {

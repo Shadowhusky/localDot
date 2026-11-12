@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { GroupHead, GroupNote } from "../ui/Group.tsx";
@@ -23,7 +24,7 @@ import {
 } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { KeyMetadataEditor } from "./KeyMetadataEditor.tsx";
-import { type KeydHealth, type KeyRecord, keyHome, vaultLocked } from "./keys-api.ts";
+import { type KeydHealth, type KeyRecord, vaultLocked } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
 import { SavedLogins } from "./SavedLogins.tsx";
 import { UNLOCK_PRIVACY, UnlockKeys } from "./UnlockKeys.tsx";
@@ -31,25 +32,33 @@ import type { KeysController } from "./useKeys.ts";
 import type { SavedLoginsView } from "./useSavedLogins.ts";
 import "./keys.css";
 
-export const keysDescription = (health: KeydHealth | null) =>
-  `dot finds keys by name and purpose. Provider and custom API keys can be used when a task needs them; general keys are encrypted storage. The values stay ${keyHome(health)}. Service API charges follow the provider’s limits.`;
+export function keysDescription(health: KeydHealth | null): string {
+  switch (health?.vault?.backend) {
+    case "keychain":
+      return t`dot finds keys by name and purpose. Provider and custom API keys can be used when a task needs them; general keys are encrypted storage. The values stay in your Mac's keychain. Service API charges follow the provider’s limits.`;
+    case "secret-service":
+      return t`dot finds keys by name and purpose. Provider and custom API keys can be used when a task needs them; general keys are encrypted storage. The values stay in the keyring of the computer running localDot. Service API charges follow the provider’s limits.`;
+    case "file":
+      return t`dot finds keys by name and purpose. Provider and custom API keys can be used when a task needs them; general keys are encrypted storage. The values stay encrypted on the computer running localDot. Service API charges follow the provider’s limits.`;
+    default:
+      return t`dot finds keys by name and purpose. Provider and custom API keys can be used when a task needs them; general keys are encrypted storage. The values stay on the computer running localDot. Service API charges follow the provider’s limits.`;
+  }
+}
 
-const HELD = "Keys are held until the audit log works again";
-const LOCKED = "Saved keys are locked until you unlock them";
+const HELD = t`Keys are held until the audit log works again`;
+const LOCKED = t`Saved keys are locked until you unlock them`;
 
 // Why no key can be saved just now, if one can't.
 export function keysUnavailable(health: KeydHealth | null): string | undefined {
-  if (!health) return "Checking key protection";
-  if (!health.online) return "Key protection is off";
+  if (!health) return t`Checking key protection`;
+  if (!health.online) return t`Key protection is off`;
   if (health.audit?.ok === false) return HELD;
   return vaultLocked(health) ? LOCKED : undefined;
 }
 
 // What a passphrase vault is, said where it asks for its passphrase.
-export const LOCKED_TEXT =
-  "Your saved keys and passwords are kept in a file only your passphrase opens. They lock each time the computer running localDot restarts, and dot can't use them until you unlock them. Sites already signed in keep working.";
-export const SETUP_TEXT =
-  "The computer running localDot has no keyring, so your keys and passwords go in a file only this passphrase opens. You'll enter it after each restart; if you forget it, you'll add your keys again.";
+export const LOCKED_TEXT = t`Your saved keys and passwords are kept in a file only your passphrase opens. They lock each time the computer running localDot restarts, and dot can't use them until you unlock them. Sites already signed in keep working.`;
+export const SETUP_TEXT = t`The computer running localDot has no keyring, so your keys and passwords go in a file only this passphrase opens. You'll enter it after each restart; if you forget it, you'll add your keys again.`;
 
 export interface KeysPanelProps {
   active: boolean;
@@ -230,7 +239,7 @@ export function KeysPanel({
           ?.focus({ preventScroll: true });
       }}
     >
-      {wide ? "Add a key" : "Add key"}
+      {wide ? t`Add a key` : t`Add key`}
     </Button>
   );
 
@@ -242,14 +251,14 @@ export function KeysPanel({
         <section className="keys-section" aria-labelledby="keys-unlock-title">
           <GroupHead
             id="keys-unlock-title"
-            title={setup ? "Choose a passphrase" : "Unlock your saved keys"}
+            title={setup ? t`Choose a passphrase` : t`Unlock your saved keys`}
           />
           <Card id="keys-unlock" className="keys-unlock">
             <p className="keys-unlock-text">{setup ? SETUP_TEXT : LOCKED_TEXT}</p>
             <UnlockKeys
               setup={setup}
               unlock={keys.unlock}
-              label={setup ? "Choose a passphrase" : "Unlock saved keys"}
+              label={setup ? t`Choose a passphrase` : t`Unlock saved keys`}
             />
             <p className="keys-unlock-note">{UNLOCK_PRIVACY}</p>
           </Card>
@@ -257,9 +266,13 @@ export function KeysPanel({
       )}
       <Protection health={health} />
       <section className="keys-section" aria-labelledby="keys-yours">
-        <GroupHead id="keys-yours" title="Your keys" aside={!phone && !formShown && add(false)} />
+        <GroupHead
+          id="keys-yours"
+          title={t`Your keys`}
+          aside={!phone && !formShown && add(false)}
+        />
         {offline ? (
-          <GroupNote>Your keys show here once key protection is back on.</GroupNote>
+          <GroupNote>{t`Your keys show here once key protection is back on.`}</GroupNote>
         ) : (
           <>
             {keys.loadError && (
@@ -297,7 +310,7 @@ export function KeysPanel({
               </div>
             )}
             {savedNote && <GroupNote role="status">{savedNote}</GroupNote>}
-            {held && <GroupNote>{HELD}.</GroupNote>}
+            {held && <GroupNote>{t`Keys are held until the audit log works again.`}</GroupNote>}
           </>
         )}
       </section>
@@ -305,7 +318,7 @@ export function KeysPanel({
         <section
           ref={editor}
           className="keys-section"
-          aria-label={`Edit ${editing.metadata?.label || editing.id}`}
+          aria-label={t`Edit ${editing.metadata?.label || editing.id}`}
         >
           <KeyMetadataEditor
             key={editing.id}
@@ -317,7 +330,7 @@ export function KeysPanel({
       )}
       {again ? (
         <section ref={form} className="keys-section" aria-labelledby="keys-reenter">
-          <GroupHead id="keys-reenter" title={`Re-enter ${again.id}`} />
+          <GroupHead id="keys-reenter" title={t`Re-enter ${again.id}`} />
           <Card>
             <KeyForm
               key={again.id}
@@ -334,7 +347,7 @@ export function KeysPanel({
         </section>
       ) : formShown ? (
         <section ref={form} className="keys-section" aria-labelledby="keys-add">
-          <GroupHead id="keys-add" title="Add a key" />
+          <GroupHead id="keys-add" title={t`Add a key`} />
           <Card>
             <KeyForm
               intakeRef={intake}

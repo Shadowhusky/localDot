@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { useLoadAgain } from "../lib/useLoadAgain.ts";
 import { downloadResult } from "./file-transfer.ts";
@@ -47,7 +48,7 @@ export function StepImage({
   const current = state?.key === key ? state : undefined;
   const resource = useRunPictureResource(image, sessionId, current?.bytes);
   return (
-    <figure className="step-output-image step-preview-resource" aria-label="Image output">
+    <figure className="step-output-image step-preview-resource" aria-label={t`Image output`}>
       {current?.url ? (
         <img
           src={current.url}
@@ -59,9 +60,9 @@ export function StepImage({
           }}
         />
       ) : (
-        <p role="status">{current?.failed ? "Image preview unavailable." : "Loading image…"}</p>
+        <p role="status">{current?.failed ? t`Image preview unavailable.` : t`Loading image…`}</p>
       )}
-      {current?.url && <StepPreviewCover label="Preview image" resource={resource} />}
+      {current?.url && <StepPreviewCover label={t`Preview image`} resource={resource} />}
     </figure>
   );
 }

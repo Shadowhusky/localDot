@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupNote, GroupRow } from "../ui/Group.tsx";
@@ -35,31 +36,31 @@ export function VoiceSection({ voice }: { voice: VoiceControl }) {
   return (
     <>
       <p className="settings-lede">
-        Tap the microphone to talk. Stop keeps your words in the message; Send sends them directly.
-        Cancel discards the recording.{keys ? ` You can also hold ${keys} to dictate.` : ""}
+        {t`Tap the microphone to talk. Stop keeps your words in the message; Send sends them directly. Cancel discards the recording.`}
+        {keys ? ` ${t`You can also hold ${keys} to dictate.`}` : ""}
       </p>
       <Group>
         <GroupRow
-          label="Speech to text"
+          label={t`Speech to text`}
           detail={routeDetail(route, computer)}
           trailing={
             offer ? (
               <Button size="sm" busy={voice.downloading} onClick={voice.download}>
-                Download
+                {t`Download`}
               </Button>
             ) : (
               routeLabel(route, computer)
             )
           }
         />
-        <Field label="Language" inline className="ui-group-row">
+        <Field label={t`Language`} inline className="ui-group-row">
           <Select
             appearance="inline"
             value={prefs.language}
             items={[
               {
                 value: AUTO_LANGUAGE,
-                label: `Automatic (${languageName(speechLanguage(AUTO_LANGUAGE, voice.browser))})`,
+                label: t`Automatic (${languageName(speechLanguage(AUTO_LANGUAGE, voice.browser))})`,
               },
               ...VOICE_LANGUAGES,
             ]}
@@ -68,8 +69,8 @@ export function VoiceSection({ voice }: { voice: VoiceControl }) {
         </Field>
         <Switch
           className="ui-group-row"
-          label="Allow online speech"
-          description="Only when this device can't. The browser's speech service then hears you."
+          label={t`Allow online speech`}
+          description={t`Only when this device can't. The browser's speech service then hears you.`}
           checked={prefs.online}
           onCheckedChange={(online) => voice.change({ online })}
         />
@@ -83,15 +84,16 @@ export function VoiceSection({ voice }: { voice: VoiceControl }) {
       <Group>
         <Switch
           className="ui-group-row"
-          label="Read replies aloud"
-          description="dot reads each new reply in this device's own voice."
+          label={t`Read replies aloud`}
+          description={t`dot reads each new reply in this device's own voice.`}
           checked={prefs.readAloud}
           onCheckedChange={(readAloud) => voice.change({ readAloud })}
         />
       </Group>
       <GroupNote>
-        Your voice is never saved, and dot only gets the text you send.
-        {!voice.saved && " This browser couldn't save these choices, so they last for this visit."}
+        {t`Your voice is never saved, and dot only gets the text you send.`}
+        {!voice.saved &&
+          ` ${t`This browser couldn't save these choices, so they last for this visit.`}`}
       </GroupNote>
     </>
   );

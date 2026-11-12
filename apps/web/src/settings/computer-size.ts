@@ -5,6 +5,7 @@ import {
   MEMORY_STEP_BYTES,
 } from "@localdot/protocol";
 import { count } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import type { SliderMark } from "../ui/StepSlider.tsx";
 
@@ -20,7 +21,7 @@ export const saveSize = async (api: ApiClient, size: ComputerSize) =>
 export function sizeProblem(error: unknown): string {
   return error instanceof ApiError && [400, 409, 503].includes(error.status)
     ? error.message
-    : "The computer's size couldn't be saved. Try again.";
+    : t`The computer's size couldn't be saved. Try again.`;
 }
 
 export const gigabytes = (bytes: number) => `${Number((bytes / GIB).toFixed(1))} GB`;
@@ -46,20 +47,22 @@ export function dockerTip(docker: ComputerSizeView["docker"], what: "memory" | "
   ).replace(" ", "\u00a0");
   if (docker.app === "host")
     return what === "memory"
-      ? `Docker gives localDot all ${amount} of this computer's memory.`
-      : `Docker gives localDot all ${docker.cpus} of this computer's CPUs.`;
+      ? t`Docker gives localDot all ${amount} of this computer's memory.`
+      : t`Docker gives localDot all ${docker.cpus} of this computer's CPUs.`;
   const where =
     docker.app === "docker-desktop"
       ? "Docker Desktop → Settings → Resources"
       : docker.app === "orbstack"
         ? "OrbStack → Settings → System"
-        : "the settings of the app that runs Docker";
-  return `Docker gives localDot ${amount}. Raise it in ${where}.`;
+        : null;
+  return where
+    ? t`Docker gives localDot ${amount}. Raise it in ${where}.`
+    : t`Docker gives localDot ${amount}. Raise it in the settings of the app that runs Docker.`;
 }
 
 export function browserLine(size: ComputerSize): string {
   const share = browserShare(size);
-  return `The web browser runs beside the desktop with ${gigabytes(share.memoryBytes)} and ${cpuCount(share.cpus)} of its own.`;
+  return t`The web browser runs beside the desktop with ${gigabytes(share.memoryBytes)} and ${cpuCount(share.cpus)} of its own.`;
 }
 
 export interface SliderModel {
@@ -97,22 +100,27 @@ export function memorySlider(view: ComputerSizeView, value: number): SliderModel
     ],
     legend: [
       ...(view.usage
-        ? [{ tone: "used" as const, text: `${gigabytes(view.usage.memoryBytes)} in use` }]
+        ? [{ tone: "used" as const, text: t`${gigabytes(view.usage.memoryBytes)} in use` }]
         : []),
       ...(held > 0
-        ? [{ tone: "held" as const, text: `Other dots hold ${gigabytes(view.others.memoryBytes)}` }]
+        ? [
+            {
+              tone: "held" as const,
+              text: t`Other dots hold ${gigabytes(view.others.memoryBytes)}`,
+            },
+          ]
         : []),
       ...(kept > 0
-        ? [{ tone: "kept" as const, text: `${gigabytes(view.headroomBytes)} kept free` }]
+        ? [{ tone: "kept" as const, text: t`${gigabytes(view.headroomBytes)} kept free` }]
         : []),
     ],
     endLabel: gigabytes(view.docker.memoryBytes),
     endTip: dockerTip(view.docker, "memory"),
-    lowReason: `dot's computer needs at least ${gigabytes(view.min.memoryBytes)}.`,
+    lowReason: t`dot's computer needs at least ${gigabytes(view.min.memoryBytes)}.`,
     highReason:
       held > 0
-        ? `That's all Docker can hold for it: other dots hold ${gigabytes(view.others.memoryBytes)} and ${gigabytes(view.headroomBytes)} stays free for the web browser and Docker.`
-        : `That's all Docker can hold for it: ${gigabytes(view.headroomBytes)} stays free for the web browser and Docker.`,
+        ? t`That's all Docker can hold for it: other dots hold ${gigabytes(view.others.memoryBytes)} and ${gigabytes(view.headroomBytes)} stays free for the web browser and Docker.`
+        : t`That's all Docker can hold for it: ${gigabytes(view.headroomBytes)} stays free for the web browser and Docker.`,
   };
 }
 
@@ -132,18 +140,18 @@ export function cpuSlider(view: ComputerSizeView, value: number): SliderModel {
     ],
     legend: [
       ...(view.usage?.cpus !== undefined
-        ? [{ tone: "used" as const, text: `${cpuCount(view.usage.cpus)} in use` }]
+        ? [{ tone: "used" as const, text: t`${cpuCount(view.usage.cpus)} in use` }]
         : []),
       ...(held > 0
-        ? [{ tone: "held" as const, text: `Other dots hold ${cpuCount(view.others.cpus)}` }]
+        ? [{ tone: "held" as const, text: t`Other dots hold ${cpuCount(view.others.cpus)}` }]
         : []),
     ],
     endLabel: cpuCount(end),
     endTip: dockerTip(view.docker, "cpus"),
-    lowReason: `dot's computer needs at least ${cpuCount(view.min.cpus)}.`,
+    lowReason: t`dot's computer needs at least ${cpuCount(view.min.cpus)}.`,
     highReason:
       held > 0
-        ? `That's all Docker can give it: other dots hold ${cpuCount(view.others.cpus)}.`
-        : "That's every CPU Docker has.",
+        ? t`That's all Docker can give it: other dots hold ${cpuCount(view.others.cpus)}.`
+        : t`That's every CPU Docker has.`,
   };
 }

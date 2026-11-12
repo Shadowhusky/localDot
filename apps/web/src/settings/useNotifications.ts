@@ -1,5 +1,6 @@
 import type { BannerKind, NotifySettings, PushDevice } from "@localdot/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   copyHomeScreenLink,
@@ -31,6 +32,8 @@ export interface NotificationsView {
   device: DeviceState | null;
   // What this device is called in its row: "This Mac", "This iPhone".
   name: string;
+  // What Send a test says before one is sent: "Check notifications on this Mac."
+  testHint: string;
   // This browser's own notification permission: on this Mac it lets a hidden tab show the
   // notification itself, so a click opens the task (the Mac banner cannot).
   tab: NotificationPermission | "unsupported";
@@ -140,13 +143,17 @@ export function useNotifications(
   };
 
   const label = deviceLabel(env().userAgent, env().maxTouchPoints);
+  const generic = label === "This device";
   return {
     settings,
     banner,
     failed,
     devices,
     device,
-    name: label === "This device" ? "This computer" : `This ${label}`,
+    name: generic ? t`This computer` : t`This ${label}`,
+    testHint: generic
+      ? t`Check notifications on this computer.`
+      : t`Check notifications on this ${label}.`,
     tab,
     busy,
     removing,
@@ -195,10 +202,10 @@ export function useNotifications(
           if (!local && device?.kind !== "on") {
             const line =
               device?.kind === "off"
-                ? "Turn on notifications for this device above, then send a test."
+                ? t`Turn on notifications for this device above, then send a test.`
                 : device
                   ? deviceCopy(device, banner).line
-                  : "Wait for this device to finish loading, then try again.";
+                  : t`Wait for this device to finish loading, then try again.`;
             setResult({ line, failed: true });
             announce(ANNOUNCE, line);
             return;
@@ -212,10 +219,12 @@ export function useNotifications(
           const line = local
             ? testResultLine(reply, banner)
             : delivered?.result === "sent"
-              ? `Test sent to this ${label === "This device" ? "device" : label}. If no banner appears, check browser notifications and Do Not Disturb on this device.`
+              ? generic
+                ? t`Test sent to this device. If no banner appears, check browser notifications and Do Not Disturb on this device.`
+                : t`Test sent to this ${label}. If no banner appears, check browser notifications and Do Not Disturb on this device.`
               : delivered?.result === "gone"
-                ? "This device's notification registration expired. Turn notifications on again, then retry."
-                : "The test couldn't reach this device. Check its connection and turn notifications on again.";
+                ? t`This device's notification registration expired. Turn notifications on again, then retry.`
+                : t`The test couldn't reach this device. Check its connection and turn notifications on again.`;
           setResult({ line, failed });
           announce(ANNOUNCE, line);
           if (delivered?.result === "gone") await refresh();
@@ -242,8 +251,8 @@ export function useNotifications(
           return;
         }
         toast.current({
-          title: "Sign-in link copied",
-          description: "Paste it in the Home Screen app within a minute. It works once.",
+          title: t`Sign-in link copied`,
+          description: t`Paste it in the Home Screen app within a minute. It works once.`,
           tone: "success",
         });
       }),

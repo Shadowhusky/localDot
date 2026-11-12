@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 
 // The thread pages through history as it scrolls. Show earlier messages waits at the top while
@@ -15,24 +16,24 @@ export function HistoryPages({
 }) {
   if (!older && !newer) return null;
   return (
-    <nav className="history-pages" aria-label="Message pages" data-older={older || undefined}>
+    <nav className="history-pages" aria-label={t`Message pages`} data-older={older || undefined}>
       <Button
         variant="quiet"
         size="sm"
         className="history-older"
-        disabledReason={older ? undefined : "These are the earliest messages."}
+        disabledReason={older ? undefined : t`These are the earliest messages.`}
         onClick={onOlder}
       >
-        Show earlier messages
+        {t`Show earlier messages`}
       </Button>
       <Button
         variant="quiet"
         size="sm"
         className="history-newer"
-        disabledReason={newer ? undefined : "These are the latest messages."}
+        disabledReason={newer ? undefined : t`These are the latest messages.`}
         onClick={onNewer}
       >
-        Newer messages
+        {t`Newer messages`}
       </Button>
     </nav>
   );

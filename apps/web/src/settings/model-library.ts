@@ -1,4 +1,5 @@
 import { type ProviderSpec, providerById } from "@localdot/providers";
+import { t, tr } from "../i18n/index.ts";
 import type { PickerGroup } from "../ui/listbox.ts";
 import {
   groupOf,
@@ -51,11 +52,11 @@ export function libraryGroups(
 export function libraryProblem(choice: RoleChoice, keys: readonly PickerKey[]): string | undefined {
   if (subscription(choice.provider)) return undefined;
   const provider = providerById(choice.provider);
-  if (!provider) return "No longer offered";
+  if (!provider) return t`No longer offered`;
   if (provider.local) return undefined;
   if (!choice.key || !matchingKeys(provider, keys).some((key) => key.id === choice.key))
-    return "Its key is gone";
-  if (provider.custom && !choice.plan && !choice.price) return "Needs a price";
+    return t`Its key is gone`;
+  if (provider.custom && !choice.plan && !choice.price) return t`Needs a price`;
   return undefined;
 }
 
@@ -112,6 +113,13 @@ export const SOURCE_GROUPS = [
   "Later releases",
 ] as const;
 
+const SOURCE_GROUP_NAMES: Readonly<Record<(typeof SOURCE_GROUPS)[number], string>> = {
+  Ready: tr("Ready"),
+  "Not set up yet": tr("Not set up yet"),
+  "Not available here": tr("Not available here"),
+  "Later releases": tr("Later releases"),
+};
+
 export interface ModelSource {
   readonly id: string;
   readonly label: string;
@@ -129,12 +137,17 @@ export interface ModelSource {
 }
 
 const PLAN_SOURCES = [
-  { id: CHATGPT, label: "ChatGPT plan", ready: "Signed in", setup: "Sign in with your account" },
+  {
+    id: CHATGPT,
+    label: tr("ChatGPT plan"),
+    ready: tr("Signed in"),
+    setup: tr("Sign in with your account"),
+  },
   {
     id: CLAUDE_CODE,
-    label: "Claude Code (your plan)",
-    ready: "Uses your own Claude Code",
-    setup: "Set up Claude Code",
+    label: tr("Claude Code (your plan)"),
+    ready: tr("Uses your own Claude Code"),
+    setup: tr("Set up Claude Code"),
   },
 ] as const;
 
@@ -164,7 +177,7 @@ export function modelSources(
         label: custom
           ? modelGroupLabel({ provider: provider.id, model: "", key: key.id }, index)
           : provider.name,
-        description: `Key ${key.id}`,
+        description: t`Key ${key.id}`,
         provider: provider.id,
         key: key.id,
         custom,
@@ -184,7 +197,7 @@ export function modelSources(
     typed: false,
     group: ready ? "Ready" : "Not set up yet",
     ...(ready ? {} : { setup: "plan" as const }),
-    ...(!ready && unavailable(row.id) ? { disabledReason: "Not available on this Mac yet" } : {}),
+    ...(!ready && unavailable(row.id) ? { disabledReason: t`Not available on this Mac yet` } : {}),
   });
   for (const row of PLAN_SOURCES) if (plansReady[row.id]) sources.push(plan(row, true));
   for (const provider of listed)
@@ -192,7 +205,7 @@ export function modelSources(
       sources.push({
         id: provider.id,
         label: provider.name,
-        description: "Runs on this Mac",
+        description: t`Runs on this Mac`,
         provider: provider.id,
         custom: false,
         typed: true,
@@ -208,21 +221,21 @@ export function modelSources(
       if (!provider.custom && matchingKeys(provider, keys).length) continue;
       sources.push({
         id: provider.id,
-        label: provider.custom ? "Custom endpoint" : provider.name,
+        label: provider.custom ? t`Custom endpoint` : provider.name,
         description: provider.custom
-          ? "Add your server's address and key"
+          ? t`Add your server's address and key`
           : provider.plan
-            ? "Add your plan's key"
-            : "Add an API key",
+            ? t`Add your plan's key`
+            : t`Add an API key`,
         provider: provider.id,
         custom: !!provider.custom,
         typed: !!provider.custom,
         ...(provider.availableIn
-          ? { group: "Later releases" as const, disabledReason: "Coming in a later release" }
+          ? { group: "Later releases" as const, disabledReason: t`Coming in a later release` }
           : provider.notOffered
             ? {
                 group: "Not available here" as const,
-                disabledReason: "Its maker allows it only in their own tools",
+                disabledReason: t`Its maker allows it only in their own tools`,
               }
             : {
                 group: "Not set up yet" as const,
@@ -243,7 +256,7 @@ export const firstSource = (sources: readonly ModelSource[]) =>
 
 export function sourceGroups(sources: readonly ModelSource[]): PickerGroup[] {
   return SOURCE_GROUPS.map((label) => ({
-    label,
+    label: SOURCE_GROUP_NAMES[label],
     items: sources
       .filter((row) => row.group === label)
       .map((row) => ({

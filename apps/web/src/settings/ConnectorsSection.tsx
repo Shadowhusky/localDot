@@ -6,6 +6,7 @@ import {
   connectorSecretId,
 } from "@localdot/protocol";
 import { type FormEvent, type ReactNode, useId, useMemo, useRef, useState } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
@@ -79,7 +80,7 @@ function HelpLink({ entry }: { entry: CatalogEntry }) {
       {entry.key.help}
       <span className="connectors-link">
         <a href={entry.key.helpUrl} target="_blank" rel="noopener noreferrer">
-          Get one from {entry.name}
+          {t`Get one from ${entry.name}`}
         </a>
         <span className="connectors-host">{new URL(entry.key.helpUrl).host}</span>
       </span>
@@ -110,7 +111,7 @@ function ToolRow({
           <Select
             appearance="inline"
             size="sm"
-            aria-label={`${label} in ${appName}`}
+            aria-label={t`${label} in ${appName}`}
             value={toolMode(tool)}
             items={TOOL_MODES}
             onValueChange={(next) => {
@@ -141,16 +142,16 @@ function ToolList({ view, connectors }: { view: ConnectorView; connectors: Conne
           <TextField
             size="sm"
             filled
-            aria-label={`Search ${view.name}'s tools`}
+            aria-label={t`Search ${view.name}'s tools`}
             prefix={<Icon name="search" size={14} />}
-            placeholder="Search tools"
+            placeholder={t`Search tools`}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
       )}
       {view.tools.length > 0 && (
-        <ul className="connectors-tool-list" aria-label={`${view.name}'s tools`}>
+        <ul className="connectors-tool-list" aria-label={t`${view.name}'s tools`}>
           {shown.map((tool) => (
             <ToolRow
               key={tool.name}
@@ -162,7 +163,9 @@ function ToolList({ view, connectors }: { view: ConnectorView; connectors: Conne
               }
             />
           ))}
-          {!shown.length && <li className="connectors-empty">No tools match “{query.trim()}”.</li>}
+          {!shown.length && (
+            <li className="connectors-empty">{t`No tools match “${query.trim()}”.`}</li>
+          )}
         </ul>
       )}
       <div className="connectors-actions">
@@ -171,24 +174,24 @@ function ToolList({ view, connectors }: { view: ConnectorView; connectors: Conne
           size="sm"
           icon="repeat"
           busy={busy && view.status === "connecting"}
-          disabledReason={!view.enabled ? "Turn the app on first" : undefined}
+          disabledReason={!view.enabled ? t`Turn the app on first` : undefined}
           onClick={() => connectors.refresh(view.id)}
         >
-          Check again
+          {t`Check again`}
         </Button>
         <Button ref={remove} variant="quiet" size="sm" onClick={() => setConfirming(true)}>
-          Remove…
+          {t`Remove…`}
         </Button>
       </div>
       <Dialog
         open={confirming}
         onClose={() => setConfirming(false)}
         anchor={remove}
-        title={`Remove ${view.name}?`}
-        description="dot stops using it, and the key localDot keeps for it is deleted."
+        title={t`Remove ${view.name}?`}
+        description={t`dot stops using it, and the key localDot keeps for it is deleted.`}
       >
         <Button variant="quiet" onClick={() => setConfirming(false)}>
-          Cancel
+          {t`Cancel`}
         </Button>
         <Button
           variant="destructive"
@@ -197,7 +200,7 @@ function ToolList({ view, connectors }: { view: ConnectorView; connectors: Conne
             void connectors.remove(view.id);
           }}
         >
-          Remove
+          {t`Remove`}
         </Button>
       </Dialog>
     </div>
@@ -221,16 +224,16 @@ function WaitingForApproval({
   const page = connectors.page?.id === view.id ? connectors.page.url : undefined;
   return (
     <GroupRow
-      label={view.signIn?.remote ? "Finish on your Mac" : "Approve in your browser"}
+      label={view.signIn?.remote ? t`Finish on your Mac` : t`Approve in your browser`}
       detail={
         view.signIn?.remote ? (
-          "The sign-in opened in the browser on your Mac, where your accounts are. It can't be finished from this device."
+          t`The sign-in opened in the browser on your Mac, where your accounts are. It can't be finished from this device.`
         ) : page ? (
           <a className="connectors-page" href={page} target="_blank" rel="noopener noreferrer">
-            Open the sign-in page
+            {t`Open the sign-in page`}
           </a>
         ) : (
-          "The sign-in page is open in your browser. This updates by itself when you're done."
+          t`The sign-in page is open in your browser. This updates by itself when you're done.`
         )
       }
       trailing={
@@ -240,7 +243,7 @@ function WaitingForApproval({
           busy={connectors.pending === view.id}
           onClick={() => connectors.cancelSignIn(view.id)}
         >
-          Cancel
+          {t`Cancel`}
         </Button>
       }
     />
@@ -252,20 +255,20 @@ function Connection({ view, connectors }: { view: ConnectorView; connectors: Con
   const busy = connectors.pending === view.id;
   return (
     <GroupRow
-      label={view.account ? `Connected as ${view.account}` : "Connected"}
-      detail="It stays connected. dot never sees this sign-in."
+      label={view.account ? t`Connected as ${view.account}` : t`Connected`}
+      detail={t`It stays connected. dot never sees this sign-in.`}
     >
       <div className="connectors-connection">
         <Button variant="quiet" size="sm" busy={busy} onClick={() => connectors.signIn(view.id)}>
-          Reconnect
+          {t`Reconnect`}
         </Button>
         <Button
           variant="quiet"
           size="sm"
-          disabledReason={busy ? "Working on it" : undefined}
+          disabledReason={busy ? t`Working on it` : undefined}
           onClick={() => connectors.disconnect(view.id)}
         >
-          Disconnect
+          {t`Disconnect`}
         </Button>
       </div>
     </GroupRow>
@@ -281,17 +284,17 @@ function NextStep({ view, connectors }: { view: ConnectorView; connectors: Conne
   if (!view.enabled) return null;
   if (view.signIn) return <WaitingForApproval view={view} connectors={connectors} />;
   if (view.status === "needs_sign_in") {
-    const verb = signsIn?.signedIn ? "Reconnect" : "Connect";
+    const verb = signsIn?.signedIn ? t`Reconnect` : t`Connect`;
     const where = view.server.kind === "remote" ? connectorHost(view.server.url) : view.name;
     return (
       <GroupRow
-        label={`${verb} ${view.name}`}
+        label={signsIn?.signedIn ? t`Reconnect ${view.name}` : t`Connect ${view.name}`}
         detail={
           view.problem
             ? view.problem
             : onAnotherDevice()
-              ? `Opens ${where} in the browser on your Mac. You'll need to be there to approve it.`
-              : `Opens ${where} in your browser to approve it.`
+              ? t`Opens ${where} in the browser on your Mac. You'll need to be there to approve it.`
+              : t`Opens ${where} in your browser to approve it.`
         }
         trailing={
           <Button
@@ -340,7 +343,7 @@ function NextStep({ view, connectors }: { view: ConnectorView; connectors: Conne
       <div className="ui-group-row">
         <form className="connectors-form" onSubmit={submit}>
           <SecretField
-            label={entry?.key?.label ?? "Key"}
+            label={entry?.key?.label ?? t`Key`}
             description={entry ? <HelpLink entry={entry} /> : undefined}
             error={connectors.failure?.id === view.id ? connectors.failure.text : undefined}
             value={key}
@@ -352,9 +355,9 @@ function NextStep({ view, connectors }: { view: ConnectorView; connectors: Conne
               variant="primary"
               size="sm"
               busy={busy}
-              disabledReason={key.trim() ? undefined : "Paste the key first"}
+              disabledReason={key.trim() ? undefined : t`Paste the key first`}
             >
-              Save key
+              {t`Save key`}
             </Button>
           </div>
         </form>
@@ -364,11 +367,11 @@ function NextStep({ view, connectors }: { view: ConnectorView; connectors: Conne
   if (view.status === "failed")
     return (
       <GroupRow
-        label="Couldn't connect"
-        detail={view.problem ?? "The app didn't answer."}
+        label={t`Couldn't connect`}
+        detail={view.problem ?? t`The app didn't answer.`}
         trailing={
           <Button size="sm" busy={busy} onClick={() => connectors.refresh(view.id)}>
-            Try again
+            {t`Try again`}
           </Button>
         }
       />
@@ -410,8 +413,8 @@ function AppCard({ view, connectors }: { view: ConnectorView; connectors: Connec
         view.status !== "needs_sign_in" &&
         signInOf(view)?.signedIn && <Connection view={view} connectors={connectors} />}
       <GroupRow
-        label="Tools"
-        trailing={view.tools.length ? `${on} of ${view.tools.length} on` : "None listed yet"}
+        label={t`Tools`}
+        trailing={view.tools.length ? t`${on} of ${view.tools.length} on` : t`None listed yet`}
         expanded={open}
         controls={panel}
         onSelect={() => setOpen((now) => !now)}
@@ -430,9 +433,9 @@ function AppCard({ view, connectors }: { view: ConnectorView; connectors: Connec
 }
 
 const ADDRESS_SIGN_INS = [
-  { value: "oauth", label: "Its own sign-in page" },
-  { value: "key", label: "A key" },
-  { value: "none", label: "Nothing" },
+  { value: "oauth", label: tr("Its own sign-in page") },
+  { value: "key", label: tr("A key") },
+  { value: "none", label: tr("Nothing") },
 ] as const;
 
 // An app that isn't listed: its address, or the command that runs it on the computer.
@@ -475,17 +478,17 @@ function CustomApp({
     <form ref={scope} className="connectors-form connectors-inline" onSubmit={submit} noValidate>
       <SegmentedControl
         size={32}
-        aria-label="How the app is reached"
+        aria-label={t`How the app is reached`}
         value={form.kind}
         items={[
-          { value: "address", label: "By address" },
-          { value: "command", label: "By command" },
+          { value: "address", label: t`By address` },
+          { value: "command", label: t`By command` },
         ]}
         onValueChange={(value) => set("kind", value as CustomForm["kind"])}
       />
-      <Field label="Name" error={problems.name}>
+      <Field label={t`Name`} error={problems.name}>
         <TextField
-          placeholder="Calendar"
+          placeholder={t`Calendar`}
           maxLength={40}
           value={form.name}
           onChange={(event) => set("name", event.target.value)}
@@ -494,8 +497,8 @@ function CustomApp({
       {command ? (
         <>
           <Field
-            label="Command"
-            description="It runs on your computer in a space of its own, with no access to your files."
+            label={t`Command`}
+            description={t`It runs on your computer in a space of its own, with no access to your files.`}
             error={problems.command}
           >
             <TextField
@@ -509,7 +512,7 @@ function CustomApp({
             />
           </Field>
           <div className="keys-pair">
-            <Field label="Key variable" error={problems.keyEnv}>
+            <Field label={t`Key variable`} error={problems.keyEnv}>
               <TextField
                 className="keys-code"
                 placeholder="API_KEY"
@@ -519,7 +522,7 @@ function CustomApp({
                 onChange={(event) => set("keyEnv", event.target.value)}
               />
             </Field>
-            <Field label="Key is for" error={problems.keyHost}>
+            <Field label={t`Key is for`} error={problems.keyHost}>
               <TextField
                 placeholder="api.example.com"
                 inputMode="url"
@@ -533,7 +536,7 @@ function CustomApp({
         </>
       ) : (
         <>
-          <Field label="Address" error={problems.url}>
+          <Field label={t`Address`} error={problems.url}>
             <TextField
               placeholder="https://example.com/mcp"
               inputMode="url"
@@ -544,7 +547,7 @@ function CustomApp({
               onChange={(event) => set("url", event.target.value)}
             />
           </Field>
-          <Field label="Signs in with">
+          <Field label={t`Signs in with`}>
             <Select
               value={form.signIn}
               items={ADDRESS_SIGN_INS}
@@ -556,12 +559,12 @@ function CustomApp({
       <Collapse open={command || form.signIn === "key"}>
         <div className="connectors-key keys-pair">
           <SecretField
-            label={command ? "Key (optional)" : "Key"}
+            label={command ? t`Key (optional)` : t`Key`}
             error={problems.key}
             value={form.key}
             onChange={(value) => set("key", value)}
           />
-          <Field label="Sent in header" error={problems.header}>
+          <Field label={t`Sent in header`} error={problems.header}>
             <TextField
               className="keys-code"
               autoCapitalize="off"
@@ -580,10 +583,10 @@ function CustomApp({
       )}
       <div className="connectors-form-actions">
         <Button variant="quiet" onClick={onDone}>
-          Cancel
+          {t`Cancel`}
         </Button>
         <Button type="submit" variant="primary" busy={busy}>
-          Add app
+          {t`Add app`}
         </Button>
       </div>
     </form>
@@ -624,7 +627,7 @@ function CatalogRow({
     event.preventDefault();
     if (busy) return;
     if (!key.trim()) {
-      setProblem("Paste the key first.");
+      setProblem(t`Paste the key first.`);
       reveal();
       return;
     }
@@ -640,7 +643,7 @@ function CatalogRow({
           <>
             {auth === "oauth-or-key" && (
               <Button variant="quiet" size="sm" aria-expanded={open} onClick={() => onOpen(!open)}>
-                {open ? "Cancel" : "Use a key"}
+                {open ? t`Cancel` : t`Use a key`}
               </Button>
             )}
             {(!open || needsKey) && (
@@ -653,7 +656,7 @@ function CatalogRow({
                   else add();
                 }}
               >
-                {open ? "Cancel" : signsIn ? "Connect" : "Add"}
+                {open ? t`Cancel` : signsIn ? t`Connect` : t`Add`}
               </Button>
             )}
           </>
@@ -667,7 +670,7 @@ function CatalogRow({
             noValidate
           >
             <SecretField
-              label={entry.key?.label ?? "Key"}
+              label={entry.key?.label ?? t`Key`}
               description={<HelpLink entry={entry} />}
               error={
                 problem ?? (connectors.failure?.id === "new" ? connectors.failure.text : undefined)
@@ -680,7 +683,7 @@ function CatalogRow({
             />
             <div className="connectors-form-actions">
               <Button type="submit" variant="primary" size="sm" busy={busy}>
-                Save key
+                {t`Save key`}
               </Button>
             </div>
           </form>
@@ -704,17 +707,15 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
   return (
     <div className="settings-connectors">
       <p className="settings-lede">
-        dot works in these apps directly. Connect one and approve it in your browser: it stays
-        connected, and dot never sees its sign-in or keys. Changes dot makes in an app need your
-        approval.
+        {t`dot works in these apps directly. Connect one and approve it in your browser: it stays connected, and dot never sees its sign-in or keys. Changes dot makes in an app need your approval.`}
       </p>
       {phase === "error" ? (
         <Group>
           <GroupRow
-            label="Couldn't load your apps"
+            label={t`Couldn't load your apps`}
             trailing={
               <Button variant="quiet" size="sm" onClick={connectors.reload}>
-                Try again
+                {t`Try again`}
               </Button>
             }
           />
@@ -734,7 +735,7 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
       ) : (
         connectors.connectors.length > 0 && (
           <section className="connectors-block" aria-labelledby="connectors-yours">
-            <GroupHead id="connectors-yours" title="Your apps" />
+            <GroupHead id="connectors-yours" title={t`Your apps`} />
             <div className="connectors-apps">
               {connectors.connectors.map((view) => (
                 <AppCard key={view.id} view={view} connectors={connectors} />
@@ -745,9 +746,9 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
       )}
       {phase === "ready" && (
         <section className="connectors-block" aria-labelledby="connectors-add">
-          <GroupHead id="connectors-add" title="Add an app" />
+          <GroupHead id="connectors-add" title={t`Add an app`} />
           <Group>
-            <ul className="connectors-catalog" aria-label="Apps you can add">
+            <ul className="connectors-catalog" aria-label={t`Apps you can add`}>
               {addable.map((entry) => (
                 <CatalogRow
                   key={entry.id}
@@ -764,8 +765,8 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
               <li>
                 <GroupRow
                   leading={<IconTile icon="plug" />}
-                  label="Another app"
-                  detail="By its address, or the command that runs it"
+                  label={t`Another app`}
+                  detail={t`By its address, or the command that runs it`}
                   trailing={
                     <Button
                       size="sm"
@@ -775,7 +776,7 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
                         setOpened(opened === "custom" ? null : "custom");
                       }}
                     >
-                      {opened === "custom" ? "Cancel" : "Add"}
+                      {opened === "custom" ? t`Cancel` : t`Add`}
                     </Button>
                   }
                 >
@@ -791,8 +792,7 @@ export function ConnectorsSection({ connectors }: { connectors: ConnectorsView }
             </ul>
           </Group>
           <GroupNote>
-            Apps that run on your computer start in a space of their own, with no access to your
-            files.
+            {t`Apps that run on your computer start in a space of their own, with no access to your files.`}
           </GroupNote>
         </section>
       )}

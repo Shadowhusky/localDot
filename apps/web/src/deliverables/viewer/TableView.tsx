@@ -2,6 +2,7 @@
 import type { TableFileReply } from "@localdot/protocol";
 import { type ReactNode, useEffect, useId, useState } from "react";
 import { count } from "../../copy/format.ts";
+import { locale, t, tr } from "../../i18n/index.ts";
 import type { ApiClient } from "../../lib/api.ts";
 import { TabPanel, Tabs } from "../../ui/Tabs.tsx";
 import { type FileRef, loadTable } from "../api.ts";
@@ -10,19 +11,24 @@ import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
 type Table = Extract<TableFileReply, { kind: "table" }>;
 const NUMERIC = /^[\s$€£¥+−-]*[\d.,]+\s*%?$/;
 const PROBLEMS: Partial<Record<string, string>> = {
-  computer_off: "Turn on your computer to see this file",
-  busy: "Your computer is busy",
-  failed: "Couldn't load this table",
-  missing: "This version is no longer available",
+  computer_off: tr("Turn on your computer to see this file"),
+  busy: tr("Your computer is busy"),
+  failed: tr("Couldn't load this table"),
+  missing: tr("This version is no longer available"),
 };
 
 // What the caption says: every row when all are shown, else how many of how many.
 export function rowsNote(table: Pick<Table, "rows" | "totalRows" | "columns">): string {
   const shown = table.rows.length;
-  const columns = table.columns > (table.rows[0]?.length ?? 0) ? " · first columns" : "";
-  if (table.totalRows === null) return `First ${count(shown, "row", "rows")}${columns}`;
-  if (table.totalRows <= shown) return `${count(table.totalRows, "row", "rows")}${columns}`;
-  return `Showing 1–${shown.toLocaleString("en-GB")} of ${table.totalRows.toLocaleString("en-GB")} rows${columns}`;
+  const rows =
+    table.totalRows === null
+      ? shown === 1
+        ? t`First ${shown.toLocaleString(locale())} row`
+        : t`First ${shown.toLocaleString(locale())} rows`
+      : table.totalRows <= shown
+        ? count(table.totalRows, "row", "rows")
+        : t`Showing 1–${shown.toLocaleString("en-GB")} of ${table.totalRows.toLocaleString("en-GB")} rows`;
+  return table.columns > (table.rows[0]?.length ?? 0) ? `${rows} · ${t`first columns`}` : rows;
 }
 
 // A table with its first row held at the top and row numbers down the side; a workbook's sheets as
@@ -69,11 +75,11 @@ export function TableView({
             <Tabs
               id={tabs}
               size={28}
-              aria-label="Sheets"
+              aria-label={t`Sheets`}
               value={String(sheet)}
               items={sheets.map((label, i) => ({
                 value: String(i),
-                label: label || `Sheet ${i + 1}`,
+                label: label || t`Sheet ${i + 1}`,
               }))}
               onValueChange={(value) => setSheet(Number(value))}
             />
@@ -85,7 +91,7 @@ export function TableView({
     return (
       <>
         {bar}
-        <ViewerLoading label="Loading the table" />
+        <ViewerLoading label={t`Loading the table`} />
       </>
     );
   const problem = reply === "failed" || reply.kind !== "none" ? "failed" : reply.reason;
@@ -119,14 +125,14 @@ export function TableView({
         className="viewer-stage viewer-table"
       >
         {table.rows.length === 0 ? (
-          <ViewerMessage name={name} title="This sheet is empty" />
+          <ViewerMessage name={name} title={t`This sheet is empty`} />
         ) : (
           // biome-ignore lint/a11y/noNoninteractiveTabindex: The table scrolls both ways, so keyboard users can focus it.
           <div className="viewer-table-scroll" tabIndex={0}>
             <table>
               <thead>
                 <tr>
-                  <th className="viewer-row-number" scope="col" aria-label="Row">
+                  <th className="viewer-row-number" scope="col" aria-label={t`Row`}>
                     1
                   </th>
                   {cells(head).map((cell, c) => (

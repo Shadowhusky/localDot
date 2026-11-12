@@ -1,4 +1,5 @@
 import type { PauseSnapshot, Rect } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { Status } from "../session/status.ts";
 
 // The island's fixed shapes; within one, its width never changes. Ready: the computer is on and
@@ -48,25 +49,25 @@ export function pauseSlot({
     if (canPause) return { kind: "pause" };
     return {
       kind: "pause",
-      reason: handedOver ? "You have the computer" : "Pause isn't available right now",
+      reason: handedOver ? t`You have the computer` : t`Pause isn't available right now`,
     };
   }
   switch (pause.phase) {
     case "pausing":
-      return { kind: "pause", reason: "Pausing after this step" };
+      return { kind: "pause", reason: t`Pausing after this step` };
     case "resuming":
-      return { kind: "continue", reason: "Continuing" };
+      return { kind: "continue", reason: t`Continuing` };
     case "uncertain":
-      return { kind: "continue", reason: "The pause isn't confirmed. Stop the task instead." };
+      return { kind: "continue", reason: t`The pause isn't confirmed. Stop the task instead.` };
     case "paused":
       if (canResume) return { kind: "continue" };
       return {
         kind: "continue",
         reason: handedOver
-          ? "You have the computer"
+          ? t`You have the computer`
           : budgetHeld
-            ? "Raise this task's limit first"
-            : "Continue isn't available yet",
+            ? t`Raise this task's limit first`
+            : t`Continue isn't available yet`,
       };
   }
 }
@@ -125,10 +126,10 @@ export interface TakeReasonInput {
 // confirmed never settles by itself: only Stop ends it.
 export function takeReason({ task, ready, pause }: TakeReasonInput): string | undefined {
   if (ready) return undefined;
-  if (!task) return "Wait for the computer to be ready";
-  if (pause === "uncertain") return "Stop the task to take over";
-  if (pause && pause !== "paused") return "Wait for the pause to settle";
-  return "Wait a moment";
+  if (!task) return t`Wait for the computer to be ready`;
+  if (pause === "uncertain") return t`Stop the task to take over`;
+  if (pause && pause !== "paused") return t`Wait for the pause to settle`;
+  return t`Wait a moment`;
 }
 
 // Take control works whatever dot is doing. dot handing the computer over makes it the porcelain

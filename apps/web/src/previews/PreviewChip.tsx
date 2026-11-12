@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useMemo } from "react";
+import { t } from "../i18n/index.ts";
 import { Chip } from "../ui/Chip.tsx";
 import {
   type LocalUrl,
@@ -25,11 +26,11 @@ export function PreviewChip({ url, inline = false }: { url: LocalUrl; inline?: b
       className="preview-chip"
       data-inline={inline || undefined}
       data-state={previews.status?.state}
-      aria-label={`Open preview of ${url.label}`}
+      aria-label={t`Open preview of ${url.label}`}
       aria-busy={previews.pending.has(requestKey(request)) || undefined}
       onClick={(event) => previews.open(request, event.currentTarget)}
     >
-      Open preview
+      {t`Open preview`}
     </Chip>
   );
 }

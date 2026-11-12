@@ -15,7 +15,12 @@ browser's name and a minimise light; no close, which would close dot's window), 
 allows, with a margin of desktop each side, and the last item on the desktop's own dock, after a
 divider. dot uses the web browser for anything online: opening a public web page brings that window
 forward. The desktop's own Chromium is for local files and pages served on the desktop itself, such as
-a site dot is building on localhost.
+a site dot is building on localhost; it isn't on the dock or in the desktop's menus, so the web browser
+is the one browser there. The desktop image labels how many apps its dock pins
+(`localdot.dock-items`), and the browser's item lines up after the last of them.
+
+**Sign in without agent control** restarts the web browser without dot's connection. While its window
+is gone, the screen holds a word over the picture saying so, and the window comes back with its tabs.
 
 The window follows dot: it comes forward when dot works in the web browser and goes back when dot
 works on the desktop, by the latest confirmed screen selection, whichever arrives first from the task

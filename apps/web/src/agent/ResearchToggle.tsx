@@ -1,9 +1,10 @@
+import { t } from "../i18n/index.ts";
 import { Chip } from "../ui/Chip.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 
-const WHAT = "Research: dot reads many sources and writes a report with citations";
-const SUGGESTED = "dot suggests research for this question";
+const WHAT = t`Research: dot reads many sources and writes a report with citations`;
+const SUGGESTED = t`dot suggests research for this question`;
 
 export interface ResearchToggleProps {
   on: boolean;
@@ -25,12 +26,12 @@ export function ResearchToggle({ on, suggested, disabledReason, onToggle }: Rese
       className="composer-research"
       hint={hint ? SUGGESTED : WHAT}
       disabledReason={disabledReason}
-      aria-label="Research"
+      aria-label={t`Research`}
       aria-pressed={on}
       data-suggested={hint || undefined}
       onClick={onToggle}
     >
-      <span className="composer-research-label">Research</span>
+      <span className="composer-research-label">{t`Research`}</span>
       <span className="composer-research-hint" aria-hidden="true" />
     </Chip>
   );
@@ -45,20 +46,20 @@ export function ResearchLine({ on, onToggle }: { on: boolean; onToggle(): void }
         <p className="file-chips">
           <span className="file-chip" data-research="">
             <Icon name="globe" size={12} className="file-chip-icon" />
-            <span>Research</span>
-            <span className="file-chip-meta">a cited report</span>
+            <span>{t`Research`}</span>
+            <span className="file-chip-meta">{t`a cited report`}</span>
             <IconButton
               className="file-chip-remove"
               icon="x"
               size={24}
-              label="Don't research"
+              label={t`Don't research`}
               onClick={onToggle}
             />
           </span>
         </p>
       ) : (
         <Chip variant="outline" icon="globe" hint={SUGGESTED} onClick={onToggle}>
-          Research this question
+          {t`Research this question`}
         </Chip>
       )}
     </div>

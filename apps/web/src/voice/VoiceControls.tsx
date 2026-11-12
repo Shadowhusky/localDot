@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -17,12 +18,12 @@ export function VoiceButton({ voice }: { voice: Voice }) {
       <IconButton
         label={
           phase === "finishing"
-            ? "Transcribing speech"
+            ? t`Transcribing speech`
             : phase === "starting"
-              ? "Starting microphone"
+              ? t`Starting microphone`
               : active
-                ? "Stop recording"
-                : "Start voice input"
+                ? t`Stop recording`
+                : t`Start voice input`
         }
         icon={active ? "stop" : "mic"}
         size={32}
@@ -31,11 +32,11 @@ export function VoiceButton({ voice }: { voice: Voice }) {
         kbd={active ? undefined : HOLD_KEYS(isApple())}
         disabledReason={
           !voice.enabled
-            ? "Not available right now"
+            ? t`Not available right now`
             : busy
               ? phase === "starting"
-                ? "Starting microphone…"
-                : "Turning speech into text…"
+                ? t`Starting microphone…`
+                : t`Turning speech into text…`
               : undefined
         }
         aria-busy={busy || undefined}
@@ -73,10 +74,10 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
               voice.dismiss();
             }}
           >
-            Enable online speech
+            {t`Enable online speech`}
           </Button>
         )}
-        <IconButton label="Dismiss voice notice" icon="x" size={24} onClick={voice.dismiss} />
+        <IconButton label={t`Dismiss voice notice`} icon="x" size={24} onClick={voice.dismiss} />
       </p>
     ) : (
       children
@@ -85,7 +86,7 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
     <div className="voice-strip" data-phase={state.phase}>
       <IconButton
         className="voice-cancel"
-        label="Cancel recording"
+        label={t`Cancel recording`}
         icon="x"
         size={32}
         round
@@ -100,7 +101,7 @@ export function VoiceStrip({ voice, children }: { voice: Voice; children?: React
         <Waveform voice={voice} since={state.since} />
       ) : (
         <span className="voice-status" role="status">
-          {state.phase === "finishing" ? "Transcribing…" : "Starting microphone…"}
+          {state.phase === "finishing" ? t`Transcribing…` : t`Starting microphone…`}
         </span>
       )}
     </div>

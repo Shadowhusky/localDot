@@ -6,8 +6,10 @@ import {
   PersonaId as PersonaIds,
 } from "@localdot/protocol";
 import { Dot } from "../dot/Dot.tsx";
+import { t } from "../i18n/index.ts";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import "./onboarding.css";
+import { personaBlurb, personaName } from "../dot/persona-words.ts";
 
 // Each dot in its outfit, with this localDot's accessory, and what it is good at. Choosing one sets
 // the next task's dot. Tiles fill a page; rows, each dot small at its start, fit a popover.
@@ -17,7 +19,7 @@ export function PersonaPicker({
   onChange,
   layout = "tiles",
   disabledReason,
-  "aria-label": label = "Your dot",
+  "aria-label": label = t`Your dot`,
 }: {
   value: PersonaId;
   accessory: Accessory | undefined;
@@ -39,8 +41,8 @@ export function PersonaPicker({
       }}
       options={Object.values(PERSONAS).map((persona, index) => ({
         value: persona.id,
-        label: persona.name,
-        description: persona.blurb,
+        label: personaName(persona.id),
+        description: personaBlurb(persona.id),
         ...(disabledReason ? { disabledReason } : {}),
         preview: (
           <span className="persona-preview" data-layout={layout}>

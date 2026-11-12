@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { type ComponentProps, type ReactNode, useId } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "./Button.tsx";
 import { Icon } from "./Icon.tsx";
 import { MiddleName } from "./MiddleTruncate.tsx";
@@ -122,7 +123,7 @@ export function FileCard({
             <>
               {onRetry && (
                 <Button size="sm" onClick={onRetry}>
-                  Try again
+                  {t`Try again`}
                 </Button>
               )}
               {actions}

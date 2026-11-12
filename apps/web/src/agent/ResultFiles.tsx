@@ -15,6 +15,7 @@ import { DeliverableFile } from "../deliverables/DeliverableFile.tsx";
 import { ProofStrip, ReplayRow } from "../deliverables/ProofStrip.tsx";
 import { useProof } from "../deliverables/useProof.ts";
 import { FileViewerScope, type ViewerEntry } from "../deliverables/viewer/scope.tsx";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { PreviewCard } from "../previews/PreviewCard.tsx";
 import { useGuest } from "../remote/guest.ts";
@@ -196,7 +197,7 @@ export function useResultDownloads(
           anchor.click();
           saved = true;
           mark(key, "done");
-          current.current.announce?.(`${record.file.name} downloaded.`);
+          current.current.announce?.(t`${record.file.name} downloaded.`);
           const done = setTimeout(() => {
             timers.current.delete(done);
             if (mounted.current) mark(key, null);
@@ -214,7 +215,7 @@ export function useResultDownloads(
       } catch {
         if (owns()) {
           mark(key, "failed");
-          current.current.announce?.(`${record.file.name} couldn't be downloaded. Try again.`);
+          current.current.announce?.(t`${record.file.name} couldn't be downloaded. Try again.`);
         }
       } finally {
         if (active.current === record) {
@@ -232,7 +233,7 @@ export function useResultDownloads(
     active.current = null;
     record.abort.abort();
     mark(fileKey(record.resultId, record.file), null);
-    current.current.announce?.("Download cancelled.");
+    current.current.announce?.(t`Download cancelled.`);
   }, [mark]);
   // The same object until a download's state changes, so the results that show it redraw only then.
   return useMemo(
@@ -327,22 +328,26 @@ export function ResultCard({
       size="sm"
       icon="download"
       variant="quiet"
-      aria-label={`Download all ${count(files.length, "file", "files")}`}
+      aria-label={
+        files.length === 1
+          ? t`Download all ${files.length} file`
+          : t`Download all ${files.length.toLocaleString()} files`
+      }
       disabledReason={
         !downloads.sessionId
-          ? "This task is no longer available."
+          ? t`This task is no longer available.`
           : downloads.busy
-            ? "Another download is still running."
+            ? t`Another download is still running.`
             : undefined
       }
       onClick={() => void all()}
     >
-      Download all
+      {t`Download all`}
     </Button>
   );
   const folded = files.length - FOLD_AFTER;
   return (
-    <section className="result-card" aria-label="Task result">
+    <section className="result-card" aria-label={t`Task result`}>
       {result.summary && (
         <div className="result-summary">
           <SafeMarkdown text={result.summary} />
@@ -360,7 +365,7 @@ export function ResultCard({
             </div>
           )}
           <ViewerScope api={api} entries={entries} downloads={downloads} onMac={onMac}>
-            <ul id={list} className="deliverables" aria-label={`Files in result ${result.id}`}>
+            <ul id={list} className="deliverables" aria-label={t`Files in result ${result.id}`}>
               {shown.map((file, index) =>
                 valid(file) && api && task ? (
                   <DeliverableFile
@@ -385,8 +390,8 @@ export function ResultCard({
                       actions={
                         <IconButton
                           icon="download"
-                          label={`Download ${file.name}`}
-                          disabledReason="This task is no longer available."
+                          label={t`Download ${file.name}`}
+                          disabledReason={t`This task is no longer available.`}
                         />
                       }
                     />
@@ -394,7 +399,7 @@ export function ResultCard({
                 ) : (
                   // biome-ignore lint/suspicious/noArrayIndexKey: an unsafe name is never shown or used as a key.
                   <li key={index} className="deliverable">
-                    <FileRow name="Unavailable file" meta="Can't be downloaded" compact />
+                    <FileRow name={t`Unavailable file`} meta={t`Can't be downloaded`} compact />
                   </li>
                 ),
               )}
@@ -408,11 +413,15 @@ export function ResultCard({
                 aria-expanded={unfolded}
                 aria-controls={list}
                 aria-label={
-                  unfolded ? "Show fewer files" : `Show ${count(folded, "more file", "more files")}`
+                  unfolded
+                    ? t`Show fewer files`
+                    : folded === 1
+                      ? t`Show ${folded} more file`
+                      : t`Show ${folded.toLocaleString()} more files`
                 }
                 onClick={() => setUnfolded((was) => !was)}
               >
-                {unfolded ? "Show fewer" : `Show ${folded.toLocaleString()} more`}
+                {unfolded ? t`Show fewer` : t`Show ${folded.toLocaleString()} more`}
               </Button>
             </div>
           )}

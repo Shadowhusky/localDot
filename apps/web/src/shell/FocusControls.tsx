@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { t } from "../i18n/index.ts";
 import type { HudAction } from "../session/status.ts";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -6,7 +7,7 @@ import { PauseButton } from "./HudIsland.tsx";
 import type { PauseSlot, TakeSlot } from "./island.ts";
 import { type DisplayControl, StreamMenu } from "./StreamMenu.tsx";
 
-const IDLE = "No task is running";
+const IDLE = t`No task is running`;
 
 export interface FocusControlsProps {
   stream: StreamPreferenceControl;
@@ -50,7 +51,7 @@ export function FocusControls({
               round
               size={44}
               icon="hand"
-              label="Take control"
+              label={t`Take control`}
               disabledReason={take.reason}
               onClick={onTake}
             />
@@ -69,15 +70,15 @@ export function FocusControls({
               round
               size={44}
               icon="stop"
-              label={stop?.busy ? "Stopping" : "Stop"}
+              label={stop?.busy ? t`Stopping` : t`Stop`}
               disabledReason={
                 !stop
                   ? IDLE
                   : stop.busy
-                    ? "Stopping…"
+                    ? t`Stopping…`
                     : stop.enabled
                       ? undefined
-                      : "Reconnecting to the task…"
+                      : t`Reconnecting to the task…`
               }
               onClick={onStop}
             />
@@ -89,12 +90,12 @@ export function FocusControls({
           round
           size={44}
           icon="shrink"
-          label="Exit full screen"
+          label={t`Exit full screen`}
           onClick={onLeave}
         />
       </div>
       <p className="focus-hint">
-        You’re in full screen. Turn your phone sideways for a larger view.
+        {t`You’re in full screen. Turn your phone sideways for a larger view.`}
       </p>
     </div>
   );

@@ -8,6 +8,7 @@ import {
 } from "@localdot/protocol";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { HudActionKind } from "../cells/hud-state.ts";
+import { rich, t, tr } from "../i18n/index.ts";
 import { KeyForm } from "../keys/KeyForm.tsx";
 import { type KeydHealth, vaultLocked } from "../keys/keys-api.ts";
 import { UNLOCK_PRIVACY, UnlockKeys } from "../keys/UnlockKeys.tsx";
@@ -24,7 +25,7 @@ import type { DotWait } from "./Composer.tsx";
 import { emptyMessageBoxHasKeys, typedLately } from "./message-box.ts";
 import type { AgentBlocker } from "./model.ts";
 import { timeLabel } from "./thread.ts";
-import { resetTime } from "./UsageFooter.tsx";
+import { resetWhen } from "./UsageFooter.tsx";
 import { useAppConnect } from "./useAppConnect.ts";
 
 const TOUCH = "(hover: none) and (pointer: coarse)";
@@ -146,7 +147,7 @@ function Shell({
     >
       <p className="thread-fix-origin">
         <Icon name="lock" size={12} />
-        <span>localDot{open.by === "dot" && " · dot asked for this"}</span>
+        <span>{open.by === "dot" ? t`localDot · dot asked for this` : "localDot"}</span>
       </p>
       <h3 id={id} className="thread-recovery-title">
         {title}
@@ -165,7 +166,7 @@ function NotNow({ open, deps }: { open: AgentBlocker; deps: FixDeps }) {
     <>
       {failed && (
         <p className="thread-recovery-reason" role="alert">
-          That didn't go through. Try again.
+          {t`That didn't go through. Try again.`}
         </p>
       )}
       <Button
@@ -179,7 +180,7 @@ function NotNow({ open, deps }: { open: AgentBlocker; deps: FixDeps }) {
             .finally(() => setBusy(false));
         }}
       >
-        Not now
+        {t`Not now`}
       </Button>
     </>
   );
@@ -212,19 +213,19 @@ async function fromCard<T>(deps: FixDeps, open: AgentBlocker, fix: () => Promise
 function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps }) {
   const setup = deps.keys.health?.vault?.state === "setup";
   const { unlock } = deps.keys;
-  const title = setup ? "Choose a passphrase for your saved keys" : "Unlock your saved keys";
+  const title = setup ? t`Choose a passphrase for your saved keys` : t`Unlock your saved keys`;
   return (
     <Shell open={open} title={title}>
       <p className="thread-recovery-text">
         {setup
-          ? "dot needs your saved keys and passwords, and they need a passphrase first. You'll enter it after each restart of the computer running localDot."
-          : "dot needs your saved keys and passwords, which lock each time the computer running localDot restarts. Unlock them and dot carries on by itself."}
+          ? t`dot needs your saved keys and passwords, and they need a passphrase first. You'll enter it after each restart of the computer running localDot.`
+          : t`dot needs your saved keys and passwords, which lock each time the computer running localDot restarts. Unlock them and dot carries on by itself.`}
       </p>
       {unlock && (
         <UnlockKeys
           setup={setup}
           unlock={(passphrase) => fromCard(deps, open, () => unlock(passphrase))}
-          label={setup ? "Choose a passphrase" : "Unlock saved keys"}
+          label={setup ? t`Choose a passphrase` : t`Unlock saved keys`}
           actions={<NotNow open={open} deps={deps} />}
         />
       )}
@@ -237,11 +238,11 @@ function KeysFix({ open, deps }: { open: BlockerOf<"keys_locked">; deps: FixDeps
 // a key, and the card's own words are localDot's.
 const SavedAs = ({ id }: { id: string }) => (
   <p className="thread-recovery-reason">
-    Saved as <code className="thread-fix-name">{id}</code>
+    {rich`Saved as ${<code className="thread-fix-name">{id}</code>}`}
   </p>
 );
 const noSaving = (health: KeydHealth | null) =>
-  health && !health.online ? "Key protection is off, so the key can't be saved." : undefined;
+  health && !health.online ? t`Key protection is off, so the key can't be saved.` : undefined;
 
 function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
   const { id, problem } = open.blocker;
@@ -250,10 +251,9 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
   // it: the key is removed and added again by hand, in Keys.
   if (problem === "rebound" || record?.rebound)
     return (
-      <Shell open={open} title="A saved key was changed outside localDot">
+      <Shell open={open} title={t`A saved key was changed outside localDot`}>
         <p className="thread-recovery-text">
-          Where this key is sent was changed outside localDot, so dot won't use it. Remove it and
-          add it again; dot carries on by itself.
+          {t`Where this key is sent was changed outside localDot, so dot won't use it. Remove it and add it again; dot carries on by itself.`}
         </p>
         <SavedAs id={id} />
         <div className="thread-recovery-actions">
@@ -265,7 +265,7 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
               deps.onOpenKeys(event.currentTarget);
             }}
           >
-            Open Keys
+            {t`Open Keys`}
           </Button>
           <NotNow open={open} deps={deps} />
         </div>
@@ -274,7 +274,7 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
   // Where the model itself met the refusal, the key may be fine: trying again is the other way on.
   const way = open.required ? (
     <Button variant="quiet" onClick={() => void deps.retry.run()}>
-      Try again
+      {t`Try again`}
     </Button>
   ) : (
     <NotNow open={open} deps={deps} />
@@ -282,12 +282,12 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
   return (
     <Shell
       open={open}
-      title={problem === "rejected" ? "A saved key was refused" : "Re-enter a saved key"}
+      title={problem === "rejected" ? t`A saved key was refused` : t`Re-enter a saved key`}
     >
       <p className="thread-recovery-text">
         {problem === "rejected"
-          ? "The service didn't accept this key. Enter a new one and dot carries on by itself."
-          : "dot can't use this key as it's stored. Enter it again and dot carries on by itself."}
+          ? t`The service didn't accept this key. Enter a new one and dot carries on by itself.`
+          : t`dot can't use this key as it's stored. Enter it again and dot carries on by itself.`}
       </p>
       <SavedAs id={id} />
       {record ? (
@@ -301,7 +301,7 @@ function KeyFix({ open, deps }: { open: BlockerOf<"key">; deps: FixDeps }) {
         />
       ) : (
         <>
-          <p className="thread-recovery-reason">Looking up the key…</p>
+          <p className="thread-recovery-reason">{t`Looking up the key…`}</p>
           <div className="thread-recovery-actions">{way}</div>
         </>
       )}
@@ -319,19 +319,19 @@ function AppFix({ open, deps }: { open: BlockerOf<"app">; deps: FixDeps }) {
     onGaveUp: () => cardFailed(deps, open),
   });
   return (
-    <Shell open={open} title={`Connect ${name}`}>
+    <Shell open={open} title={t`Connect ${name}`}>
       <p className="thread-recovery-text">
         {sign.waiting
           ? sign.waiting.remote
-            ? "The sign-in opened in the browser on your Mac, where your accounts are. It can't be finished from this device."
-            : `Approve ${name} in your browser. dot carries on when you're done.`
-          : `dot needs ${name}, and its sign-in has ended. You approve it in your browser, and dot carries on by itself.`}
+            ? t`The sign-in opened in the browser on your Mac, where your accounts are. It can't be finished from this device.`
+            : t`Approve ${name} in your browser. dot carries on when you're done.`
+          : t`dot needs ${name}, and its sign-in has ended. You approve it in your browser, and dot carries on by itself.`}
       </p>
       <p className="thread-recovery-reason">{host}</p>
       {sign.waiting?.page && (
         <p className="thread-recovery-reason">
           <a href={sign.waiting.page} target="_blank" rel="noopener noreferrer">
-            Open the sign-in page
+            {t`Open the sign-in page`}
           </a>
         </p>
       )}
@@ -346,7 +346,7 @@ function AppFix({ open, deps }: { open: BlockerOf<"app">; deps: FixDeps }) {
           busy={sign.starting}
           onClick={() => void usingCard(deps, open).then(() => sign.connect())}
         >
-          {sign.waiting ? "Open again" : "Connect"}
+          {sign.waiting ? t`Open again` : t`Connect`}
         </Button>
         <NotNow open={open} deps={deps} />
       </div>
@@ -354,23 +354,24 @@ function AppFix({ open, deps }: { open: BlockerOf<"app">; deps: FixDeps }) {
   );
 }
 
-const ANOTHER = "or carry on with another model";
 const PLAN_LIMIT = (plan: string) => ({
-  title: "Paused at your plan's limit",
-  text: `Your ${plan} plan is at its limit. Wait for it to reset, ${ANOTHER}.`,
+  title: t`Paused at your plan's limit`,
+  text: t`Your ${plan} plan is at its limit. Wait for it to reset, or carry on with another model.`,
 });
 const MODEL_WORDS: Record<string, { title: string; text: string }> = {
   [STALL.modelRefused]: {
-    title: "The provider could not process my request",
-    text: `The provider turned this request down. Try again, ${ANOTHER}.`,
+    title: tr("The provider could not process my request"),
+    text: tr("The provider turned this request down. Try again, or carry on with another model."),
   },
   [STALL.modelUnavailable]: {
-    title: "The model isn't answering",
-    text: `I tried several times. Try again, ${ANOTHER}.`,
+    title: tr("The model isn't answering"),
+    text: tr("I tried several times. Try again, or carry on with another model."),
   },
   [STALL.providerLimit]: {
-    title: "Your provider's credit or usage limit is reached",
-    text: `Add credit or wait for your plan to reset, then try again, ${ANOTHER}.`,
+    title: tr("Your provider's credit or usage limit is reached"),
+    text: tr(
+      "Add credit or wait for your plan to reset, then try again, or carry on with another model.",
+    ),
   },
   "chatgpt plan limit reached": PLAN_LIMIT("ChatGPT"),
   "claude code plan limit reached": PLAN_LIMIT("Claude"),
@@ -386,25 +387,28 @@ export function planWait(reason: string | undefined, wait: AutoContinue | undefi
         ? "Claude"
         : undefined;
   if (!plan || !wait) return undefined;
-  if ("at" in wait)
+  if ("at" in wait) {
+    const until = wait.checking ? null : resetWhen(Math.round(wait.at / 1000));
     return {
       waiting: true,
       // The title says when, so the plan's own reset time needn't.
       known: !wait.checking,
-      title: wait.checking
-        ? "Paused at your plan's limit"
-        : (resetTime(Math.round(wait.at / 1000))?.replace(/^Resets/, "Paused until") ??
-          "Paused at your plan's limit"),
+      title: !until
+        ? t`Paused at your plan's limit`
+        : until.day
+          ? t`Paused until ${until.day}, ${until.time}`
+          : t`Paused until ${until.time}`,
       text: wait.checking
-        ? `Your ${plan} plan is at its limit and didn't say when it resets. dot checks it every few minutes and continues by itself once it has.`
-        : `Your ${plan} plan is at its limit. dot continues by itself when it resets.`,
+        ? t`Your ${plan} plan is at its limit and didn't say when it resets. dot checks it every few minutes and continues by itself once it has.`
+        : t`Your ${plan} plan is at its limit. dot continues by itself when it resets.`,
     };
+  }
   if (wait.off === "gave_up")
     return {
       waiting: false,
       known: false,
-      title: "Paused at your plan's limit",
-      text: `Your ${plan} plan is still at its limit, so dot stopped waiting for it. Try again once it resets, ${ANOTHER}.`,
+      title: t`Paused at your plan's limit`,
+      text: t`Your ${plan} plan is still at its limit, so dot stopped waiting for it. Try again once it resets, or carry on with another model.`,
     };
   return undefined;
 }
@@ -434,7 +438,7 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
     wait ?? MODEL_WORDS[reason ?? blocker.reason] ?? MODEL_WORDS[STALL.modelUnavailable];
   const text =
     deps.local && reason === STALL.modelUnavailable
-      ? `The local model isn't answering. Start its server and load the model, then try again, ${ANOTHER}.`
+      ? t`The local model isn't answering. Start its server and load the model, then try again, or carry on with another model.`
       : words?.text;
   const [stopping, setStopping] = useState(false);
   const dontContinue = async () => {
@@ -443,7 +447,7 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
     try {
       await deps.api.post(`/api/agent/sessions/${deps.sessionId}/auto-continue/cancel`);
     } catch {
-      setProblem("That didn't go through. Try again.");
+      setProblem(t`That didn't go through. Try again.`);
     } finally {
       setStopping(false);
     }
@@ -462,30 +466,28 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
     } catch (error) {
       setProblem(
         error instanceof ApiError && error.status === 400
-          ? "dot can't use that model right now. Choose another."
-          : "That didn't go through. Try again.",
+          ? t`dot can't use that model right now. Choose another.`
+          : t`That didn't go through. Try again.`,
       );
     } finally {
       setSending(false);
     }
   };
   return (
-    <Shell open={open} title={words?.title ?? "The model can't go on"}>
+    <Shell open={open} title={words?.title ?? t`The model can't go on`}>
       <p className="thread-recovery-text">{text}</p>
       {detail && (
         <blockquote className="thread-fix-quoted">
-          <p className="thread-recovery-reason">From the provider, not localDot:</p>
+          <p className="thread-recovery-reason">{t`From the provider, not localDot:`}</p>
           <p className="thread-recovery-reason">{detail}</p>
         </blockquote>
       )}
       {deps.planResets && !wait?.known && (
-        <p className="thread-recovery-reason">
-          {deps.planResets.replace(/^Resets/, "Your plan's limit resets")}.
-        </p>
+        <p className="thread-recovery-reason">{deps.planResets}</p>
       )}
       {choices.length > 1 && (
         <Select
-          aria-label="Model"
+          aria-label={t`Model`}
           value={picked ?? ""}
           groups={groups.map((group) => ({
             label: group.label,
@@ -507,16 +509,16 @@ function ModelFix({ open, deps }: { open: BlockerOf<"model">; deps: FixDeps }) {
           onClick={() => void go()}
         >
           {trying
-            ? "Trying again…"
+            ? t`Trying again…`
             : moving
-              ? `Continue with ${option?.name}`
+              ? t`Continue with ${option?.name ?? ""}`
               : wait?.waiting
-                ? "Continue now"
-                : "Try again"}
+                ? t`Continue now`
+                : t`Try again`}
         </Button>
         {wait?.waiting && (
           <Button variant="quiet" busy={stopping} onClick={() => void dontContinue()}>
-            Don't continue
+            {t`Don't continue`}
           </Button>
         )}
       </div>
@@ -530,27 +532,27 @@ function ComputerFix({ open, deps }: { open: BlockerOf<"computer">; deps: FixDep
   // A computer on its way back offers to stop instead: it needs nothing from here but time.
   const offered = action && action.kind !== "stop" ? action : undefined;
   return (
-    <Shell open={open} title={paused ? "Your computer is paused" : "Your computer is off"}>
+    <Shell open={open} title={paused ? t`Your computer is paused` : t`Your computer is off`}>
       <p className="thread-recovery-text">
-        dot needs it to go on. Turn it back on and dot carries on by itself.
+        {t`dot needs it to go on. Turn it back on and dot carries on by itself.`}
       </p>
       <div className="thread-recovery-actions">
         <Button
           variant="primary"
           icon="power"
           busy={!offered || !!offered.busy}
-          disabledReason={!offered || offered.enabled ? undefined : "Wait a moment"}
+          disabledReason={!offered || offered.enabled ? undefined : t`Wait a moment`}
           onClick={() => {
             if (offered) void usingCard(deps, open).then(() => run(offered.kind));
           }}
         >
           {!offered
-            ? "Turning on…"
+            ? t`Turning on…`
             : offered.kind === "resume"
-              ? "Resume"
+              ? t`Resume`
               : offered.kind === "retry"
-                ? "Try again"
-                : "Turn on"}
+                ? t`Try again`
+                : t`Turn on`}
         </Button>
         <NotNow open={open} deps={deps} />
       </div>
@@ -572,13 +574,13 @@ function RuntimeFix({ open, deps }: { open: BlockerOf<"runtime">; deps: FixDeps 
     }
   };
   return (
-    <Shell open={open} title="Docker isn't running">
+    <Shell open={open} title={t`Docker isn't running`}>
       <p className="thread-recovery-text">
         {state === "waiting"
-          ? "Docker is starting. dot carries on by itself as soon as it's up."
+          ? t`Docker is starting. dot carries on by itself as soon as it's up.`
           : state === "manual"
-            ? "localDot couldn't start it from here. Start Docker on the computer running localDot, and dot carries on by itself."
-            : "Docker runs your computer. Start it and dot carries on by itself."}
+            ? t`localDot couldn't start it from here. Start Docker on the computer running localDot, and dot carries on by itself.`
+            : t`Docker runs your computer. Start it and dot carries on by itself.`}
       </p>
       <div className="thread-recovery-actions">
         <Button
@@ -588,10 +590,10 @@ function RuntimeFix({ open, deps }: { open: BlockerOf<"runtime">; deps: FixDeps 
           onClick={() => void start()}
         >
           {state === "waiting"
-            ? "Starting Docker…"
+            ? t`Starting Docker…`
             : state === "manual"
-              ? "Try again"
-              : "Start Docker"}
+              ? t`Try again`
+              : t`Start Docker`}
         </Button>
         <NotNow open={open} deps={deps} />
       </div>

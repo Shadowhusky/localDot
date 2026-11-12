@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 // How a tap's frames reach the render worker, fastest first. Chromium reads the track on the page
 // and transfers the stream ("stream"). Safari reads tracks only in workers, so it transfers a clone
 // of the track and the worker reads it ("track"). Where that fails, each frame the client's video
@@ -30,14 +31,13 @@ export function frameTapSupport(): { ok: true } | { ok: false; reason: string } 
   if (typeof VideoFrame === "undefined" || typeof OffscreenCanvas === "undefined") {
     return {
       ok: false,
-      reason: "This browser lacks WebCodecs. Open localDot in a current Chromium browser.",
+      reason: t`This browser lacks WebCodecs. Open localDot in a current Chromium browser.`,
     };
   }
   if (typeof MediaStreamTrackProcessor === "undefined" && !reportsVideoFrames()) {
     return {
       ok: false,
-      reason:
-        "This browser can't show the live desktop. Update Safari, or open localDot in Chrome.",
+      reason: t`This browser can't show the live desktop. Update Safari, or open localDot in Chrome.`,
     };
   }
   return { ok: true };

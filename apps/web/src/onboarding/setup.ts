@@ -1,4 +1,5 @@
 import type { ProviderSpec } from "@localdot/providers";
+import { t } from "../i18n/index.ts";
 
 // Setup's six steps, as the first-run setup counts them: how dot thinks, the key, the model,
 // permissions, which dot, and turning the computer on. The rail lists the first five; the curtain's
@@ -29,13 +30,13 @@ export interface SetupInput {
 }
 
 function thinks(provider: SetupInput["provider"]): string {
-  if (provider === "chatgpt") return "ChatGPT plan";
+  if (provider === "chatgpt") return t`ChatGPT plan`;
   if (provider === "claude-code") return "Claude Code";
-  if (!provider) return "Not chosen yet";
-  if (provider.local) return "Local model";
-  if (provider.plan) return "Coding plan";
-  if (provider.custom) return "Custom address";
-  return "API key";
+  if (!provider) return t`Not chosen yet`;
+  if (provider.local) return t`Local model`;
+  if (provider.plan) return t`Coding plan`;
+  if (provider.custom) return t`Custom address`;
+  return t`API key`;
 }
 
 export function setupSteps(input: SetupInput): { steps: SetupStep[]; done: number } {
@@ -43,31 +44,31 @@ export function setupSteps(input: SetupInput): { steps: SetupStep[]; done: numbe
   const app = provider === "chatgpt" || provider === "claude-code";
   const local = provider !== null && typeof provider !== "string" && !!provider.local;
   const steps: SetupStep[] = [
-    { id: "thinks", title: "How dot thinks", detail: thinks(provider), done: !!provider },
+    { id: "thinks", title: t`How dot thinks`, detail: thinks(provider), done: !!provider },
     local
-      ? { id: "key", title: "Key", detail: "Not needed", done: true }
+      ? { id: "key", title: t`Key`, detail: t`Not needed`, done: true }
       : {
           id: "key",
-          title: app ? "Sign-in" : "Key",
-          detail: input.key ?? (app ? "Not signed in" : "Not added yet"),
+          title: app ? t`Sign-in` : t`Key`,
+          detail: input.key ?? (app ? t`Not signed in` : t`Not added yet`),
           done: input.key !== null,
         },
     {
       id: "model",
-      title: "Model",
-      detail: input.modelReady ? (input.model ?? "Chosen") : "Needed to start",
+      title: t`Model`,
+      detail: input.modelReady ? (input.model ?? t`Chosen`) : t`Needed to start`,
       done: input.modelReady,
     },
     {
       id: "permissions",
-      title: "Permissions",
-      detail: input.permissions ?? "Balanced until you choose",
+      title: t`Permissions`,
+      detail: input.permissions ?? t`Balanced until you choose`,
       done: input.permissions !== null,
     },
     {
       id: "dot",
-      title: "Your dot",
-      detail: input.persona ?? "Everyday until you choose",
+      title: t`Your dot`,
+      detail: input.persona ?? t`Everyday until you choose`,
       done: input.persona !== null,
     },
   ];

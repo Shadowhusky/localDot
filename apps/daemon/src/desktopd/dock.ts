@@ -5,8 +5,14 @@ import type { CellDesktopd } from "./registry.ts";
 
 // The desktop's dock in its own 1280 × 800 measure: Plank's nine pinned apps on their glass
 // (cells/desktop's localdot-plank and localdot-glass theme) and the web browser's item the stage
-// draws on the same line, 8 px to their right (apps/web's browser-window.css).
+// draws on the same line, 8 px to their right (apps/web's browser-window.css). Plank keeps its shelf
+// centred, 54 px an item, so each app fewer moves both its ends 27 px in.
 export const DOCK_AREA = { x: 387, y: 732, w: 587, h: 68 };
+export const DOCK_ITEMS = 9;
+export function dockArea(items = DOCK_ITEMS): typeof DOCK_AREA {
+  const inset = ((DOCK_ITEMS - items) * 54) / 2;
+  return { ...DOCK_AREA, x: DOCK_AREA.x + inset, w: DOCK_AREA.w - inset * 2 };
+}
 const MEASURE = { w: 1280, h: 800 };
 
 // One reading serves every viewer of the computer this long; a viewer asks about once a second.
@@ -23,13 +29,15 @@ type Frame = ScreenWindow["frame"];
 export function dockCovered(
   windows: readonly { frame: Frame }[],
   screen: { w: number; h: number },
+  items = DOCK_ITEMS,
 ): boolean {
   const unit = screen.w / MEASURE.w;
+  const dock = dockArea(items);
   const area = {
-    x: DOCK_AREA.x * unit,
-    y: DOCK_AREA.y * unit,
-    w: DOCK_AREA.w * unit,
-    h: DOCK_AREA.h * unit,
+    x: dock.x * unit,
+    y: dock.y * unit,
+    w: dock.w * unit,
+    h: dock.h * unit,
   };
   return windows.some(({ frame: f }, index) => {
     const wide = f.x <= 0 && f.x + f.w >= screen.w;
@@ -47,6 +55,8 @@ export interface DockRoutesDeps {
   registry: { for(cellId: string): Pick<CellDesktopd, "client"> | undefined };
   // Whether the computer's web browser has a window: the stage's item stands in the dock only then.
   browserRunning?(cellId: string): boolean | Promise<boolean>;
+  // How many apps the computer's dock pins, when its desktop says.
+  dockItems?(cellId: string): Promise<number | undefined>;
   now?(): number;
 }
 
@@ -56,7 +66,12 @@ export function dockRoutes(app: Hono, deps: DockRoutesDeps): void {
   const now = deps.now ?? Date.now;
   const kept = new Map<
     string,
-    { at: number; covered: Promise<boolean>; browser: Promise<boolean> }
+    {
+      at: number;
+      covered: Promise<boolean>;
+      browser: Promise<boolean>;
+      items: Promise<number | undefined>;
+    }
   >();
   app.get("/api/cells/:id/dock", async (c) => {
     const id = c.req.param("id");
@@ -69,11 +84,14 @@ export function dockRoutes(app: Hono, deps: DockRoutesDeps): void {
     let reading = kept.get(id);
     if (!reading || now() - reading.at > KEPT_MS) {
       const screen = { w: MEASURE.w * cell.scale, h: MEASURE.h * cell.scale };
+      const items = Promise.resolve(deps.dockItems?.(id)).catch(() => undefined);
       const read = {
         at: now(),
-        covered: desktopd.client
-          .windows({}, AbortSignal.timeout(READ_MS))
-          .then((stack) => dockCovered(stack.windows, screen)),
+        items,
+        covered: Promise.all([
+          desktopd.client.windows({}, AbortSignal.timeout(READ_MS)),
+          items,
+        ]).then(([stack, pinned]) => dockCovered(stack.windows, screen, pinned)),
         // Unknown counts as running: the item then behaves as it always has.
         browser: Promise.resolve(deps.browserRunning?.(id) ?? true).catch(() => true),
       };
@@ -84,9 +102,16 @@ export function dockRoutes(app: Hono, deps: DockRoutesDeps): void {
       reading = read;
     }
     try {
-      return c.json({ covered: await reading.covered, browser: await reading.browser }, 200, {
-        "cache-control": "no-store",
-      });
+      const items = await reading.items;
+      return c.json(
+        {
+          covered: await reading.covered,
+          browser: await reading.browser,
+          ...(items === undefined ? {} : { items }),
+        },
+        200,
+        { "cache-control": "no-store" },
+      );
     } catch {
       return c.text("the computer's windows can't be read", 502);
     }

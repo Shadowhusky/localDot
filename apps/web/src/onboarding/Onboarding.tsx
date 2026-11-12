@@ -1,6 +1,7 @@
 import {
   type AgentSettingsDocument,
   type AutonomyPolicy,
+  BALANCED_AUTONOMY,
   type ComputerSize,
   DEFAULT_PERSONA,
   type PersonaId,
@@ -12,6 +13,7 @@ import type { BrowserEngineName } from "../../../../packages/protocol/src/browse
 import type { SpeechTierId } from "../../../../packages/protocol/src/speech-install.ts";
 import { AUTONOMY_PRESETS, presetOf } from "../copy/autonomy.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
+import { t, tr } from "../i18n/index.ts";
 import {
   bindingOf,
   EMPTY_DRAFT,
@@ -19,7 +21,7 @@ import {
   suggestedId,
   valueProblem,
 } from "../keys/binding.ts";
-import { keyHome, problemText } from "../keys/keys-api.ts";
+import { type KeydHealth, problemText } from "../keys/keys-api.ts";
 import type { KeysController } from "../keys/useKeys.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ChatgptPanel } from "../settings/ChatgptPanel.tsx";
@@ -73,6 +75,7 @@ import {
   type WizardStep,
 } from "./wizard.ts";
 import "./onboarding.css";
+import { personaName } from "../dot/persona-words.ts";
 
 export interface OnboardingProps {
   api: ApiClient;
@@ -140,12 +143,14 @@ function draftOf(progress: WizardProgress, saved: AgentSettingsDocument | null):
       input: saved?.fast?.price ? String(saved.fast.price.inputUSDPerMTok) : "",
       output: saved?.fast?.price ? String(saved.fast.price.outputUSDPerMTok) : "",
     },
-    preset: (saved?.autonomy && presetOf(saved.autonomy)?.label) || "Balanced",
+    preset:
+      (saved?.autonomy && presetOf(saved.autonomy)?.label) ||
+      (presetOf(BALANCED_AUTONOMY)?.label ?? "Balanced"),
     persona: saved?.persona ?? DEFAULT_PERSONA,
   };
 }
 
-const KEYD_OFF = "Key protection is off. To turn it back on, run this in Terminal:";
+const KEYD_OFF = t`Key protection is off. To turn it back on, run this in Terminal:`;
 const sameAddress = (a: string | undefined, b: string) => {
   try {
     return !!a && new URL(a).href.replace(/\/+$/, "") === new URL(b).href.replace(/\/+$/, "");
@@ -384,7 +389,7 @@ export function Onboarding(props: OnboardingProps) {
             : { choice: "chromium" },
         ))
           ? null
-          : "Couldn't save your choice of browser. Try again.",
+          : t`Couldn't save your choice of browser. Try again.`,
       () => advance(),
     );
 
@@ -402,15 +407,15 @@ export function Onboarding(props: OnboardingProps) {
 
   const keyStep = () => {
     if (draft.kind === "chatgpt")
-      return { reason: chatgpt.canStart ? undefined : "Sign in with ChatGPT first", run: advance };
+      return { reason: chatgpt.canStart ? undefined : t`Sign in with ChatGPT first`, run: advance };
     if (draft.kind === "claude-code")
       return {
-        reason: claude.canStart ? undefined : "Set up Claude Code first",
+        reason: claude.canStart ? undefined : t`Set up Claude Code first`,
         run: () => advance({ provider: draft.provider }),
       };
     if (draft.kind === "local") return { run: () => advance({ provider: draft.provider }) };
     if (draft.kind === "custom" && !/^https:\/\//.test(draft.address.trim()))
-      return { reason: "Enter the server's https:// address first", run: () => {} };
+      return { reason: t`Enter the server's https:// address first`, run: () => {} };
     if (typed)
       return {
         run: async () => {
@@ -419,16 +424,16 @@ export function Onboarding(props: OnboardingProps) {
           const { id, problem: failed } = await saveKey();
           if (!alive.current) return;
           setBusy(false);
-          if (failed || !id) return setProblem(failed ?? "The key couldn't be saved. Try again.");
+          if (failed || !id) return setProblem(failed ?? t`The key couldn't be saved. Try again.`);
           setKeySaved(id);
           setTyped(false);
           advance({ provider: draft.provider, key: id });
         },
       };
-    if (keydOff) return { reason: "Key protection is off right now", run: () => {} };
+    if (keydOff) return { reason: t`Key protection is off right now`, run: () => {} };
     // A key saved on paste counts before the list of keys has caught up with it.
     const key = chosenKey?.id ?? keySaved;
-    if (!key) return { reason: "Paste a key first", run: () => {} };
+    if (!key) return { reason: t`Paste a key first`, run: () => {} };
     return { run: () => advance({ provider: draft.provider, key }) };
   };
 
@@ -453,27 +458,27 @@ export function Onboarding(props: OnboardingProps) {
     switch (shown) {
       case "welcome":
         return {
-          title: "Hi, I'm dot.",
-          sub: "I do tasks on my own computer, right here on your Mac. You can watch, step in or stop me at any time.",
+          title: t`Hi, I'm dot.`,
+          sub: t`I do tasks on my own computer, right here on your Mac. You can watch, step in or stop me at any time.`,
           body: <WelcomeStep />,
-          primary: "Get started",
+          primary: t`Get started`,
           run: () => advance(),
         };
       case "thinks":
         return {
-          title: "How should dot think?",
-          sub: "Choose where the AI comes from. You can change this later in Settings.",
+          title: t`How should dot think?`,
+          sub: t`Choose where the AI comes from. You can change this later in Settings.`,
           body: (
             <ThinksStep
               value={draft.kind}
               chatgptReason={
                 index?.subscriptions.find((row) => row.id === "chatgpt")?.available === false
-                  ? "Not available on this Mac yet."
+                  ? t`Not available on this Mac yet.`
                   : undefined
               }
               claudeReason={
                 index?.subscriptions.find((row) => row.id === "claude-code")?.available === false
-                  ? "Not available on this Mac yet."
+                  ? t`Not available on this Mac yet.`
                   : undefined
               }
               onChange={(kind) => {
@@ -490,7 +495,7 @@ export function Onboarding(props: OnboardingProps) {
               }}
             />
           ),
-          primary: "Continue",
+          primary: t`Continue`,
           run: () =>
             advance({
               kind: draft.kind,
@@ -551,21 +556,21 @@ export function Onboarding(props: OnboardingProps) {
         const copy = KEY_COPY[draft.kind];
         return {
           title: copy.title,
-          sub: typeof copy.sub === "string" ? copy.sub : copy.sub(keyHome(keys.health)),
+          sub: typeof copy.sub === "string" ? copy.sub : copy.sub[homeOf(keys.health)],
           body,
-          primary: "Continue",
+          primary: t`Continue`,
           reason,
           run: next,
         };
       }
       case "model":
         return {
-          title: "Which model should do the work?",
+          title: t`Which model should do the work?`,
           sub: appKind(draft.kind)
-            ? "One of your plan's models. Change it any time in Settings."
+            ? t`One of your plan's models. Change it any time in Settings.`
             : catalog
-              ? "Choose from this provider’s model list. Change it any time in Settings."
-              : "Type the model's name as your server shows it.",
+              ? t`Choose from this provider’s model list. Change it any time in Settings.`
+              : t`Type the model's name as your server shows it.`,
           body: (
             <ModelStep
               kind={draft.kind}
@@ -594,22 +599,22 @@ export function Onboarding(props: OnboardingProps) {
               onFastPrice={(fastPrice) => change({ fastPrice })}
             />
           ),
-          primary: "Continue",
-          reason: mainModel ? undefined : "Choose a model first",
+          primary: t`Continue`,
+          reason: mainModel ? undefined : t`Choose a model first`,
           run: saveModels,
         };
       case "permissions":
         return {
-          title: "How often should dot check with you?",
-          sub: "Everyday work on dot's own computer always just runs.",
+          title: t`How often should dot check with you?`,
+          sub: t`Everyday work on dot's own computer always just runs.`,
           body: <PermissionsStep value={draft.preset} onChange={(preset) => change({ preset })} />,
-          primary: "Continue",
+          primary: t`Continue`,
           run: savePermissions,
         };
       case "dot":
         return {
-          title: "Which dot do you need most?",
-          sub: "Each one brings the skills for its kind of work. You can switch any time.",
+          title: t`Which dot do you need most?`,
+          sub: t`Each one brings the skills for its kind of work. You can switch any time.`,
           body: (
             <PersonaPicker
               value={draft.persona}
@@ -617,38 +622,40 @@ export function Onboarding(props: OnboardingProps) {
               onChange={(persona) => change({ persona })}
             />
           ),
-          primary: "Continue",
+          primary: t`Continue`,
           run: savePersona,
         };
       case "view":
         return {
-          title: "How would you like to see dot?",
-          sub: "Just for this device. You can switch any time from the ⋯ menu.",
+          title: t`How would you like to see dot?`,
+          sub: t`Just for this device. You can switch any time from the ⋯ menu.`,
           body: (
             <ViewStylePicker
-              aria-label="View"
+              aria-label={t`View`}
               value={props.view.value}
               recommended={props.view.recommended}
               onChange={props.view.choose}
             />
           ),
-          primary: "Continue",
+          primary: t`Continue`,
           run: () => advance(),
         };
       case "browser":
         return {
-          title: "Which web browser should dot use?",
-          sub: "dot signs in to sites and works on the web with it. You can change this in Settings.",
+          title: t`Which web browser should dot use?`,
+          sub: t`dot signs in to sites and works on the web with it. You can change this in Settings.`,
           body: <BrowserStep value={browserChoice} onChange={setBrowserChoice} />,
-          primary: browserChoice === "chrome" ? "Accept and continue" : "Continue",
+          primary: browserChoice === "chrome" ? t`Accept and continue` : t`Continue`,
           run: saveBrowser,
         };
       case "speech": {
-        const computer = speechStatus?.host.computer ?? "computer";
         const under = !!speechStatus?.job;
         return {
-          title: "Talk to dot",
-          sub: `Talk instead of typing. Your words turn into text on your ${computer}, and your voice goes nowhere else.`,
+          title: t`Talk to dot`,
+          sub:
+            speechStatus?.host.computer === "Mac"
+              ? t`Talk instead of typing. Your words turn into text on your Mac, and your voice goes nowhere else.`
+              : t`Talk instead of typing. Your words turn into text on your computer, and your voice goes nowhere else.`,
           body: speechStatus && speechTier && (
             <SpeechStep
               speech={props.speech}
@@ -659,7 +666,7 @@ export function Onboarding(props: OnboardingProps) {
               phone={phone}
             />
           ),
-          primary: under || !speechAsked ? "Continue" : "Download and continue",
+          primary: under || !speechAsked ? t`Continue` : t`Download and continue`,
           run: () => {
             if (under || !speechAsked || !speechTier) return advance();
             void run(
@@ -667,21 +674,22 @@ export function Onboarding(props: OnboardingProps) {
               () => advance(),
             );
           },
-          skip: under || !speechAsked ? undefined : { label: "Skip for now", run: () => advance() },
+          skip:
+            under || !speechAsked ? undefined : { label: t`Skip for now`, run: () => advance() },
         };
       }
       case "turn-on":
         return {
-          title: "You're all set.",
+          title: t`You're all set.`,
           sub: props.turnOn
-            ? "Turn on dot's computer to start. The first start takes about a minute."
-            : "Your computer is on. dot is ready when you are.",
+            ? t`Turn on dot's computer to start. The first start takes about a minute.`
+            : t`Your computer is on. dot is ready when you are.`,
           body: (
             <SummaryStep
               rows={[
                 {
                   icon: "key-round",
-                  label: "Thinks with",
+                  label: t`Thinks with`,
                   value: thinksWith(
                     draft.kind,
                     draft.provider,
@@ -693,25 +701,25 @@ export function Onboarding(props: OnboardingProps) {
                 },
                 {
                   icon: "cpu",
-                  label: "Model",
-                  value: modelName || "Not chosen yet",
+                  label: t`Model`,
+                  value: modelName || t`Not chosen yet`,
                   change: () => go("model", "turn-on"),
                 },
                 {
                   icon: "sliders-horizontal",
-                  label: "Checks with you",
+                  label: t`Checks with you`,
                   value: (saved?.autonomy && presetOf(saved.autonomy)?.label) ?? draft.preset,
                   change: () => go("permissions", "turn-on"),
                 },
                 {
                   icon: "smile",
-                  label: "Your dot",
-                  value: personaOf(saved?.persona).name,
+                  label: t`Your dot`,
+                  value: personaName(personaOf(saved?.persona).id),
                   change: () => go("dot", "turn-on"),
                 },
                 {
                   icon: "layout-grid",
-                  label: "View",
+                  label: t`View`,
                   value: VIEW_NAMES[props.view.value],
                   change: () => go("view", "turn-on"),
                 },
@@ -719,7 +727,7 @@ export function Onboarding(props: OnboardingProps) {
                   ? [
                       {
                         icon: "globe" as const,
-                        label: "Web browser",
+                        label: t`Web browser`,
                         value: engine.status?.choice === "chrome" ? "Google Chrome" : "Chromium",
                         change: () => go("browser", "turn-on"),
                       },
@@ -729,7 +737,7 @@ export function Onboarding(props: OnboardingProps) {
                   ? [
                       {
                         icon: "mic" as const,
-                        label: "Talk to dot",
+                        label: t`Talk to dot`,
                         value: speechSummary(speechStatus),
                         change: () => go("speech", "turn-on"),
                       },
@@ -749,7 +757,7 @@ export function Onboarding(props: OnboardingProps) {
               )}
             </SummaryStep>
           ),
-          primary: props.turnOn ? "Turn on your computer" : "Done",
+          primary: props.turnOn ? t`Turn on your computer` : t`Done`,
           icon: props.turnOn ? "power" : undefined,
           reason: props.turnOn?.reason,
           // The size is saved first, so the computer turned on here starts with it.
@@ -817,7 +825,7 @@ export function Onboarding(props: OnboardingProps) {
           className="onboarding-back"
           onClick={back}
         >
-          Back
+          {t`Back`}
         </Button>
       )}
       {skip}
@@ -830,20 +838,20 @@ export function Onboarding(props: OnboardingProps) {
       {phone ? (
         <div className="onboarding-head">
           {step !== "welcome" ? (
-            <IconButton icon="chevron-left" label="Back" size={44} onClick={back} />
+            <IconButton icon="chevron-left" label={t`Back`} size={44} onClick={back} />
           ) : (
             <span className="onboarding-head-spacer" />
           )}
           {progressBars}
           <Button variant="quiet" size="lg" onClick={control.later}>
-            Later
+            {t`Later`}
           </Button>
         </div>
       ) : (
         <header className="onboarding-bar">
           <span className="bar-wordmark">localDot</span>
           <Button variant="quiet" onClick={control.later}>
-            Finish later
+            {t`Finish later`}
           </Button>
         </header>
       )}
@@ -886,31 +894,81 @@ export function Onboarding(props: OnboardingProps) {
   );
 }
 
-// A key's sub-line names where it is kept, from keyd's vault (keyHome).
-const KEY_COPY: Record<ThinkKind, { title: string; sub: string | ((home: string) => string) }> = {
+// Where keyd keeps keys, as keyHome names it; each sub-line says it in a whole sentence.
+type KeyHome = "keychain" | "keyring" | "file" | "computer";
+
+function homeOf(health: KeydHealth | null): KeyHome {
+  switch (health?.vault?.backend) {
+    case "keychain":
+      return "keychain";
+    case "secret-service":
+      return "keyring";
+    case "file":
+      return "file";
+    default:
+      return "computer";
+  }
+}
+
+const KEY_COPY: Record<ThinkKind, { title: string; sub: string | Record<KeyHome, string> }> = {
   api: {
-    title: "Add your API key",
-    sub: (home) => `Paste a key from your provider. It stays ${home}.`,
+    title: tr("Add your API key"),
+    sub: {
+      keychain: tr("Paste a key from your provider. It stays in your Mac's keychain."),
+      keyring: tr(
+        "Paste a key from your provider. It stays in the keyring of the computer running localDot.",
+      ),
+      file: tr(
+        "Paste a key from your provider. It stays encrypted on the computer running localDot.",
+      ),
+      computer: tr("Paste a key from your provider. It stays on the computer running localDot."),
+    },
   },
   plan: {
-    title: "Add your plan's key",
-    sub: (home) => `Choose your plan, then paste its key. It stays ${home}.`,
+    title: tr("Add your plan's key"),
+    sub: {
+      keychain: tr("Choose your plan, then paste its key. It stays in your Mac's keychain."),
+      keyring: tr(
+        "Choose your plan, then paste its key. It stays in the keyring of the computer running localDot.",
+      ),
+      file: tr(
+        "Choose your plan, then paste its key. It stays encrypted on the computer running localDot.",
+      ),
+      computer: tr(
+        "Choose your plan, then paste its key. It stays on the computer running localDot.",
+      ),
+    },
   },
   chatgpt: {
-    title: "Set up your ChatGPT plan",
-    sub: "dot uses your ChatGPT plan. Set it up once on this Mac.",
+    title: tr("Set up your ChatGPT plan"),
+    sub: tr("dot uses your ChatGPT plan. Set it up once on this Mac."),
   },
   "claude-code": {
-    title: "Set up Claude Code",
-    sub: "dot works through your own Claude Code on this Mac. Install it and sign in there, once.",
+    title: tr("Set up Claude Code"),
+    sub: tr(
+      "dot works through your own Claude Code on this Mac. Install it and sign in there, once.",
+    ),
   },
   local: {
-    title: "Which app runs your model?",
-    sub: "Free and private. dot talks to the app running on this Mac.",
+    title: tr("Which app runs your model?"),
+    sub: tr("Free and private. dot talks to the app running on this Mac."),
   },
   custom: {
-    title: "Add your server",
-    sub: (home) => `Any OpenAI- or Anthropic-compatible server. Its key stays ${home}.`,
+    title: tr("Add your server"),
+    sub: {
+      keychain: tr(
+        "Any OpenAI- or Anthropic-compatible server. Its key stays in your Mac's keychain.",
+      ),
+      keyring: tr(
+        "Any OpenAI- or Anthropic-compatible server. Its key stays in the keyring of the computer running localDot.",
+      ),
+      file: tr(
+        "Any OpenAI- or Anthropic-compatible server. Its key stays encrypted on the computer running localDot.",
+      ),
+      computer: tr(
+        "Any OpenAI- or Anthropic-compatible server. Its key stays on the computer running localDot.",
+      ),
+    },
   },
 };
 
@@ -928,7 +986,7 @@ function Progress({
   const n = stepNumber(step);
   const current = WIZARD_STEPS[n - 1];
   const label = current
-    ? `Step ${n} of ${WIZARD_STEPS.length} · ${stepTitle(current, kind)}`
+    ? t`Step ${n} of ${WIZARD_STEPS.length} · ${stepTitle(current, kind)}`
     : undefined;
   return (
     <div className="onboarding-progress" data-hidden={hidden || undefined}>

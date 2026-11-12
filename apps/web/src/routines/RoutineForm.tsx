@@ -8,6 +8,7 @@ import {
   zoneText,
 } from "@localdot/protocol";
 import { useId, useMemo } from "react";
+import { t, tc } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
 import { Combobox } from "../ui/Combobox.tsx";
@@ -67,7 +68,7 @@ function Weekdays({
   onChange(next: number[]): void;
 }) {
   return (
-    <Field label="On" className="ui-group-row" error={error}>
+    <Field label={tc("date", "On")} className="ui-group-row" error={error}>
       <span className="routine-days">
         {WEEK.map(({ day, short, long }) => {
           const on = value.includes(day);
@@ -113,16 +114,16 @@ function MonthDays({
   };
   return (
     <Field
-      label="On"
+      label={tc("date", "On")}
       className="ui-group-row"
       error={error}
       description={
-        value.some((day) => day > 28) ? "A month without that day is passed over." : undefined
+        value.some((day) => day > 28) ? t`A month without that day is passed over.` : undefined
       }
     >
       <span className="routine-days" data-month="">
-        {MONTH_DAYS.map((day) => chip(day, String(day), `Day ${day}`))}
-        {chip(LAST_DAY, "Last", "The last day of the month")}
+        {MONTH_DAYS.map((day) => chip(day, String(day), t`Day ${day}`))}
+        {chip(LAST_DAY, t`Last`, t`The last day of the month`)}
       </span>
     </Field>
   );
@@ -140,7 +141,7 @@ function Times({
   // The field's label goes with the first; each control needs its own id.
   const others = useId();
   return (
-    <Field label="At" inline className="ui-group-row" error={error}>
+    <Field label={t`At`} inline className="ui-group-row" error={error}>
       <span className="routine-times">
         {value.map((time, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: a time's place is its identity while it is typed
@@ -149,7 +150,7 @@ function Times({
               size="sm"
               type="time"
               id={index ? `${others}${index}` : undefined}
-              aria-label={value.length > 1 ? `Time ${index + 1}` : "Time"}
+              aria-label={value.length > 1 ? t`Time ${index + 1}` : t`Time`}
               value={time}
               onChange={(event) =>
                 onChange(value.map((each, at) => (at === index ? event.target.value : each)))
@@ -158,7 +159,7 @@ function Times({
             {value.length > 1 && (
               <IconButton
                 icon="x"
-                label={`Remove time ${index + 1}`}
+                label={t`Remove time ${index + 1}`}
                 onClick={() => onChange(value.filter((_, at) => at !== index))}
               />
             )}
@@ -171,7 +172,7 @@ function Times({
             icon="plus"
             onClick={() => onChange([...value, value.at(-1) ?? "09:00"])}
           >
-            Add time
+            {t`Add time`}
           </Button>
         )}
       </span>
@@ -197,13 +198,13 @@ function ScheduleRows({
     onChange({ ...value, [key]: next });
   return (
     <Group className="routine-schedule">
-      <Field label="Every" inline className="ui-group-row" error={errors.every}>
+      <Field label={t`Every`} inline className="ui-group-row" error={errors.every}>
         <span className="routine-every">
           <TextField
             size="sm"
             className="routine-every-count"
             inputMode="numeric"
-            aria-label="How many"
+            aria-label={t`How many`}
             value={value.every}
             maxLength={3}
             onChange={(event) => set("every", event.target.value.replace(/\D/g, ""))}
@@ -211,7 +212,7 @@ function ScheduleRows({
           <Select
             appearance="inline"
             id={period}
-            aria-label="Period"
+            aria-label={t`Period`}
             value={value.unit}
             items={UNITS.map(({ value: unit, one, many }) => ({
               value: unit,
@@ -219,7 +220,9 @@ function ScheduleRows({
             }))}
             onValueChange={(unit) => onChange(withUnit(value, unit as ScheduleUnit))}
           />
-          {onRemove && <IconButton icon="trash" label="Remove this schedule" onClick={onRemove} />}
+          {onRemove && (
+            <IconButton icon="trash" label={t`Remove this schedule`} onClick={onRemove} />
+          )}
         </span>
       </Field>
       {value.unit === "month" ? (
@@ -237,7 +240,7 @@ function ScheduleRows({
       )}
       {within ? (
         <>
-          <Field label="From" inline className="ui-group-row">
+          <Field label={t`From`} inline className="ui-group-row">
             <TextField
               size="sm"
               type="time"
@@ -245,7 +248,7 @@ function ScheduleRows({
               onChange={(event) => set("from", event.target.value)}
             />
           </Field>
-          <Field label="Until" inline className="ui-group-row" error={errors.span}>
+          <Field label={t`Until`} inline className="ui-group-row" error={errors.span}>
             <TextField
               size="sm"
               type="time"
@@ -269,7 +272,7 @@ function RunsPreview({ form }: { form: RoutineFormState }) {
   if (!preview)
     return (
       <p className="routine-preview routine-preview-note">
-        Finish the schedule to see when it runs.
+        {t`Finish the schedule to see when it runs.`}
       </p>
     );
   return (
@@ -278,7 +281,7 @@ function RunsPreview({ form }: { form: RoutineFormState }) {
         {preview.summary}
       </p>
       {preview.runs.length ? (
-        <ol className="routine-preview-runs" aria-label="Next runs">
+        <ol className="routine-preview-runs" aria-label={t`Next runs`}>
           {preview.runs.map((run) => (
             <li key={run}>
               <time className="num" dateTime={new Date(run).toISOString()}>
@@ -288,7 +291,7 @@ function RunsPreview({ form }: { form: RoutineFormState }) {
           ))}
         </ol>
       ) : (
-        <p className="routine-preview-note">No runs are left on those dates.</p>
+        <p className="routine-preview-note">{t`No runs are left on those dates.`}</p>
       )}
     </div>
   );
@@ -306,46 +309,46 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
   const zoneItems = useMemo(() => zones(value.tz), [value.tz]);
   return (
     <div className="routine-form">
-      <Field label="Name" error={errors.name}>
+      <Field label={t`Name`} error={errors.name}>
         <TextField
           value={value.name}
           maxLength={80}
           autoComplete="off"
-          placeholder="Morning inbox"
+          placeholder={t`Morning inbox`}
           onChange={(event) => set("name", event.target.value)}
         />
       </Field>
       <Field
-        label="What dot does"
-        description="Write it the way you'd ask dot in the chat."
+        label={t`What dot does`}
+        description={t`Write it the way you'd ask dot in the chat.`}
         error={errors.instruction}
       >
         <TextArea
           value={value.instruction}
           maxLength={8000}
           maxRows={8}
-          placeholder="Check my inbox and tell me what needs a reply."
+          placeholder={t`Check my inbox and tell me what needs a reply.`}
           onChange={(event) => set("instruction", event.target.value)}
         />
       </Field>
 
       <div className="routine-when">
-        <GroupHead title="When" />
+        <GroupHead title={t`When`} />
         <Group>
-          <Field label="Runs" inline className="ui-group-row">
+          <Field label={t`Runs`} inline className="ui-group-row">
             <SegmentedControl
               size={24}
               value={value.once ? "once" : "repeat"}
               items={[
-                { value: "repeat", label: "On a schedule" },
-                { value: "once", label: "Once" },
+                { value: "repeat", label: t`On a schedule` },
+                { value: "once", label: t`Once` },
               ]}
               onValueChange={(runs) => set("once", runs === "once")}
             />
           </Field>
           {value.once && (
             <>
-              <Field label="Date" inline className="ui-group-row" error={errors.date}>
+              <Field label={t`Date`} inline className="ui-group-row" error={errors.date}>
                 <TextField
                   size="sm"
                   type="date"
@@ -389,7 +392,7 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
                     set("schedules", [...value.schedules, addedSchedule(value.schedules)])
                   }
                 >
-                  Add another schedule
+                  {t`Add another schedule`}
                 </Button>
               </span>
             )}
@@ -398,7 +401,7 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
         <Group>
           {!value.once && (
             <>
-              <Field label="Starts" inline className="ui-group-row" error={errors.start}>
+              <Field label={t`Starts`} inline className="ui-group-row" error={errors.start}>
                 <TextField
                   size="sm"
                   type="date"
@@ -408,12 +411,12 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
               </Field>
               <Switch
                 className="ui-group-row"
-                label="Stop on a date"
+                label={t`Stop on a date`}
                 checked={value.ends}
                 onCheckedChange={(ends) => set("ends", ends)}
               />
               <Collapse open={value.ends}>
-                <Field label="Last day" inline className="ui-group-row" error={errors.until}>
+                <Field label={t`Last day`} inline className="ui-group-row" error={errors.until}>
                   <TextField
                     size="sm"
                     type="date"
@@ -424,10 +427,10 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
               </Collapse>
             </>
           )}
-          <Field label="Time zone" inline className="ui-group-row">
+          <Field label={t`Time zone`} inline className="ui-group-row">
             <Combobox
               appearance="inline"
-              searchPlaceholder="Search time zones"
+              searchPlaceholder={t`Search time zones`}
               value={value.tz}
               items={zoneItems}
               onValueChange={(tz) => set("tz", tz)}
@@ -436,15 +439,14 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
         </Group>
         <GroupNote>
           {value.tz === zone
-            ? `Times are on this Mac's clock (${zoneText(zone)}).`
-            : `Times are in ${zoneText(value.tz)}, not this Mac's clock (${zoneText(zone)}).`}{" "}
-          They stay put when the clocks change.
+            ? t`Times are on this Mac's clock (${zoneText(zone)}). They stay put when the clocks change.`
+            : t`Times are in ${zoneText(value.tz)}, not this Mac's clock (${zoneText(zone)}). They stay put when the clocks change.`}
         </GroupNote>
         <RunsPreview form={value} />
       </div>
 
       <div>
-        <GroupHead title="While you're away" />
+        <GroupHead title={t`While you're away`} />
         <RadioCards
           layout="rows"
           name="routine-away"
@@ -453,16 +455,16 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
             value: profile,
             label: AWAY[profile].label,
             description: AWAY[profile].description,
-            ...(profile === "ask_first" ? { tag: "Recommended" } : {}),
+            ...(profile === "ask_first" ? { tag: t`Recommended` } : {}),
           }))}
           onValueChange={(profile) => set("profile", profile as RoutineProfile)}
         />
       </div>
 
       <div>
-        <GroupHead title="Details" />
+        <GroupHead title={t`Details`} />
         <Group>
-          <Field label="Tell me" inline className="ui-group-row">
+          <Field label={t`Tell me`} inline className="ui-group-row">
             <Select
               appearance="inline"
               value={value.notify}
@@ -473,18 +475,18 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
               onValueChange={(notify) => set("notify", notify as RoutineNotify)}
             />
           </Field>
-          <Field label="If a run is missed" inline className="ui-group-row">
+          <Field label={t`If a run is missed`} inline className="ui-group-row">
             <SegmentedControl
               size={24}
               value={value.missedPolicy}
               items={(Object.keys(MISSED) as MissedPolicy[]).map((policy) => ({
                 value: policy,
-                label: policy === "run_once" ? "Run once later" : MISSED[policy],
+                label: policy === "run_once" ? t`Run once later` : MISSED[policy],
               }))}
               onValueChange={(policy) => set("missedPolicy", policy as MissedPolicy)}
             />
           </Field>
-          <Field label="Wait for my answer" inline className="ui-group-row">
+          <Field label={t`Wait for my answer`} inline className="ui-group-row">
             <Select
               appearance="inline"
               value={value.windowMinutes}
@@ -497,11 +499,11 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
           </Field>
           <Switch
             className="ui-group-row"
-            label="Spending limit per run"
+            label={t`Spending limit per run`}
             description={
               value.limited
-                ? "The run ends when it reaches this"
-                : "Off: it follows your usual spending settings"
+                ? t`The run ends when it reaches this`
+                : t`Off: it follows your usual spending settings`
             }
             checked={value.limited}
             onCheckedChange={(limited) =>
@@ -509,7 +511,7 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
             }
           />
           <Collapse open={value.limited}>
-            <Field label="Per run" inline className="ui-group-row" error={errors.budget}>
+            <Field label={t`Per run`} inline className="ui-group-row" error={errors.budget}>
               <MoneyField
                 size="sm"
                 value={value.budget}
@@ -520,8 +522,7 @@ export function RoutineForm({ value, errors, zone, onChange }: RoutineFormProps)
           </Collapse>
         </Group>
         <GroupNote>
-          A missed run is one due while your Mac was asleep or localDot wasn't running. If dot needs
-          you and nobody answers in time, that run stops and says so.
+          {t`A missed run is one due while your Mac was asleep or localDot wasn't running. If dot needs you and nobody answers in time, that run stops and says so.`}
         </GroupNote>
       </div>
     </div>

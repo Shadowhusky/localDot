@@ -17,6 +17,8 @@ import {
   whenLabel,
 } from "../agent/conversation-list.ts";
 import { researchQuestion } from "../agent/research.ts";
+import { personaBlurb, personaName } from "../dot/persona-words.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { APPEARANCE_NAMES } from "../onboarding/AppearancePicker.tsx";
 import { APPEARANCE_CHOICES, type AppearanceChoice } from "../onboarding/appearance.ts";
@@ -96,9 +98,9 @@ export interface ActionsInput {
 const APPEARANCES = APPEARANCE_CHOICES.map((value) => ({ value, label: APPEARANCE_NAMES[value] }));
 const RENAME_MAX = 80;
 const MEMORY_PROBLEMS: Partial<Record<string, string>> = {
-  invalid: "dot can't keep that. Keep it under 1,000 characters, with no keys in it.",
-  busy: "Memory can't change right now. Try again in a moment.",
-  full: "Memory is full. Remove something in Settings → What dot knows first.",
+  invalid: tr("dot can't keep that. Keep it under 1,000 characters, with no keys in it."),
+  busy: tr("Memory can't change right now. Try again in a moment."),
+  full: tr("Memory is full. Remove something in Settings → What dot knows first."),
 };
 
 // Every action the slash commands and the palette offer, as the app stands. Only what an action
@@ -164,14 +166,14 @@ export function useActions(input: ActionsInput): {
     const doable = (pick: (input: ActionsInput) => Doable) => () => {
       if (!pick(now()).reason) pick(now()).run();
     };
-    const noConversation = currentConversation ? undefined : "Start a conversation first";
+    const noConversation = currentConversation ? undefined : t`Start a conversation first`;
     const organize = async (change: Organize, done: string) => {
       const id = now().conversations.current;
-      if (!id) return "Start a conversation first.";
+      if (!id) return t`Start a conversation first.`;
       try {
         await organizeConversation(api, id, change);
       } catch {
-        return "That change couldn't be saved. Try again.";
+        return t`That change couldn't be saved. Try again.`;
       }
       announce("conversation", done);
       return undefined;
@@ -188,23 +190,22 @@ export function useActions(input: ActionsInput): {
       {
         id: "btw",
         command: "btw",
-        title: "Ask a side question",
-        description:
-          "Look into this task, its log, screen and files, without interrupting it. dot never sees it.",
-        hint: "<question>",
+        title: t`Ask a side question`,
+        description: t`Look into this task, its log, screen and files, without interrupting it. dot never sees it.`,
+        hint: t`<question>`,
         group: "Task",
         icon: "message-circle",
         keywords: "by the way aside side question quick look check",
         input: "required",
-        placeholder: "Ask about this task…",
-        unavailable: sessionId ? undefined : "Start a task first",
+        placeholder: t`Ask about this task…`,
+        unavailable: sessionId ? undefined : t`Start a task first`,
         run: ({ text }) => now().aside.ask(text),
       },
       {
         id: "stop",
         command: "stop",
-        title: "Stop the task",
-        description: "Stop dot's current task",
+        title: t`Stop the task`,
+        description: t`Stop dot's current task`,
         group: "Task",
         icon: "stop",
         keywords: "cancel halt pause end",
@@ -215,8 +216,8 @@ export function useActions(input: ActionsInput): {
       {
         id: "continue",
         command: "continue",
-        title: "Continue the task",
-        description: "Carry on a paused or interrupted task",
+        title: t`Continue the task`,
+        description: t`Carry on a paused or interrupted task`,
         group: "Task",
         icon: "continue",
         keywords: "resume unpause carry on",
@@ -226,8 +227,8 @@ export function useActions(input: ActionsInput): {
       {
         id: "takeover",
         command: "takeover",
-        title: "Take control",
-        description: "Use the computer yourself while dot waits",
+        title: t`Take control`,
+        description: t`Use the computer yourself while dot waits`,
         group: "Task",
         icon: "hand",
         keywords: "take over control computer myself",
@@ -237,8 +238,8 @@ export function useActions(input: ActionsInput): {
       {
         id: "handback",
         command: "handback",
-        title: "Hand back",
-        description: "Give the computer back to dot",
+        title: t`Hand back`,
+        description: t`Give the computer back to dot`,
         group: "Task",
         icon: "hand-back",
         keywords: "give back return control",
@@ -248,8 +249,8 @@ export function useActions(input: ActionsInput): {
       {
         id: "new",
         command: "new",
-        title: "New conversation",
-        description: "Start afresh; this conversation stays in the list",
+        title: t`New conversation`,
+        description: t`Start afresh; this conversation stays in the list`,
         group: "Conversation",
         icon: "compose",
         keywords: "clear fresh start",
@@ -259,13 +260,13 @@ export function useActions(input: ActionsInput): {
       {
         id: "resume",
         command: "resume",
-        title: "Switch conversation",
-        description: "Pick up an earlier conversation where it left off",
-        hint: "[search]",
+        title: t`Switch conversation`,
+        description: t`Pick up an earlier conversation where it left off`,
+        hint: t`[search]`,
         group: "Conversation",
         icon: "message-circle",
         keywords: "open continue history conversations chats earlier",
-        placeholder: "Search conversations",
+        placeholder: t`Search conversations`,
         unavailable: conversationReason,
         searchable: true,
         choices: async (signal) => {
@@ -293,45 +294,48 @@ export function useActions(input: ActionsInput): {
       {
         id: "rename",
         command: "rename",
-        title: "Rename this conversation",
-        description: "Give it a name of your own, or let dot name it again",
-        hint: "[name]",
+        title: t`Rename this conversation`,
+        description: t`Give it a name of your own, or let dot name it again`,
+        hint: t`[name]`,
         group: "Conversation",
         icon: "file-text",
         keywords: "title name",
         input: "optional",
-        placeholder: "A name for this conversation",
-        unavailable: currentConversation ? undefined : "Start a conversation first",
-        choices: [{ value: "auto", label: "Use the automatic title", detail: "dot names it" }],
+        placeholder: t`A name for this conversation`,
+        unavailable: currentConversation ? undefined : t`Start a conversation first`,
+        choices: [{ value: "auto", label: t`Use the automatic title`, detail: t`dot names it` }],
         run: async ({ text, choice }) => {
           const id = now().conversations.current;
-          if (!id) return "Start a conversation first.";
+          if (!id) return t`Start a conversation first.`;
           const title = choice?.value === "auto" ? null : text.trim();
           if (title !== null && (!title || title.length > RENAME_MAX))
-            return `Use a name of 1–${RENAME_MAX} characters.`;
+            return t`Use a name of 1–${RENAME_MAX} characters.`;
           try {
             await api.post(`/api/conversations/${id}/title`, { title });
           } catch {
-            return "Couldn't rename the conversation. Try again.";
+            return t`Couldn't rename the conversation. Try again.`;
           }
           now().conversations.renamed();
-          announce("conversation", title ? `Renamed to ${title}.` : "dot names this conversation.");
+          announce(
+            "conversation",
+            title ? t`Renamed to ${title}.` : t`dot names this conversation.`,
+          );
           return undefined;
         },
       },
       {
         id: "tag",
         command: "tag",
-        title: "Tag this conversation",
-        description: "Give it a colour to tell it apart in the list",
-        hint: "[colour]",
+        title: t`Tag this conversation`,
+        description: t`Give it a colour to tell it apart in the list`,
+        hint: t`[colour]`,
         group: "Conversation",
         icon: "tag",
         keywords: "colour color label mark",
-        placeholder: "Search colours",
+        placeholder: t`Search colours`,
         unavailable: noConversation,
         choices: [
-          { value: "none", label: "No tag", current: !filedTag },
+          { value: "none", label: t`No tag`, current: !filedTag },
           ...CONVERSATION_TAGS.map((tag) => ({
             value: tag,
             label: TAG_NAMES[tag],
@@ -343,17 +347,17 @@ export function useActions(input: ActionsInput): {
           const tag = choice.value === "none" ? null : (choice.value as ConversationTag);
           return organize(
             { tag },
-            tag ? `Tagged ${TAG_NAMES[tag].toLowerCase()}.` : "Tag taken off.",
+            tag ? t`Tagged ${TAG_NAMES[tag].toLowerCase()}.` : t`Tag taken off.`,
           );
         },
       },
       {
         id: "pin",
         command: "pin",
-        title: filedPinned ? "Unpin this conversation" : "Pin this conversation",
+        title: filedPinned ? t`Unpin this conversation` : t`Pin this conversation`,
         description: filedPinned
-          ? "Let it move down the list with the rest"
-          : "Keep it at the top of the list",
+          ? t`Let it move down the list with the rest`
+          : t`Keep it at the top of the list`,
         group: "Conversation",
         icon: "pin",
         keywords: "top favourite favorite star keep",
@@ -361,47 +365,47 @@ export function useActions(input: ActionsInput): {
         run: () =>
           organize(
             { pinned: !filedPinned },
-            filedPinned ? "Unpinned this conversation." : "Pinned to the top.",
+            filedPinned ? t`Unpinned this conversation.` : t`Pinned to the top.`,
           ),
       },
       {
         id: "archive",
         command: "archive",
-        title: filedArchived ? "Unarchive this conversation" : "Archive this conversation",
+        title: filedArchived ? t`Unarchive this conversation` : t`Archive this conversation`,
         description: filedArchived
-          ? "Bring it back to the list"
-          : "Put it away; it comes back if it goes on",
+          ? t`Bring it back to the list`
+          : t`Put it away; it comes back if it goes on`,
         group: "Conversation",
         icon: filedArchived ? "archive-restore" : "archive",
         keywords: "hide put away tidy",
         unavailable:
           noConversation ??
           (underWay && !filedArchived
-            ? "Stop the task before archiving its conversation"
+            ? t`Stop the task before archiving its conversation`
             : undefined),
         run: () =>
           organize(
             { archived: !filedArchived },
-            filedArchived ? "Back in the list." : "Archived. It's under Archived in the list.",
+            filedArchived ? t`Back in the list.` : t`Archived. It's under Archived in the list.`,
           ),
       },
       {
         id: "delete-conversation",
-        title: "Delete this conversation",
-        description: "Its messages, recordings and screenshots, for good",
+        title: t`Delete this conversation`,
+        description: t`Its messages, recordings and screenshots, for good`,
         group: "Conversation",
         icon: "trash",
         keywords: "remove erase forget",
         unavailable:
           noConversation ??
-          (underWay ? "Stop the task before deleting its conversation" : undefined),
+          (underWay ? t`Stop the task before deleting its conversation` : undefined),
         run: ({ trigger }) => now().conversations.remove(trigger),
       },
       {
         id: "replay",
         command: "replay",
-        title: "Open Replay",
-        description: "Watch this task back, or browse your recordings",
+        title: t`Open Replay`,
+        description: t`Watch this task back, or browse your recordings`,
         group: "Conversation",
         icon: "history",
         keywords: "recording video watch back history",
@@ -411,27 +415,27 @@ export function useActions(input: ActionsInput): {
       {
         id: "research",
         command: "research",
-        title: "Research a question",
-        description: "dot reads many sources and writes a cited report",
-        hint: "<question>",
+        title: t`Research a question`,
+        description: t`dot reads many sources and writes a cited report`,
+        hint: t`<question>`,
         group: "Task",
         icon: "globe",
         keywords: "search web report sources",
         input: "required",
-        placeholder: "What should dot research?",
+        placeholder: t`What should dot research?`,
         unavailable: research,
         run: ({ text }) => researchQuestion(text),
       },
       {
         id: "model",
         command: "model",
-        title: "Switch model",
-        description: "Choose the model dot works with",
-        hint: "[name]",
+        title: t`Switch model`,
+        description: t`Choose the model dot works with`,
+        hint: t`[name]`,
         group: "dot",
         icon: "cpu",
         keywords: "llm provider claude gpt",
-        placeholder: "Search models",
+        placeholder: t`Search models`,
         unavailable: modelReason,
         searchable: true,
         choices: modelChoices,
@@ -445,50 +449,50 @@ export function useActions(input: ActionsInput): {
       {
         id: "dot",
         command: "dot",
-        title: "Switch dot",
-        description: "Choose which dot works with you, from the next task",
-        hint: "[name]",
+        title: t`Switch dot`,
+        description: t`Choose which dot works with you, from the next task`,
+        hint: t`[name]`,
         group: "dot",
         icon: "smile",
         keywords: "persona character",
-        placeholder: "Search dots",
+        placeholder: t`Search dots`,
         searchable: true,
         choices: Object.values(PERSONAS).map((each) => ({
           value: each.id,
-          label: each.name,
-          detail: each.blurb,
+          label: personaName(each.id),
+          detail: personaBlurb(each.id),
           current: each.id === persona.value,
         })),
         run: ({ choice }) => {
           const chosen = Object.values(PERSONAS).find((each) => each.id === choice?.value);
           if (!chosen) return;
           now().persona.choose(chosen.id);
-          announce("persona", `${chosen.name} works with you from the next task.`);
+          announce("persona", t`${chosen.name} works with you from the next task.`);
         },
       },
       {
         id: "remember",
         command: "remember",
-        title: "Remember something",
-        description: "Save a fact dot keeps for every task",
-        hint: "<fact>",
+        title: t`Remember something`,
+        description: t`Save a fact dot keeps for every task`,
+        hint: t`<fact>`,
         group: "dot",
         icon: "book",
         keywords: "memory note fact know",
         input: "required",
-        placeholder: "What should dot remember?",
+        placeholder: t`What should dot remember?`,
         run: async ({ text }) => {
           try {
             await addEntry(api, "MEMORY.md", text);
           } catch (error) {
             return (
               (error instanceof MemoryRequestError && MEMORY_PROBLEMS[error.reason]) ||
-              "Couldn't save that. Try again."
+              t`Couldn't save that. Try again.`
             );
           }
           showToast({
-            title: "dot will remember that",
-            action: { label: "View", onAction: () => now().settings(null, "knowledge") },
+            title: t`dot will remember that`,
+            action: { label: t`View`, onAction: () => now().settings(null, "knowledge") },
           });
           return undefined;
         },
@@ -496,8 +500,8 @@ export function useActions(input: ActionsInput): {
       {
         id: "usage",
         command: "usage",
-        title: "Show plan usage",
-        description: "How much of your ChatGPT or Claude plan is used",
+        title: t`Show plan usage`,
+        description: t`How much of your ChatGPT or Claude plan is used`,
         group: "dot",
         icon: "chart",
         keywords: "limits quota plan subscription spending",
@@ -509,9 +513,9 @@ export function useActions(input: ActionsInput): {
       {
         id: "report",
         command: "report",
-        title: "Report a problem",
-        description: "Tell the localDot team what went wrong",
-        hint: "[what happened]",
+        title: t`Report a problem`,
+        description: t`Tell the localDot team what went wrong`,
+        hint: t`[what happened]`,
         group: "Help",
         icon: "circle-alert",
         keywords: "bug feedback issue",
@@ -521,8 +525,8 @@ export function useActions(input: ActionsInput): {
       {
         id: "help",
         command: "help",
-        title: "Show commands",
-        description: "List every command you can type after /",
+        title: t`Show commands`,
+        description: t`List every command you can type after /`,
         group: "Help",
         icon: "info",
         keywords: "commands slash list",
@@ -531,8 +535,8 @@ export function useActions(input: ActionsInput): {
       {
         id: "shortcuts",
         command: "shortcuts",
-        title: "Keyboard shortcuts",
-        description: "Every key that does something here",
+        title: t`Keyboard shortcuts`,
+        description: t`Every key that does something here`,
         group: "Help",
         icon: "keyboard",
         keywords: "keys hotkeys",
@@ -541,8 +545,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "watch",
-        title: "Go to Watch",
-        description: "The live computer and this conversation",
+        title: t`Go to Watch`,
+        description: t`The live computer and this conversation`,
         group: "Go to",
         icon: "monitor",
         keywords: "live leave replay",
@@ -551,8 +555,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "overview",
-        title: "Show the overview",
-        description: "Every dot's screen and progress at once",
+        title: t`Show the overview`,
+        description: t`Every dot's screen and progress at once`,
         group: "Go to",
         icon: "layout-dashboard",
         keywords: "grid tiles all dots conversations tasks screens dashboard",
@@ -561,8 +565,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "view-chat",
-        title: "Show the chat",
-        description: "This conversation",
+        title: t`Show the chat`,
+        description: t`This conversation`,
         group: "Go to",
         icon: "message-circle",
         keywords: "thread messages tab",
@@ -570,8 +574,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "view-activity",
-        title: `Show ${PANEL_NAME}`,
-        description: "Steps, files and previews of this work",
+        title: t`Show ${PANEL_NAME}`,
+        description: t`Steps, files and previews of this work`,
         group: "Go to",
         icon: "list",
         keywords: "activity steps timeline tab",
@@ -579,8 +583,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "files",
-        title: "Show files",
-        description: "Files dot made or changed in this conversation",
+        title: t`Show files`,
+        description: t`Files dot made or changed in this conversation`,
         group: "Go to",
         icon: "file",
         keywords: "downloads results outputs activity",
@@ -589,8 +593,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "previews",
-        title: "Show previews",
-        description: "Apps dot started on its computer",
+        title: t`Show previews`,
+        description: t`Apps dot started on its computer`,
         group: "Go to",
         icon: "app-window",
         keywords: "dev server preview localhost activity",
@@ -599,8 +603,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "view-routines",
-        title: "Show Routines",
-        description: "Tasks dot runs on a schedule",
+        title: t`Show Routines`,
+        description: t`Tasks dot runs on a schedule`,
         group: "Go to",
         icon: "repeat",
         keywords: "schedule tab",
@@ -610,8 +614,8 @@ export function useActions(input: ActionsInput): {
         ? [
             {
               id: "chat-panel",
-              title: chatShown ? "Hide the conversation panel" : "Show the conversation panel",
-              description: "Give the computer the whole width, or bring the chat back",
+              title: chatShown ? t`Hide the conversation panel` : t`Show the conversation panel`,
+              description: t`Give the computer the whole width, or bring the chat back`,
               group: "Go to",
               icon: "panel-right",
               keywords: "toggle sidebar rail chat",
@@ -621,8 +625,8 @@ export function useActions(input: ActionsInput): {
         : []),
       {
         id: "full-screen",
-        title: fullOn ? "Leave full screen" : "Full screen",
-        description: "The computer's screen on its own",
+        title: fullOn ? t`Leave full screen` : t`Full screen`,
+        description: t`The computer's screen on its own`,
         group: "Go to",
         icon: fullOn ? "shrink" : "expand",
         keywords: "fullscreen focus",
@@ -632,8 +636,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "settings",
-        title: "Open Settings",
-        description: "Models, autonomy, keys and more",
+        title: t`Open Settings`,
+        description: t`Models, autonomy, keys and more`,
         group: "Settings",
         icon: "settings",
         keywords: "preferences options",
@@ -641,12 +645,12 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "settings-section",
-        title: "Settings section",
-        description: "Go straight to one part of Settings",
+        title: t`Settings section`,
+        description: t`Go straight to one part of Settings`,
         group: "Settings",
         icon: "settings",
         keywords: "preferences",
-        placeholder: "Search Settings",
+        placeholder: t`Search Settings`,
         searchable: true,
         choices: SECTIONS.map((section) => ({ value: section.id, label: section.title })),
         run: ({ choice, trigger }) => {
@@ -656,8 +660,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "appearance",
-        title: "Change appearance",
-        description: "How localDot looks",
+        title: t`Change appearance`,
+        description: t`How localDot looks`,
         group: "Settings",
         icon: "contrast",
         keywords: "theme colour color dark light daylight system",
@@ -675,7 +679,7 @@ export function useActions(input: ActionsInput): {
       {
         id: "view-style",
         title: viewStyle.label,
-        description: `${VIEW_NAMES.chat} or ${VIEW_NAMES.studio}, on this device`,
+        description: t`${VIEW_NAMES.chat} or ${VIEW_NAMES.studio}, on this device`,
         group: "Settings",
         icon: "layout-grid",
         keywords: `view style layout messenger switch ${VIEW_NAMES.chat} ${VIEW_NAMES.studio}`,
@@ -684,12 +688,12 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "other-dots",
-        title: "Open another localDot",
-        description: "Your other localDots on this Mac or elsewhere",
+        title: t`Open another localDot`,
+        description: t`Your other localDots on this Mac or elsewhere`,
         group: "Settings",
         icon: "monitor",
         keywords: "switch instance computer",
-        unavailable: otherDots.length ? undefined : "You have no other localDots",
+        unavailable: otherDots.length ? undefined : t`You have no other localDots`,
         searchable: true,
         choices: otherDots.map((dot) => ({ value: dot.id, label: dot.name, detail: "localDot" })),
         run: ({ choice }) =>
@@ -699,8 +703,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "new-routine",
-        title: "New routine",
-        description: "Have dot do something on a schedule",
+        title: t`New routine`,
+        description: t`Have dot do something on a schedule`,
         group: "Settings",
         icon: "repeat",
         keywords: "schedule automate",
@@ -708,8 +712,8 @@ export function useActions(input: ActionsInput): {
       },
       {
         id: "stop-all",
-        title: "Stop everything",
-        description: "Stop every task and routine on this localDot",
+        title: t`Stop everything`,
+        description: t`Stop every task and routine on this localDot`,
         group: "Task",
         icon: "stop",
         keywords: "emergency halt all",

@@ -5,6 +5,7 @@ import {
   UserUploadStatus,
   userUploadPath,
 } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import {
   boundedBody,
@@ -39,14 +40,14 @@ const pause = (ms: number, signal: AbortSignal) =>
   });
 const message = (status?: number) =>
   status === 507
-    ? "Not enough storage. Free some space, then retry."
+    ? t`Not enough storage. Free some space, then retry.`
     : status === 413
-      ? "The upload limit is 10 GiB per file and 20 GiB of unfinished uploads."
+      ? t`The upload limit is 10 GiB per file and 20 GiB of unfinished uploads.`
       : status === 401 || status === 403
-        ? "Reconnect to localDot, then retry the upload."
+        ? t`Reconnect to localDot, then retry the upload.`
         : status === 404
-          ? "This upload is unavailable or expired. Select the file again."
-          : "Upload paused. Retry to continue from the last saved chunk.";
+          ? t`This upload is unavailable or expired. Select the file again.`
+          : t`Upload paused. Retry to continue from the last saved chunk.`;
 
 // Only a small slice is read into memory. No base64 expansion or whole-file model ingestion.
 export async function uploadFile(
@@ -67,7 +68,7 @@ export async function uploadFile(
     throw new FileTransferFailure(
       false,
       undefined,
-      "Choose a file with a safe, visible name, at most 10 GiB.",
+      t`Choose a file with a safe, visible name, at most 10 GiB.`,
     );
   const id = options.id ?? crypto.randomUUID();
   if (!UserUploadId.safeParse(id).success) throw new FileTransferFailure(false);
@@ -177,17 +178,17 @@ export async function uploadFile(
             state.problem === "storage_full"
               ? message(507)
               : state.problem === "computer_update_required"
-                ? "File received. Update your computer, then retry to finish placing it in Downloads."
+                ? t`File received. Update your computer, then retry to finish placing it in Downloads.`
                 : state.problem === "verification_failed"
-                  ? "File verification failed. Retry the upload."
-                  : "File received. Waiting for the computer to be available; retry to finish placing it in Downloads.",
+                  ? t`File verification failed. Retry the upload.`
+                  : t`File received. Waiting for the computer to be available; retry to finish placing it in Downloads.`,
           );
         } else {
           if (Date.now() - placingStarted > 30 * 60_000)
             throw new FileTransferFailure(
               true,
               undefined,
-              "Still placing the file in Downloads. Retry to check its progress.",
+              t`Still placing the file in Downloads. Retry to check its progress.`,
             );
           await pause(1000, owner);
           state = await request(path, "GET");

@@ -11,6 +11,7 @@ import {
   checksSummary,
   presetOf,
 } from "../copy/autonomy.ts";
+import { t, tr } from "../i18n/index.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -30,22 +31,22 @@ type Editable = (typeof EDITABLE_ACTION_CLASSES)[number];
 
 export const GROUPS: readonly { label: string; rows: readonly Editable[] }[] = [
   {
-    label: "Its own work",
+    label: tr("Its own work"),
     rows: ["reading", "browsing", "computer", "download_execute", "memory"],
   },
-  { label: "Acting as you", rows: ["send", "post", "delete", "system_settings", "purchase"] },
+  { label: tr("Acting as you"), rows: ["send", "post", "delete", "system_settings", "purchase"] },
 ];
 
 const MODES = [
-  { value: "act", label: "Just do it" },
-  { value: "ask", label: "Ask me" },
-  { value: "handoff", label: "I'll do it" },
+  { value: "act", label: tr("Just do it") },
+  { value: "ask", label: tr("Ask me") },
+  { value: "handoff", label: tr("I'll do it") },
 ] as const;
 
 const locked = (policy: AutonomyPolicy): readonly [ActionClass, string][] => [
-  ["upload", policy.send === "handoff" ? "I'll do it, like sending" : "Ask me"],
-  ["credentials", "I'll do it"],
-  ["unknown", "Ask me"],
+  ["upload", policy.send === "handoff" ? t`I'll do it, like sending` : t`Ask me`],
+  ["credentials", t`I'll do it`],
+  ["unknown", t`Ask me`],
 ];
 
 export interface AutonomyMatrixProps {
@@ -63,7 +64,7 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
   if (!parsed.success)
     return (
       <p role="alert" className="settings-lede">
-        These choices couldn't be read. Revert to load the saved ones.
+        {t`These choices couldn't be read. Revert to load the saved ones.`}
       </p>
     );
   const policy = parsed.data;
@@ -72,13 +73,13 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
     <div className="settings-autonomy">
       <div>
         <RadioCards
-          aria-label="Start from"
+          aria-label={t`Start from`}
           roomy={phone}
           value={active?.name ?? ""}
           options={[...AUTONOMY_PRESETS].reverse().map((preset) => ({
             value: preset.name,
             label: preset.label,
-            tag: preset.recommended ? "Recommended" : undefined,
+            tag: preset.recommended ? t`Recommended` : undefined,
             description: preset.summary,
           }))}
           onValueChange={(name) => {
@@ -88,13 +89,13 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
         />
         <GroupNote>
           {active ? "" : `${CUSTOM_SUMMARY} `}
-          {checksSummary(policy)} Uploads always ask first, and passwords, codes and card details
-          are always yours to enter.
+          {checksSummary(policy)}{" "}
+          {t`Uploads always ask first, and passwords, codes and card details are always yours to enter.`}
         </GroupNote>
       </div>
-      <Disclosure summary="Choose for each kind of action" className="settings-matrix">
+      <Disclosure summary={t`Choose for each kind of action`} className="settings-matrix">
         <p className="settings-lede settings-matrix-key">
-          Just do it: dot goes ahead. Ask me: dot waits for your OK. I'll do it: you take over.
+          {t`Just do it: dot goes ahead. Ask me: dot waits for your OK. I'll do it: you take over.`}
         </p>
         {GROUPS.map((group) => (
           <div key={group.label}>
@@ -114,7 +115,7 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
                         className="settings-changed"
                         kind="dot"
                         tone="attention"
-                        label="Changed"
+                        label={t`Changed`}
                       />
                     )}
                     <SegmentedControl
@@ -134,9 +135,9 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
           </div>
         ))}
         <div>
-          <GroupHead title="Always the same" />
+          <GroupHead title={t`Always the same`} />
           <Group>
-            <ul className="settings-locked" aria-label="Always the same">
+            <ul className="settings-locked" aria-label={t`Always the same`}>
               {locked(policy).map(([key, mode]) => (
                 <li key={key} className="ui-group-row">
                   <span>{CLASS_LABELS[key]}</span>
@@ -146,8 +147,7 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
             </ul>
           </Group>
           <GroupNote>
-            Always allow can cover uploads and unclear steps for one task only. Once you sign in on
-            its computer, commands count as unclear steps.
+            {t`Always allow can cover uploads and unclear steps for one task only. Once you sign in on its computer, commands count as unclear steps.`}
           </GroupNote>
         </div>
       </Disclosure>
@@ -166,7 +166,7 @@ const RULE_ICON: Partial<Record<ActionClass, IconName>> = {
 // The choices made with Always allow on a request, each removable.
 export function AlwaysAllowed({ rules }: { rules: RulesView }) {
   const busy = rules.removing !== null || rules.resetting;
-  const wait = busy ? "Wait for the other change to finish" : undefined;
+  const wait = busy ? t`Wait for the other change to finish` : undefined;
   return (
     <div className="settings-rules">
       {rules.unreadable && (
@@ -182,28 +182,28 @@ export function AlwaysAllowed({ rules }: { rules: RulesView }) {
               disabledReason={rules.resetting ? undefined : wait}
               onClick={rules.reset}
             >
-              Start over
+              {t`Start over`}
             </Button>
           }
         >
-          Start over to save new choices. The old file is kept, not deleted.
-          {rules.resetFailed && <span role="alert"> Couldn't start over. Try again.</span>}
+          {t`Start over to save new choices. The old file is kept, not deleted.`}
+          {rules.resetFailed && <span role="alert"> {t`Couldn't start over. Try again.`}</span>}
         </Banner>
       )}
       {rules.phase === "error" ? (
         <Group>
           <GroupRow
-            label="Couldn't load this list"
+            label={t`Couldn't load this list`}
             trailing={
               <Button variant="quiet" size="sm" onClick={rules.reload}>
-                Try again
+                {t`Try again`}
               </Button>
             }
           />
         </Group>
       ) : rules.rules.length ? (
         <Group>
-          <ul className="settings-rule-list" aria-label="Always allowed">
+          <ul className="settings-rule-list" aria-label={t`Always allowed`}>
             {rules.rules.map((rule) => {
               const name = CLASS_LABELS[rule.actionClass];
               return (
@@ -216,19 +216,19 @@ export function AlwaysAllowed({ rules }: { rules: RulesView }) {
                       <Button
                         variant="quiet"
                         size="sm"
-                        aria-label={`Remove ${name}: ${rule.label}`}
+                        aria-label={t`Remove ${name}: ${rule.label}`}
                         busy={rules.removing === rule.id}
                         disabledReason={rules.removing === rule.id ? undefined : wait}
                         onClick={() => rules.remove(rule.id)}
                       >
-                        Remove
+                        {t`Remove`}
                       </Button>
                     }
                   >
                     {rules.failed === rule.id && (
                       <p className="settings-rule-failed" role="status">
                         <Icon name="circle-alert" size={12} />
-                        Couldn't remove this. Try again.
+                        {t`Couldn't remove this. Try again.`}
                       </p>
                     )}
                   </GroupRow>
@@ -247,15 +247,15 @@ export function AlwaysAllowed({ rules }: { rules: RulesView }) {
       ) : (
         !rules.unreadable && (
           <Group>
-            <EmptyState icon="check-circle" title="Nothing allowed yet">
-              Choose Always allow on a request, and dot stops asking for it.
+            <EmptyState icon="check-circle" title={t`Nothing allowed yet`}>
+              {t`Choose Always allow on a request, and dot stops asking for it.`}
             </EmptyState>
           </Group>
         )
       )}
       {rules.rules.length > 0 && (
         <GroupNote>
-          dot doesn't ask again inside a rule. Removing one takes effect right away.
+          {t`dot doesn't ask again inside a rule. Removing one takes effect right away.`}
         </GroupNote>
       )}
     </div>

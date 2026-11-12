@@ -5,6 +5,7 @@ import type {
   TailscaleProblem,
 } from "@localdot/protocol";
 import { useEffect, useRef, useState } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { copyHomeScreenLink, LinkNotCopied } from "../notify/home-screen-link.ts";
 import { isBareAddress } from "../notify/this-device.ts";
@@ -20,27 +21,27 @@ const WAITING_POLL_MS = 2000;
 
 // The Tailscale row's second line: where it stands. The note under the list says what to do.
 const STANDING: Record<TailscaleAccess["state"], string> = {
-  "not-installed": "Not installed",
-  "not-running": "Not running",
-  "needs-login": "Signed out",
-  "needs-approval": "Waiting for you to allow HTTPS",
-  "ready-to-enable": "Off",
-  served: "On",
-  unavailable: "Unavailable",
+  "not-installed": tr("Not installed"),
+  "not-running": tr("Not running"),
+  "needs-login": tr("Signed out"),
+  "needs-approval": tr("Waiting for you to allow HTTPS"),
+  "ready-to-enable": tr("Off"),
+  served: tr("On"),
+  unavailable: tr("Unavailable"),
 };
 const PROBLEMS: Record<TailscaleProblem, string> = {
-  permission: "Needs your permission",
-  "port-taken": "Port in use",
-  funnel: "Public through Funnel",
-  "no-name": "No ts.net name",
-  "no-answer": "Not answering",
-  "other-user": "In use by another account",
-  failed: "Couldn't turn on",
+  permission: tr("Needs your permission"),
+  "port-taken": tr("Port in use"),
+  funnel: tr("Public through Funnel"),
+  "no-name": tr("No ts.net name"),
+  "no-answer": tr("Not answering"),
+  "other-user": tr("In use by another account"),
+  failed: tr("Couldn't turn on"),
 };
 // What a localDot started before it reported Tailscale's state answers.
 const OUTDATED: TailscaleAccess = {
   state: "unavailable",
-  message: "Restart localDot on this computer to set up Tailscale here.",
+  message: t`Restart localDot on this computer to set up Tailscale here.`,
 };
 
 function accessStatus(value: unknown): AccessLinksStatus {
@@ -70,8 +71,8 @@ const bareHttps = (origin: string) =>
 function homeScreenNote({ links, tailscale }: AccessLinksStatus): string | undefined {
   if (!links.some(({ origin }) => bareHttps(origin))) return undefined;
   return tailscale.state === "served"
-    ? "For an iPhone's Home Screen, use the Tailscale link: its certificate is trusted, so the app gets its icon and opens with no warning."
-    : "An iPhone doesn't trust the certificate of a bare address, so the app would lose its icon and warn each time it opens. Turn on Tailscale for an address it trusts.";
+    ? t`For an iPhone's Home Screen, use the Tailscale link: its certificate is trusted, so the app gets its icon and opens with no warning.`
+    : t`An iPhone doesn't trust the certificate of a bare address, so the app would lose its icon and warn each time it opens. Turn on Tailscale for an address it trusts.`;
 }
 
 export function AccessLinksSettings({ api }: { api: ApiClient }) {
@@ -103,8 +104,8 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
         if (!disposed)
           setError(
             failure instanceof ApiError && failure.status === 404
-              ? "App links will be available after the localDot service is updated and restarted."
-              : "App addresses couldn't load. Try again.",
+              ? t`App links will be available after the localDot service is updated and restarted.`
+              : t`App addresses couldn't load. Try again.`,
           );
       }
     };
@@ -145,7 +146,7 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
     } catch (failure) {
       if (failure instanceof LinkNotCopied)
         setResult({ origin, expiresAt: failure.expiresAt, fallback: failure.link });
-      else setError("Couldn't create a sign-in link. Try again.");
+      else setError(t`Couldn't create a sign-in link. Try again.`);
     } finally {
       lock.current = false;
       setBusy(null);
@@ -162,15 +163,15 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
     } catch {
       setError(
         name === "turn-on"
-          ? "Tailscale couldn't be turned on. Try again."
-          : "Tailscale couldn't be checked. Try again.",
+          ? t`Tailscale couldn't be turned on. Try again.`
+          : t`Tailscale couldn't be checked. Try again.`,
       );
     } finally {
       lock.current = false;
       setBusy(null);
     }
   };
-  const waitReason = (name: string) => (busy && busy !== name ? "Please wait…" : undefined);
+  const waitReason = (name: string) => (busy && busy !== name ? t`Please wait…` : undefined);
   const copyButton = (origin: string, label: string) => {
     const copied = result?.origin === origin && !result.fallback;
     return (
@@ -180,10 +181,10 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
         icon={copied ? "check" : "copy"}
         busy={busy === origin}
         disabledReason={waitReason(origin)}
-        aria-label={copied ? `${label} link copied` : `Copy ${named(label)} link`}
+        aria-label={copied ? t`${label} link copied` : t`Copy ${named(label)} link`}
         onClick={() => void copy(origin)}
       >
-        <StableText choices={["Copy link", "Copied"]} value={copied ? "Copied" : "Copy link"} />
+        <StableText choices={[t`Copy link`, t`Copied`]} value={copied ? t`Copied` : t`Copy link`} />
       </Button>
     );
   };
@@ -193,7 +194,7 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
     if (state.state === "needs-approval" && page)
       return (
         <Button size="sm" onClick={() => openPage(page)}>
-          Allow HTTPS
+          {t`Allow HTTPS`}
         </Button>
       );
     if (state.state === "ready-to-enable" || state.reason === "permission")
@@ -201,7 +202,7 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
         <>
           {page && (
             <Button variant="quiet" size="sm" onClick={() => openPage(page)}>
-              Allow HTTPS
+              {t`Allow HTTPS`}
             </Button>
           )}
           <Button
@@ -210,14 +211,14 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
             disabledReason={waitReason("turn-on")}
             onClick={() => void act("turn-on", () => api.post("/api/access-links/tailscale"))}
           >
-            Turn on
+            {t`Turn on`}
           </Button>
         </>
       );
     if (state.state === "not-installed")
       return (
         <Button size="sm" onClick={() => openPage(TAILSCALE_DOWNLOAD)}>
-          Get Tailscale
+          {t`Get Tailscale`}
         </Button>
       );
     if (state === OUTDATED) return undefined;
@@ -229,7 +230,7 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
         disabledReason={waitReason("check")}
         onClick={() => void act("check", () => api.get("/api/access-links?fresh=1"))}
       >
-        Check again
+        {t`Check again`}
       </Button>
     );
   };
@@ -244,8 +245,8 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
   );
   return (
     <div>
-      <GroupHead title="App links" />
-      <GroupNote>Open localDot on your devices. Keep this computer on.</GroupNote>
+      <GroupHead title={t`App links`} />
+      <GroupNote>{t`Open localDot on your devices. Keep this computer on.`}</GroupNote>
       {status && tailscale && (
         <>
           <Group>
@@ -277,20 +278,20 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
         <span role="status">
           <StableText
             choices={[
-              "Sign-in links work once and expire in 1 minute. Only share with a device you trust.",
-              "Link copied. Open it on your device within a minute. Only share with a device you trust.",
+              t`Sign-in links work once and expire in 1 minute. Only share with a device you trust.`,
+              t`Link copied. Open it on your device within a minute. Only share with a device you trust.`,
             ]}
             value={
               result && !result.fallback
-                ? "Link copied. Open it on your device within a minute. Only share with a device you trust."
-                : "Sign-in links work once and expire in 1 minute. Only share with a device you trust."
+                ? t`Link copied. Open it on your device within a minute. Only share with a device you trust.`
+                : t`Sign-in links work once and expire in 1 minute. Only share with a device you trust.`
             }
           />
         </span>
       </GroupNote>
       <SignInLinkSheet
         link={result?.fallback}
-        label="App sign-in link"
+        label={t`App sign-in link`}
         onClose={() => setResult(null)}
       />
       {error && (
@@ -299,7 +300,7 @@ export function AccessLinksSettings({ api }: { api: ApiClient }) {
             {error}
           </p>
           <Button variant="quiet" size="sm" onClick={() => setRetry((value) => value + 1)}>
-            Retry
+            {t`Retry`}
           </Button>
         </div>
       )}

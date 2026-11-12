@@ -10,6 +10,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { LocalAddress, PreviewChips } from "../previews/PreviewChip.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { CopyButton } from "./CopyButton.tsx";
@@ -62,7 +63,7 @@ function LinkView({ node }: { node: Extract<Inline, { kind: "link" }> }) {
 function ImageView({ node }: { node: Extract<Inline, { kind: "image" }> }) {
   const rule = useContext(Links);
   const href = rule ? rule(node.href) : node.href;
-  if (href === undefined) return <Unopened text={node.text || "Image"} href={node.href} />;
+  if (href === undefined) return <Unopened text={node.text || t`Image`} href={node.href} />;
   return (
     <a
       className="md-host md-image"
@@ -73,7 +74,7 @@ function ImageView({ node }: { node: Extract<Inline, { kind: "image" }> }) {
       referrerPolicy="no-referrer"
     >
       <Icon name="share" size={12} />
-      Image · {linkHost(href)}
+      {t`Image · ${linkHost(href)}`}
     </a>
   );
 }
@@ -103,7 +104,7 @@ function ListView({ list }: { list: List }) {
           className="md-box"
           data-done={item.task === "done" || undefined}
           role="img"
-          aria-label={item.task === "done" ? "Done" : "To do"}
+          aria-label={item.task === "done" ? t`Done` : t`To do`}
         >
           {item.task === "done" && <Icon name="check" size={12} />}
         </span>
@@ -125,10 +126,10 @@ function ListView({ list }: { list: List }) {
 function BlockView({ node, announce }: { node: Block; announce?: (text: string) => void }) {
   if (node.kind === "code")
     return (
-      <section className="md-code" aria-label={node.language || "Code"}>
+      <section className="md-code" aria-label={node.language || t`Code`}>
         <div className="md-code-head">
-          <span className="md-code-language">{node.language || "Code"}</span>
-          <CopyButton text={node.text} label="Copy code" announce={announce} />
+          <span className="md-code-language">{node.language || t`Code`}</span>
+          <CopyButton text={node.text} label={t`Copy code`} announce={announce} />
         </div>
         <pre tabIndex={0}>
           <code>{node.text}</code>
@@ -213,7 +214,7 @@ export const SafeMarkdown = memo(function SafeMarkdown({
   streaming = false,
   compact = false,
   announce,
-  shortened = "Message preview shortened.",
+  shortened = t`Message preview shortened.`,
   links,
 }: {
   text: string;

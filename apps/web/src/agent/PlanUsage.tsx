@@ -1,5 +1,6 @@
 import type { PlanProvider, PlanUsageReply } from "@localdot/protocol";
 import { useEffect, useId, useRef, useState } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Meter } from "../ui/Meter.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
@@ -16,8 +17,8 @@ import {
 import { PLAN_NAMES } from "./UsageFooter.tsx";
 
 const TONE_WORDS: Record<Exclude<PlanTone, "normal">, string> = {
-  near: "Almost at limit",
-  limit: "Limit reached",
+  near: tr("Almost at limit"),
+  limit: tr("Limit reached"),
 };
 
 // The time, kept current while something shows how far off a reset is.
@@ -39,14 +40,15 @@ export function planAlert(
   const plan = reply?.plans.find((row) => row.provider === provider);
   const tone = plan ? planView(plan, now).tone : "normal";
   if (!plan || tone === "normal") return undefined;
-  return { tone, words: `${PLAN_NAMES[plan.provider]} ${TONE_WORDS[tone].toLowerCase()}` };
+  const name = PLAN_NAMES[plan.provider];
+  return { tone, words: tone === "near" ? t`${name} almost at limit` : t`${name} limit reached` };
 }
 
-function When({ at, now, lead }: { at: number; now: number; lead: string }) {
+function When({ at, now, words }: { at: number; now: number; words(until: string): string }) {
   const exact = exactTime(at, now);
   return (
     <time dateTime={new Date(at).toISOString()} title={exact}>
-      {lead} {untilText(at, now)}
+      {words(untilText(at, now))}
       <VisuallyHidden>, {exact}</VisuallyHidden>
     </time>
   );
@@ -62,14 +64,14 @@ function LimitRow({ row, now }: { row: WindowView; now: number }) {
       <Meter
         label={row.name}
         value={row.reset ? 0 : row.usedPercent}
-        valueText={row.reset ? "Reset" : `${used}% used`}
+        valueText={row.reset ? t`Reset` : t`${used}% used`}
       />
       {row.resetsAt !== undefined && (
         <p className="plan-usage-line">
           {row.reset ? (
-            `Reset ${exactTime(row.resetsAt, now)}. New usage not known yet.`
+            t`Reset ${exactTime(row.resetsAt, now)}. New usage not known yet.`
           ) : (
-            <When at={row.resetsAt} now={now} lead="Resets" />
+            <When at={row.resetsAt} now={now} words={(until) => t`Resets ${until}`} />
           )}
         </p>
       )}
@@ -110,15 +112,19 @@ function PlanBlock({
           />
         )}
         {view?.asOf !== undefined && (
-          <span className="plan-usage-age">As of {agoText(view.asOf, now)}</span>
+          <span className="plan-usage-age">{t`As of ${agoText(view.asOf, now)}`}</span>
         )}
       </div>
       {view?.limit && (
         <p className="plan-usage-limit">
           {view.limit.liftsAt === undefined ? (
-            "Limit reached"
+            t`Limit reached`
           ) : (
-            <When at={view.limit.liftsAt} now={now} lead="Limit reached · resets" />
+            <When
+              at={view.limit.liftsAt}
+              now={now}
+              words={(until) => t`Limit reached · resets ${until}`}
+            />
           )}
         </p>
       )}
@@ -128,8 +134,8 @@ function PlanBlock({
       {!view?.windows.length && !view?.limit && (
         <p className="plan-usage-line">
           {checking && !checked.current.done
-            ? "Checking usage…"
-            : "Usage appears after the first reply."}
+            ? t`Checking usage…`
+            : t`Usage appears after the first reply.`}
         </p>
       )}
     </section>

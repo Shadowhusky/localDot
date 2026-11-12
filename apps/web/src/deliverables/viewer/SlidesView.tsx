@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../../i18n/index.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { useLayer } from "../../ui/LayerStack.tsx";
@@ -68,7 +69,7 @@ export function SlidesView({
       icon="presentation"
       onClick={() => setPresenting(true)}
     >
-      Present
+      {t`Present`}
     </Button>
   );
   return (
@@ -285,7 +286,7 @@ function SlideTrack({
       ref={stage}
       className="viewer-slide-stage"
       role="img"
-      aria-label={`Slide ${slide} of ${count}`}
+      aria-label={t`Slide ${slide} of ${count}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerEnd}
@@ -376,7 +377,7 @@ function Present({
       className="viewer-present"
       role="dialog"
       aria-modal="true"
-      aria-label="Presenting"
+      aria-label={t`Presenting`}
       tabIndex={-1}
       onPointerMove={(event) => event.pointerType === "mouse" && wake()}
       data-controls={controls || undefined}
@@ -392,15 +393,15 @@ function Present({
           wake();
         }}
       />
-      <p className="viewer-present-hint">Turn your phone sideways for a bigger slide</p>
+      <p className="viewer-present-hint">{t`Turn your phone sideways for a bigger slide`}</p>
       <div className="viewer-present-bar">
         <IconButton
           icon="chevron-left"
           size={36}
           variant="glass"
           round
-          label="Previous slide"
-          disabledReason={slide <= 1 ? "This is the first slide" : undefined}
+          label={t`Previous slide`}
+          disabledReason={slide <= 1 ? t`This is the first slide` : undefined}
           onClick={() => onSlide(slide - 1)}
         />
         <span className="viewer-present-count num">
@@ -411,8 +412,8 @@ function Present({
           size={36}
           variant="glass"
           round
-          label="Next slide"
-          disabledReason={slide >= count ? "This is the last slide" : undefined}
+          label={t`Next slide`}
+          disabledReason={slide >= count ? t`This is the last slide` : undefined}
           onClick={() => onSlide(slide + 1)}
         />
         <span className="viewer-present-rule" aria-hidden="true" />
@@ -421,7 +422,7 @@ function Present({
           size={36}
           variant="glass"
           round
-          label="Stop presenting"
+          label={t`Stop presenting`}
           kbd={["Esc"]}
           onClick={onClose}
         />

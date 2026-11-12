@@ -3,6 +3,7 @@ import {
   type BrowserEngineRequest,
   BrowserEngineStatus,
 } from "../../../../packages/protocol/src/browser-engine.ts";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 
 const ENGINE_PATH = "/api/browser/engine";
@@ -76,8 +77,8 @@ export function useBrowserEngine(api: ApiClient, visible: boolean): BrowserEngin
         request.choice,
         () => api.put(ENGINE_PATH, request),
         request.choice === "chrome"
-          ? "Couldn't start installing Google Chrome. Try again."
-          : "Couldn't switch to Chromium. Try again.",
+          ? t`Couldn't start installing Google Chrome. Try again.`
+          : t`Couldn't switch to Chromium. Try again.`,
       ),
     [api, change],
   );
@@ -85,7 +86,7 @@ export function useBrowserEngine(api: ApiClient, visible: boolean): BrowserEngin
     void change(
       "restore",
       () => api.post(`${ENGINE_PATH}/restore`),
-      "Couldn't go back to the backup. Try again.",
+      t`Couldn't go back to the backup. Try again.`,
     );
   }, [api, change]);
   const deleteBackup = useCallback(() => {
@@ -95,7 +96,7 @@ export function useBrowserEngine(api: ApiClient, visible: boolean): BrowserEngin
         await api.del(`${ENGINE_PATH}/backup`);
         return api.get(ENGINE_PATH);
       },
-      "Couldn't delete the backup. Try again.",
+      t`Couldn't delete the backup. Try again.`,
     );
   }, [api, change]);
 

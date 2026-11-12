@@ -1,6 +1,7 @@
 import type { ManualStreamInput } from "@localdot/protocol";
 import { useContext, useEffect, useRef, useState } from "react";
 import { Outbox } from "../agent/outbox.ts";
+import { t } from "../i18n/index.ts";
 import { textInputs } from "../stage/manual-keys.ts";
 import { Button } from "../ui/Button.tsx";
 import { Field } from "../ui/Field.tsx";
@@ -63,7 +64,7 @@ export function TypeText({
     if (element) element.value = "";
     if (blocked || !value) return;
     if ([...value].length > TYPE_LIMIT || !value.isWellFormed() || value.includes("\0")) {
-      setProblem("Type up to 4,000 characters at a time.");
+      setProblem(t`Type up to 4,000 characters at a time.`);
       return;
     }
     setProblem(null);
@@ -74,15 +75,15 @@ export function TypeText({
     <form
       ref={form}
       className="type-text"
-      aria-label="Type on the computer"
+      aria-label={t`Type on the computer`}
       onSubmit={(event) => {
         event.preventDefault();
         if (!composing.current) type();
       }}
     >
       <Field
-        label="Text to type on the computer"
-        description="Paste here: the computer doesn't share this device's clipboard."
+        label={t`Text to type on the computer`}
+        description={t`Paste here: the computer doesn't share this device's clipboard.`}
         error={problem}
         disabledReason={blocked}
       >
@@ -117,7 +118,7 @@ export function TypeText({
         />
       </Field>
       <Button type="submit" variant="secondary" disabledReason={blocked}>
-        Type it
+        {t`Type it`}
       </Button>
     </form>
   );
@@ -142,7 +143,7 @@ export function ControlStrip({
   const [open, setOpen] = useState<"keys" | "type" | null>(null);
   const close = () => setOpen(null);
   return (
-    <div className="control-strip" role="toolbar" aria-label="Computer controls">
+    <div className="control-strip" role="toolbar" aria-label={t`Computer controls`}>
       <Button
         ref={keys}
         variant="quiet"
@@ -152,7 +153,7 @@ export function ControlStrip({
         {...triggerProps("menu", open === "keys")}
         onClick={() => setOpen("keys")}
       >
-        Send keys
+        {t`Send keys`}
         <Icon name="chevron-down" size={14} className="control-strip-chevron" />
       </Button>
       <Menu
@@ -161,7 +162,7 @@ export function ControlStrip({
         anchor={keys}
         side="top"
         align="start"
-        label="Send keys"
+        label={t`Send keys`}
       >
         {SEND_KEYS.map((key) => (
           <MenuItem key={key.label} onSelect={() => send({ kind: "key", combo: key.combo })}>
@@ -178,7 +179,7 @@ export function ControlStrip({
         {...triggerProps("dialog", open === "type")}
         onClick={() => setOpen("type")}
       >
-        Type text…
+        {t`Type text…`}
       </Button>
       <Popover
         open={open === "type"}
@@ -186,13 +187,13 @@ export function ControlStrip({
         anchor={typing}
         side="top"
         align="end"
-        label="Type on the computer"
+        label={t`Type on the computer`}
       >
         <TypeText send={send} blocked={blocked} onDone={close} />
       </Popover>
       <span className="control-strip-divider" aria-hidden="true" />
       <Button variant="quiet" round icon={full ? "shrink" : "expand"} onClick={onFullScreen}>
-        {full ? "Exit full screen" : "Full screen"}
+        {full ? t`Exit full screen` : t`Full screen`}
       </Button>
     </div>
   );
@@ -243,7 +244,7 @@ export function ControlTools({
     <div
       className="control-tools"
       role="toolbar"
-      aria-label="Computer controls"
+      aria-label={t`Computer controls`}
       data-compact={compact || undefined}
     >
       <IconButton
@@ -251,7 +252,7 @@ export function ControlTools({
         round
         variant="filled"
         icon="keyboard"
-        label="Keyboard"
+        label={t`Keyboard`}
         aria-pressed={typing}
         disabledReason={blocked}
         onPointerDown={() => {
@@ -268,7 +269,7 @@ export function ControlTools({
         round
         variant="filled"
         icon="mouse-right"
-        label="Right-click the next tap"
+        label={t`Right-click the next tap`}
         aria-pressed={rightClick}
         disabledReason={blocked}
         onClick={() => onRightClick(!rightClick)}
@@ -279,7 +280,7 @@ export function ControlTools({
         round
         variant="filled"
         icon="type"
-        label="Type text"
+        label={t`Type text`}
         disabledReason={blocked}
         {...triggerProps("dialog", sheet)}
         onClick={() => setSheet(true)}
@@ -290,7 +291,7 @@ export function ControlTools({
           round
           variant="filled"
           icon="expand"
-          label="Full screen"
+          label={t`Full screen`}
           onClick={onFullScreen}
         />
       )}
@@ -300,7 +301,7 @@ export function ControlTools({
           round
           variant="filled"
           icon="message-circle"
-          label="Message dot"
+          label={t`Message dot`}
           onClick={write}
         />
       )}
@@ -310,7 +311,7 @@ export function ControlTools({
           round
           variant="filled"
           icon="x"
-          label="Not now"
+          label={t`Not now`}
           aria-busy={decline.busy || undefined}
           disabledReason={decline.reason}
           onClick={decline.busy ? undefined : onDecline}
@@ -322,7 +323,7 @@ export function ControlTools({
           round
           variant="primary"
           icon="hand-back"
-          label="Hand back"
+          label={t`Hand back`}
           aria-busy={handBack.busy || undefined}
           disabledReason={handBack.reason}
           onClick={handBack.busy ? undefined : onHandBack}
@@ -338,7 +339,7 @@ export function ControlTools({
           disabledReason={handBack.reason}
           onClick={onHandBack}
         >
-          Hand back
+          {t`Hand back`}
         </Button>
       )}
       <Sheet
@@ -346,7 +347,7 @@ export function ControlTools({
         onClose={() => setSheet(false)}
         side="bottom"
         detents={["fit"]}
-        title="Type on the computer"
+        title={t`Type on the computer`}
         returnFocus={typeButton}
       >
         <TypeText send={send} blocked={blocked} onDone={() => setSheet(false)} />

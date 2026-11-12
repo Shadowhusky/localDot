@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -26,24 +27,24 @@ export function CompareView({
       setPosition(Math.max(0, Math.min(100, (100 * (clientX - bounds.left)) / bounds.width)));
   };
   return (
-    <section className="replay-compare" aria-label="Before and after comparison">
+    <section className="replay-compare" aria-label={t`Before and after comparison`}>
       <header className="replay-compare-head">
         <p className="replay-compare-title">
           {label && <span className="replay-compare-step">{label}</span>}
-          <span>Before → After</span>
+          <span>{t`Before → After`}</span>
         </p>
-        <IconButton label="Close comparison" icon="x" kbd={["Escape"]} onClick={onClose} />
+        <IconButton label={t`Close comparison`} icon="x" kbd={["Escape"]} onClick={onClose} />
       </header>
       <div
         ref={panel}
         className="replay-compare-images"
         role="slider"
         tabIndex={0}
-        aria-label="Comparison divider"
+        aria-label={t`Comparison divider`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(position)}
-        aria-valuetext={`${Math.round(position)} percent before`}
+        aria-valuetext={t`${Math.round(position)} percent before`}
         onPointerDown={(event) => {
           if (event.button !== 0) return;
           event.currentTarget.focus();
@@ -76,7 +77,7 @@ export function CompareView({
           sessionId={sessionId}
           frameId={frames.after}
           full
-          alt="Screen after this step"
+          alt={t`Screen after this step`}
         />
         <div
           className="replay-compare-before"
@@ -87,7 +88,7 @@ export function CompareView({
             sessionId={sessionId}
             frameId={frames.before}
             full
-            alt="Screen before this step"
+            alt={t`Screen before this step`}
           />
         </div>
         <div className="replay-compare-divider" style={{ left: `${position}%` }}>
@@ -96,10 +97,10 @@ export function CompareView({
             <Icon name="chevron-right" size={12} />
           </span>
         </div>
-        <span className="replay-compare-label before">Before</span>
-        <span className="replay-compare-label after">After</span>
+        <span className="replay-compare-label before">{t`Before`}</span>
+        <span className="replay-compare-label after">{t`After`}</span>
         {!frames.before && !frames.after && (
-          <p className="replay-compare-empty">No screenshots for this step.</p>
+          <p className="replay-compare-empty">{t`No screenshots for this step.`}</p>
         )}
       </div>
     </section>

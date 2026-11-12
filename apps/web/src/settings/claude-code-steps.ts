@@ -1,4 +1,5 @@
 import type { ClaudeCodeStatus } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
 
 export interface ClaudeCodeStep {
@@ -16,36 +17,42 @@ export function claudeCodeSteps(
   status: ClaudeCodeStatus | null,
   checking: boolean,
 ): ClaudeCodeStep[] {
-  const install = { id: "install", title: "Install Claude Code" } as const;
-  const signIn = { id: "sign-in", title: "Sign in to Claude Code" } as const;
+  const install = { id: "install", title: t`Install Claude Code` } as const;
+  const signIn = { id: "sign-in", title: t`Sign in to Claude Code` } as const;
   const waiting = {
     ...signIn,
     state: "todo",
-    detail: "With your Claude plan, in Terminal",
+    detail: t`With your Claude plan, in Terminal`,
   } as const;
-  const looking = { state: "doing", detail: "Checking…" } as const;
+  const looking = { state: "doing", detail: t`Checking…` } as const;
   if (!status) return [{ ...install, ...looking }, waiting];
-  const version = status.version ? `Version ${status.version}` : "Installed";
+  const version = status.version ? t`Version ${status.version}` : t`Installed`;
   switch (status.state) {
     case "not_installed":
       return [
         checking
           ? { ...install, ...looking }
-          : { ...install, state: "todo", detail: "Not on this Mac yet" },
+          : { ...install, state: "todo", detail: t`Not on this Mac yet` },
         waiting,
       ];
     case "outdated":
       return [
         checking
           ? { ...install, ...looking }
-          : { ...install, state: "failed", detail: `${version} is too old to use here` },
+          : {
+              ...install,
+              state: "failed",
+              detail: status.version
+                ? t`Version ${status.version} is too old to use here`
+                : t`Installed is too old to use here`,
+            },
         waiting,
       ];
     case "unavailable":
       return [
         checking
           ? { ...install, ...looking }
-          : { ...install, state: "failed", detail: "Claude Code didn't answer" },
+          : { ...install, state: "failed", detail: t`Claude Code didn't answer` },
         waiting,
       ];
     case "signed_out":
@@ -56,7 +63,7 @@ export function claudeCodeSteps(
           : {
               ...signIn,
               state: "todo",
-              detail: status.separate ? "This dot's account isn't signed in" : "Not signed in",
+              detail: status.separate ? t`This dot's account isn't signed in` : t`Not signed in`,
             },
       ];
     case "signed_in":
@@ -66,8 +73,8 @@ export function claudeCodeSteps(
           ...signIn,
           state: "done",
           detail: [
-            status.separate ? "Signed in on this dot" : "Signed in",
-            ...(status.plan ? [`${planName(status.plan)} plan`] : []),
+            status.separate ? t`Signed in on this dot` : t`Signed in`,
+            ...(status.plan ? [t`${planName(status.plan)} plan`] : []),
           ].join(" · "),
         },
       ];

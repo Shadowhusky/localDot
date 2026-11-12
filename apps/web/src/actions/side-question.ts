@@ -1,4 +1,5 @@
 import { ULID_PATTERN } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 
 export interface SideAnswer {
@@ -35,14 +36,16 @@ export type SideStep =
 
 // The daemon's reasons, as the user reads them.
 const PROBLEMS: Record<string, string> = {
-  "no-model": "Choose a model for this task first.",
-  "no-spare-model":
+  "no-model": tr("Choose a model for this task first."),
+  "no-spare-model": tr(
     "The ChatGPT plan answers one request at a time, and this task needs it, so it can't take a side question. A task's record stays with the models you chose for it.",
-  "no-tool-model":
+  ),
+  "no-tool-model": tr(
     "Side questions need a model that can use tools, and this task's models can't use tools. A task's record stays with the models you chose for it.",
-  busy: "Wait for the answer to your last side question.",
+  ),
+  busy: tr("Wait for the answer to your last side question."),
 };
-const NO_ANSWER = "No model could answer. Try again.";
+const NO_ANSWER = t`No model could answer. Try again.`;
 // Longer than the daemon's own limit for a side question, which ends with what it found.
 const ANSWER_MS = 140_000;
 
@@ -60,7 +63,7 @@ export class SideQuestionFailure extends Error {
 const refusal = (problem: string, reason: string | undefined) => {
   const said = PROBLEMS[problem] ?? NO_ANSWER;
   return new SideQuestionFailure(
-    reason ? `${said} (${reason})` : said,
+    reason ? t`${said} (${reason})` : said,
     problem === "no-model" || problem === "no-spare-model" || problem === "no-tool-model",
   );
 };
@@ -105,7 +108,7 @@ export async function askSideQuestion(
   signal: AbortSignal,
   onStep?: (step: SideStep) => void,
 ): Promise<SideAnswer> {
-  if (!ULID_PATTERN.test(sessionId)) throw new SideQuestionFailure("Start a task first.");
+  if (!ULID_PATTERN.test(sessionId)) throw new SideQuestionFailure(t`Start a task first.`);
   let response: Response;
   try {
     response = await api.fetch(
@@ -121,16 +124,16 @@ export async function askSideQuestion(
     );
   } catch {
     signal.throwIfAborted();
-    throw new SideQuestionFailure("Couldn't reach your computer. Try again.");
+    throw new SideQuestionFailure(t`Couldn't reach your computer. Try again.`);
   }
   if (response.status === 401) api.rejectUnauthorized?.();
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     if (response.status === 400)
       throw new SideQuestionFailure(
-        "Write a question of up to 2,000 characters, with no keys in it.",
+        t`Write a question of up to 2,000 characters, with no keys in it.`,
       );
-    if (response.status === 404) throw new SideQuestionFailure("This task can't be asked about.");
+    if (response.status === 404) throw new SideQuestionFailure(t`This task can't be asked about.`);
     const [problem = "", reason] = text.split("\n");
     throw refusal(problem, reason);
   }
@@ -150,7 +153,7 @@ export async function askSideQuestion(
   } catch (error) {
     signal.throwIfAborted();
     if (error instanceof SideQuestionFailure) throw error;
-    throw new SideQuestionFailure("Couldn't reach your computer. Try again.");
+    throw new SideQuestionFailure(t`Couldn't reach your computer. Try again.`);
   }
   throw new SideQuestionFailure(NO_ANSWER);
 }

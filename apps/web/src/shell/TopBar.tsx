@@ -1,4 +1,5 @@
 import { memo, type ReactNode, type Ref } from "react";
+import { t } from "../i18n/index.ts";
 import type { KeyStatus } from "../keys/useKeys.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
@@ -60,11 +61,11 @@ export const TopBar = memo(function TopBar({
   guest = false,
 }: TopBarProps) {
   const modes: SegmentItem[] = [
-    { value: "watch", label: "Watch", attention: watchAttention },
+    { value: "watch", label: t`Watch`, attention: watchAttention },
     {
       value: "replay",
-      label: "Replay",
-      ...(replayEnabled ? {} : { disabledReason: "No recordings yet" }),
+      label: t`Replay`,
+      ...(replayEnabled ? {} : { disabledReason: t`No recordings yet` }),
     },
   ];
   return (
@@ -86,7 +87,7 @@ export const TopBar = memo(function TopBar({
         {panels}
         <SegmentedControl
           className="bar-modes"
-          aria-label="Mode"
+          aria-label={t`Mode`}
           size={28}
           items={modes}
           value={mode}
@@ -99,7 +100,7 @@ export const TopBar = memo(function TopBar({
               ref={settingsRef}
               size={32}
               icon="settings"
-              label="Settings"
+              label={t`Settings`}
               aria-haspopup="dialog"
               aria-expanded={settingsOpen}
               aria-controls="settings-sheet"

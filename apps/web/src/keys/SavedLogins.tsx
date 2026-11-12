@@ -6,6 +6,7 @@ import {
 } from "@localdot/protocol";
 import { type CSSProperties, type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { signInSite } from "../../../../packages/protocol/src/accounts.ts";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { Card } from "../ui/Card.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -27,15 +28,15 @@ import type { SavedLoginsView } from "./useSavedLogins.ts";
 const SEARCH_FROM = 8;
 
 const SKIPPED: Readonly<Record<string, string>> = {
-  "no-password": "no password",
-  "no-website": "no web address dot can use",
-  "not-a-login": "not a login, such as a card or a note",
-  "not-https": "a plain http site, which isn't filled",
-  "same-site": "another account for the same site; one is kept per site",
-  "too-many": "past the limit of 3,000 logins",
-  unreadable: "the row couldn't be read",
-  "unusable-account": "an account name that can't be typed into a page",
-  "unusable-password": "a password that can't be typed into a page",
+  "no-password": tr("no password"),
+  "no-website": tr("no web address dot can use"),
+  "not-a-login": tr("not a login, such as a card or a note"),
+  "not-https": tr("a plain http site, which isn't filled"),
+  "same-site": tr("another account for the same site; one is kept per site"),
+  "too-many": tr("past the limit of 3,000 logins"),
+  unreadable: tr("the row couldn't be read"),
+  "unusable-account": tr("an account name that can't be typed into a page"),
+  "unusable-password": tr("a password that can't be typed into a page"),
 };
 
 const hostOf = (origin: string) => new URL(origin).host;
@@ -70,7 +71,7 @@ export function SavedLogins({
   useEffect(() => {
     if (form && formNode.current) reveal?.(formNode.current);
   }, [form]);
-  const waiting = view.busy ? "Wait for the last change" : unavailable;
+  const waiting = view.busy ? t`Wait for the last change` : unavailable;
   const actions = (
     <span className="saved-logins-add">
       <ChooseFileButton
@@ -85,7 +86,7 @@ export function SavedLogins({
           if (file) void view.importFile(file);
         }}
       >
-        Import
+        {t`Import`}
       </ChooseFileButton>
       <Button
         size="sm"
@@ -96,16 +97,15 @@ export function SavedLogins({
           setForm("new");
         }}
       >
-        Add login
+        {t`Add login`}
       </Button>
     </span>
   );
   return (
     <section className="keys-section" aria-labelledby="saved-logins-title">
-      <GroupHead id="saved-logins-title" title="Saved logins" aside={!phone && actions} />
+      <GroupHead id="saved-logins-title" title={t`Saved logins`} aside={!phone && actions} />
       <GroupNote>
-        After you tap, localDot enters a saved login on its own site. dot never sees the password,
-        and neither can you once it's saved.
+        {t`After you tap, localDot enters a saved login on its own site. dot never sees the password, and neither can you once it's saved.`}
       </GroupNote>
       {phone && <div className="saved-logins-phone-actions">{actions}</div>}
       <ImportOutcome view={view} />
@@ -118,11 +118,13 @@ export function SavedLogins({
       {view.loading ? (
         <Skeleton loading shape="block" width="100%" height="calc(var(--spacing) * 13)" />
       ) : view.logins.length === 0 && unavailable ? (
-        <GroupNote>Your saved logins show here once they can be read. {unavailable}.</GroupNote>
+        <GroupNote>
+          {t`Your saved logins show here once they can be read. ${unavailable}.`}
+        </GroupNote>
       ) : view.logins.length === 0 ? (
         <Group>
-          <EmptyState icon="key-round" title="No saved logins yet">
-            Add one here, or import them from Chrome, 1Password, Bitwarden or Apple Passwords.
+          <EmptyState icon="key-round" title={t`No saved logins yet`}>
+            {t`Add one here, or import them from Chrome, 1Password, Bitwarden or Apple Passwords.`}
           </EmptyState>
         </Group>
       ) : (
@@ -131,8 +133,8 @@ export function SavedLogins({
             <TextField
               className="saved-logins-search"
               size="sm"
-              aria-label="Search saved logins"
-              placeholder="Search saved logins"
+              aria-label={t`Search saved logins`}
+              placeholder={t`Search saved logins`}
               prefix={<Icon name="search" size={16} />}
               autoComplete="off"
               autoCapitalize="off"
@@ -144,7 +146,7 @@ export function SavedLogins({
           <Group>
             <ul
               className="keys-list"
-              aria-label="Saved logins"
+              aria-label={t`Saved logins`}
               style={{ "--_armed": `${ARMED_MS}ms` } as CSSProperties}
             >
               {shown.map((login) => (
@@ -162,12 +164,12 @@ export function SavedLogins({
               ))}
             </ul>
           </Group>
-          {shown.length === 0 && <GroupNote>No saved login matches that.</GroupNote>}
+          {shown.length === 0 && <GroupNote>{t`No saved login matches that.`}</GroupNote>}
         </>
       )}
       {saved && <GroupNote role="status">{saved}</GroupNote>}
       {form && (
-        <section ref={formNode} className="saved-logins-form" aria-label="Saved login">
+        <section ref={formNode} className="saved-logins-form" aria-label={t`Saved login`}>
           <LoginForm
             key={form === "new" ? "new" : form.origin}
             editing={form === "new" ? undefined : form}
@@ -218,7 +220,7 @@ function LoginRow({
         }
         detail={
           <span className="keys-row-facts" title={login.username || undefined}>
-            {login.username || "No account name"}
+            {login.username || t`No account name`}
           </span>
         }
         trailing={
@@ -226,14 +228,14 @@ function LoginRow({
             <IconButton
               size={phone ? 44 : 36}
               icon="compose"
-              label={`Edit login for ${site}`}
+              label={t`Edit login for ${site}`}
               disabledReason={unavailable}
               onClick={edit}
             />
             <IconButton
               size={phone ? 44 : 36}
               icon={armed ? "check" : "trash"}
-              label={`${armed ? "Confirm remove" : "Remove"} login for ${site}`}
+              label={armed ? t`Confirm remove login for ${site}` : t`Remove login for ${site}`}
               disabledReason={unavailable}
               className="keys-remove-icon"
               data-confirm={armed ? "" : undefined}
@@ -244,7 +246,7 @@ function LoginRow({
                 }
                 setArmed(false);
                 remove(() => foldAway(row.current)).catch((err: unknown) =>
-                  setProblem(loginProblem(err, "Couldn't remove that login. Try again.")),
+                  setProblem(loginProblem(err, t`Couldn't remove that login. Try again.`)),
                 );
               }}
             />
@@ -293,7 +295,7 @@ function LoginForm({
     const host = editing ? hostOf(editing.origin) : signInSite(site);
     const typed = password.current?.value ?? "";
     const next = {
-      ...(host ? {} : { site: "Enter a public site, like github.com." }),
+      ...(host ? {} : { site: t`Enter a public site, like github.com.` }),
       ...(accountProblem(account.trim()) ? { account: accountProblem(account.trim()) } : {}),
       ...(!editing || typed
         ? passwordProblem(typed)
@@ -311,9 +313,9 @@ function LoginForm({
         ...(typed ? { password: typed } : {}),
       });
       if (password.current) password.current.value = "";
-      close(`Saved a login for ${hostOf(saved.origin)}.`);
+      close(t`Saved a login for ${hostOf(saved.origin)}.`);
     } catch (err) {
-      setProblems({ form: loginProblem(err, "Couldn't save that login. Try again.") });
+      setProblems({ form: loginProblem(err, t`Couldn't save that login. Try again.`) });
     } finally {
       setSaving(false);
     }
@@ -322,15 +324,15 @@ function LoginForm({
     <Card>
       <form
         className="keys-form"
-        aria-label={editing ? `Edit login for ${hostOf(editing.origin)}` : "Add a login"}
+        aria-label={editing ? t`Edit login for ${hostOf(editing.origin)}` : t`Add a login`}
         autoComplete="off"
         onSubmit={(event) => void submit(event)}
       >
         <Field
-          label="Site"
+          label={t`Site`}
           error={problems.site}
           validates
-          description={editing ? "A login stays with its site." : "It fills only on this site."}
+          description={editing ? t`A login stays with its site.` : t`It fills only on this site.`}
         >
           <TextField
             value={site}
@@ -344,7 +346,7 @@ function LoginForm({
             onChange={(event) => setSite(event.target.value)}
           />
         </Field>
-        <Field label="Account" error={problems.account} validates>
+        <Field label={t`Account`} error={problems.account} validates>
           <TextField
             value={account}
             autoCapitalize="off"
@@ -356,11 +358,11 @@ function LoginForm({
           />
         </Field>
         <Field
-          label={editing ? "New password" : "Password"}
+          label={editing ? t`New password` : t`Password`}
           error={problems.password}
           validates
           description={
-            editing ? "Leave it blank to keep the saved one." : "It's never shown again."
+            editing ? t`Leave it blank to keep the saved one.` : t`It's never shown again.`
           }
         >
           <TextField
@@ -380,13 +382,13 @@ function LoginForm({
         <div className="keys-actions">
           <Button
             variant="quiet"
-            disabledReason={saving ? "Saving" : undefined}
+            disabledReason={saving ? t`Saving` : undefined}
             onClick={() => close()}
           >
-            Cancel
+            {t`Cancel`}
           </Button>
           <Button type="submit" busy={saving} disabledReason={unavailable}>
-            Save login
+            {t`Save login`}
           </Button>
         </div>
       </form>
@@ -397,7 +399,9 @@ function LoginForm({
 function linesOf(skip: LoginImport["skipped"][number]): string {
   if (!skip.lines.length) return "";
   const listed = skip.lines.join(", ");
-  return ` (line${skip.lines.length === 1 ? "" : "s"} ${listed}${skip.count > skip.lines.length ? " and more" : ""})`;
+  const more = skip.count > skip.lines.length;
+  if (skip.lines.length === 1) return more ? t` (line ${listed} and more)` : t` (line ${listed})`;
+  return more ? t` (lines ${listed} and more)` : t` (lines ${listed})`;
 }
 
 // What an import did, in counts and line numbers only. The file is theirs to delete, which it says
@@ -407,14 +411,13 @@ function ImportOutcome({ view }: { view: SavedLoginsView }) {
   if (importing)
     return (
       <GroupNote className="saved-logins-import-note" role="status">
-        Importing your logins. A long list takes a few minutes.
+        {t`Importing your logins. A long list takes a few minutes.`}
       </GroupNote>
     );
   if (!summary && !importProblem)
     return (
       <GroupNote className="saved-logins-import-note">
-        Import a CSV export from Chrome, 1Password, Bitwarden or Apple Passwords. Only each login's
-        site, account and password are kept. The file itself isn't kept, so delete it afterwards.
+        {t`Import a CSV export from Chrome, 1Password, Bitwarden or Apple Passwords. Only each login's site, account and password are kept. The file itself isn't kept, so delete it afterwards.`}
       </GroupNote>
     );
   return (
@@ -426,20 +429,26 @@ function ImportOutcome({ view }: { view: SavedLoginsView }) {
           <>
             <p className="saved-logins-summary-head">
               {summary.imported === 1
-                ? "Imported 1 login."
-                : `Imported ${summary.imported.toLocaleString()} logins.`}
+                ? t`Imported 1 login.`
+                : t`Imported ${summary.imported.toLocaleString()} logins.`}
               {summary.alreadySaved > 0 &&
-                ` ${summary.alreadySaved.toLocaleString()} ${summary.alreadySaved === 1 ? "site has" : "sites have"} a saved login already, which stayed as it was.`}
+                (summary.alreadySaved === 1
+                  ? t` ${summary.alreadySaved.toLocaleString()} site has a saved login already, which stayed as it was.`
+                  : t` ${summary.alreadySaved.toLocaleString()} sites have a saved login already, which stayed as it was.`)}
             </p>
             {summary.skipped.length > 0 && (
               <ul className="saved-logins-skips">
-                {summary.skipped.map((skip) => (
-                  <li key={skip.reason}>
-                    {skip.count.toLocaleString()} {skip.count === 1 ? "row" : "rows"} left out:{" "}
-                    {SKIPPED[skip.reason] ?? "the row couldn't be used"}
-                    {linesOf(skip)}
-                  </li>
-                ))}
+                {summary.skipped.map((skip) => {
+                  const rows = skip.count.toLocaleString();
+                  const reason = SKIPPED[skip.reason] ?? tr("the row couldn't be used");
+                  return (
+                    <li key={skip.reason}>
+                      {skip.count === 1
+                        ? t`${rows} row left out: ${reason}${linesOf(skip)}`
+                        : t`${rows} rows left out: ${reason}${linesOf(skip)}`}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </>
@@ -448,13 +457,12 @@ function ImportOutcome({ view }: { view: SavedLoginsView }) {
       <p className="saved-logins-delete">
         <Icon name="circle-alert" size={14} />
         <span>
-          Delete the file now. It holds your passwords in plain text, and localDot didn't keep a
-          copy.
+          {t`Delete the file now. It holds your passwords in plain text, and localDot didn't keep a copy.`}
         </span>
       </p>
       <div className="keys-actions">
         <Button variant="quiet" size="sm" onClick={view.dismissSummary}>
-          Done
+          {t`Done`}
         </Button>
       </div>
     </Card>

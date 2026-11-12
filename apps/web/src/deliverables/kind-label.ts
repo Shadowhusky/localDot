@@ -6,13 +6,14 @@ import {
   type ViewerKind,
   viewerKind,
 } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
 
 const TEXT_LABELS: Record<TextFormat, string> = {
-  plain: "Text",
-  code: "code",
+  plain: tr("Text"),
+  code: tr("code"),
   markdown: "Markdown",
   json: "JSON",
-  log: "Log",
+  log: tr("Log"),
 };
 const LANGUAGES: Record<string, string> = {
   ...Object.fromEntries(["js", "mjs", "cjs", "jsx"].map((e) => [e, "JavaScript"])),
@@ -26,13 +27,13 @@ const LANGUAGES: Record<string, string> = {
   kt: "Kotlin",
   swift: "Swift",
   c: "C",
-  h: "C header",
+  h: tr("C header"),
   cpp: "C++",
   cs: "C#",
   php: "PHP",
-  ...Object.fromEntries(["sh", "bash", "zsh", "fish"].map((e) => [e, "Shell script"])),
+  ...Object.fromEntries(["sh", "bash", "zsh", "fish"].map((e) => [e, tr("Shell script")])),
   sql: "SQL",
-  css: "Stylesheet",
+  css: tr("Stylesheet"),
   xml: "XML",
   yaml: "YAML",
   yml: "YAML",
@@ -45,20 +46,20 @@ export function kindLabel(name: string): string {
   if (kind === "text") {
     const format = textFormat(name);
     return format === "code"
-      ? (LANGUAGES[ext.toLowerCase()] ?? `${ext} text`)
+      ? (LANGUAGES[ext.toLowerCase()] ?? t`${ext} text`)
       : TEXT_LABELS[format];
   }
   const labels: Record<Exclude<ViewerKind, "text">, string> = {
-    picture: `${ext} picture`,
-    svg: "SVG picture",
+    picture: t`${ext} picture`,
+    svg: tr("SVG picture"),
     pdf: "PDF",
-    html: "Web page",
-    table: `${ext} table`,
-    sheet: "Spreadsheet",
-    audio: `${ext} audio`,
-    video: `${ext} video`,
-    page: isPresentation(name) ? `${ext} presentation` : `${ext} document`,
-    details: ext ? `${ext} file` : "File",
+    html: tr("Web page"),
+    table: t`${ext} table`,
+    sheet: tr("Spreadsheet"),
+    audio: t`${ext} audio`,
+    video: t`${ext} video`,
+    page: isPresentation(name) ? t`${ext} presentation` : t`${ext} document`,
+    details: ext ? t`${ext} file` : tr("File"),
   };
   return labels[kind];
 }

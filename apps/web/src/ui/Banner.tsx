@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { announce as speak } from "./Announcer.tsx";
 import { canFocus, focusWithoutScroll, tabbableBefore } from "./focus.ts";
 import { Icon } from "./Icon.tsx";
@@ -39,7 +40,7 @@ export function Banner({
   children,
   actions,
   onDismiss,
-  dismissLabel = "Dismiss",
+  dismissLabel = t`Dismiss`,
   open = true,
   announce = false,
   className,

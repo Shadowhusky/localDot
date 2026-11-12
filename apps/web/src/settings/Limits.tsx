@@ -1,4 +1,5 @@
 import { ResearchBudget } from "@localdot/protocol";
+import { t, tr } from "../i18n/index.ts";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Group, GroupHead, GroupNote, GroupRow } from "../ui/Group.tsx";
@@ -16,24 +17,24 @@ const CHECK_INS: readonly {
 }[] = [
   {
     key: "steps",
-    label: "After a number of steps",
-    description: "dot asks whether to keep going.",
-    field: "Steps",
-    unit: "steps",
+    label: tr("After a number of steps"),
+    description: tr("dot asks whether to keep going."),
+    field: tr("Steps"),
+    unit: tr("steps"),
   },
   {
     key: "failures",
-    label: "After failed actions in a row",
-    description: "dot asks whether to keep trying. Off, it tries another way by itself.",
-    field: "Failed actions",
-    unit: "in a row",
+    label: tr("After failed actions in a row"),
+    description: tr("dot asks whether to keep trying. Off, it tries another way by itself."),
+    field: tr("Failed actions"),
+    unit: tr("in a row"),
   },
   {
     key: "actions",
-    label: "Stop after a number of actions",
-    description: "A hard stop dot can't skip. Send a message to continue.",
-    field: "Actions",
-    unit: "actions",
+    label: tr("Stop after a number of actions"),
+    description: tr("A hard stop dot can't skip. Send a message to continue."),
+    field: tr("Actions"),
+    unit: tr("actions"),
   },
 ];
 
@@ -51,7 +52,7 @@ export function CheckIns({
 }) {
   return (
     <div>
-      <GroupHead title="Check in with me" />
+      <GroupHead title={t`Check in with me`} />
       <Group>
         {CHECK_INS.map((row) => {
           const current = value[row.key];
@@ -92,7 +93,7 @@ export function CheckIns({
         })}
       </Group>
       <GroupNote>
-        Off unless you turn them on. Each count starts again when you send a message.
+        {t`Off unless you turn them on. Each count starts again when you send a message.`}
       </GroupNote>
     </div>
   );
@@ -112,10 +113,10 @@ export function ResearchLimits({
   const sourcesFit = ResearchBudget.shape.sources.safeParse(Number(value.sources || "x")).success;
   return (
     <div>
-      <GroupHead title="Research" />
+      <GroupHead title={t`Research`} />
       <Group>
         <Field
-          label="Read up to"
+          label={t`Read up to`}
           inline
           className="ui-group-row"
           {...saying(sourcesFit ? undefined : error)}
@@ -125,13 +126,13 @@ export function ResearchLimits({
             inputMode="numeric"
             maxLength={3}
             autoComplete="off"
-            suffix="sources"
+            suffix={t`sources`}
             value={value.sources}
             onChange={(event) => onChange({ ...value, sources: digits(event.target.value) })}
           />
         </Field>
         <Field
-          label="Take up to"
+          label={t`Take up to`}
           inline
           className="ui-group-row"
           {...saying(sourcesFit ? error : undefined)}
@@ -141,15 +142,14 @@ export function ResearchLimits({
             inputMode="numeric"
             maxLength={3}
             autoComplete="off"
-            suffix="minutes"
+            suffix={t`minutes`}
             value={value.minutes}
             onChange={(event) => onChange({ ...value, minutes: digits(event.target.value) })}
           />
         </Field>
       </Group>
       <GroupNote>
-        Where dot stops reading and writes its report with what it has. While it works you can wrap
-        up sooner or let it keep going.
+        {t`Where dot stops reading and writes its report with what it has. While it works you can wrap up sooner or let it keep going.`}
       </GroupNote>
     </div>
   );
@@ -169,37 +169,37 @@ export function SpendingLimits({
       <Group>
         <Switch
           className="ui-group-row"
-          label="Spending limit"
-          description={value.on ? "On: dot pauses and asks you at a limit" : "Off: no limit"}
+          label={t`Spending limit`}
+          description={value.on ? t`On: dot pauses and asks you at a limit` : t`Off: no limit`}
           checked={value.on}
           onCheckedChange={(on) => onChange({ ...value, on })}
         />
         <Collapse open={value.on}>
-          <Field label="Per task" inline className="ui-group-row" {...saying(errors?.task)}>
+          <Field label={t`Per task`} inline className="ui-group-row" {...saying(errors?.task)}>
             <MoneyField
               size="sm"
               value={value.task}
               maxLength={9}
-              placeholder="No limit"
+              placeholder={t`No limit`}
               onValueChange={(task) => onChange({ ...value, task })}
             />
           </Field>
-          <Field label="Per day" inline className="ui-group-row" {...saying(errors?.day)}>
+          <Field label={t`Per day`} inline className="ui-group-row" {...saying(errors?.day)}>
             <MoneyField
               size="sm"
               value={value.day}
               maxLength={9}
-              placeholder="No limit"
+              placeholder={t`No limit`}
               onValueChange={(day) => onChange({ ...value, day })}
             />
           </Field>
-          <GroupRow label="When it's reached" trailing="Pause and ask me" />
+          <GroupRow label={t`When it's reached`} trailing={t`Pause and ask me`} />
         </Collapse>
       </Group>
       <GroupNote>
         {value.on
-          ? "A task limit applies to new tasks; the day limit is shared by every task."
-          : "Turn on to set a limit per task or per day. When dot reaches it, it pauses and asks you."}
+          ? t`A task limit applies to new tasks; the day limit is shared by every task.`
+          : t`Turn on to set a limit per task or per day. When dot reaches it, it pauses and asks you.`}
       </GroupNote>
     </div>
   );

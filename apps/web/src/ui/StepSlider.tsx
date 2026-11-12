@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { type CSSProperties, type KeyboardEvent, type ReactNode, useId, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { announce } from "./Announcer.tsx";
 import { joinIds } from "./merge.ts";
 import { useTooltip } from "./Tooltip.tsx";
@@ -175,7 +176,7 @@ export function StepSlider({
           {...triggerProps.handlers}
           type="button"
           className="ui-step-slider-end"
-          aria-label={`${label} limit: ${endLabel}`}
+          aria-label={t`${label} limit: ${endLabel}`}
           aria-describedby={triggerProps["aria-describedby"]}
         >
           {endLabel}

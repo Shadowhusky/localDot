@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
 import { count } from "../copy/format.ts";
+import { t, tc, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
@@ -9,36 +10,36 @@ import { changeDownload, listDownloads } from "./download-api.ts";
 import "./downloads.css";
 
 type Decision = { item: QuarantineItem; action: "release" | "discard" };
-const REFRESH_FAILED = "Downloads could not be refreshed. Check the computer and try again.";
+const REFRESH_FAILED = t`Downloads could not be refreshed. Check the computer and try again.`;
 const KIND: Record<QuarantineItem["kind"], string> = {
-  document: "Document",
-  image: "Image",
-  archive: "Archive",
-  program: "Program",
-  other: "File",
+  document: tr("Document"),
+  image: tr("Image"),
+  archive: tr("Archive"),
+  program: tr("Program"),
+  other: tr("File"),
 };
 const decisionTitle = ({ item, action }: Decision) =>
   action === "discard"
-    ? `Discard ${item.name}?`
+    ? t`Discard ${item.name}?`
     : item.state === "releasing"
-      ? `Check whether ${item.name} arrived?`
-      : `Save ${item.name} to your computer?`;
+      ? t`Check whether ${item.name} arrived?`
+      : t`Save ${item.name} to your computer?`;
 const size = (bytes: number) =>
   bytes < 1024
-    ? `${bytes} bytes`
+    ? t`${bytes} bytes`
     : bytes < 1048576
       ? `${(bytes / 1024).toFixed(1)} KB`
       : `${(bytes / 1048576).toFixed(1)} MB`;
 const stateLabel = (item: QuarantineItem) =>
   item.state === "held"
-    ? "Waiting for your review"
+    ? t`Waiting for your review`
     : item.state === "releasing"
-      ? "Delivery needs checking"
+      ? t`Delivery needs checking`
       : item.state === "released"
-        ? `Saved to ${item.receipt.path}`
+        ? t`Saved to ${item.receipt.path}`
         : item.state === "failed"
-          ? "File verification failed"
-          : "Discarded";
+          ? t`File verification failed`
+          : t`Discarded`;
 
 export function BrowserDownloads({
   api,
@@ -150,14 +151,14 @@ export function BrowserDownloads({
       setItems((rows) => rows.map((row) => (row.id === item.id ? item : row)));
       setMessage(
         item.state === "released"
-          ? `Saved ${item.name} to ${item.receipt.path}.`
+          ? t`Saved ${item.name} to ${item.receipt.path}.`
           : item.state === "discarded"
-            ? `Discarded ${item.name}.`
-            : "The earlier transfer did not save this file. Review it again to release it.",
+            ? t`Discarded ${item.name}.`
+            : t`The earlier transfer did not save this file. Review it again to release it.`,
       );
     } catch {
       if (epoch === owner.current)
-        setMessage("Couldn't confirm that change. Refresh, then try again.");
+        setMessage(t`Couldn't confirm that change. Refresh, then try again.`);
     } finally {
       if (epoch === owner.current) {
         operation.current = null;
@@ -173,11 +174,11 @@ export function BrowserDownloads({
   };
   if (!visible.length && !message && !decision) return null;
   return (
-    <section className="activity-section browser-downloads" aria-label="Browser downloads">
+    <section className="activity-section browser-downloads" aria-label={t`Browser downloads`}>
       <div className="activity-section-head">
-        <h3>Downloads</h3>
+        <h3>{t`Downloads`}</h3>
         <span className="activity-section-meta">
-          {waiting ? `${waiting} waiting` : count(visible.length, "file", "files")}
+          {waiting ? t`${waiting} waiting` : count(visible.length, "file", "files")}
         </span>
       </div>
       {visible.slice(0, limit).map((item) => (
@@ -205,7 +206,7 @@ export function BrowserDownloads({
             <p className="activity-detail-note">
               {stateLabel(item)} · {item.source}
               {item.state === "held" && item.recovery
-                ? " · The earlier transfer didn't save this file, so it needs a new review."
+                ? ` · ${t`The earlier transfer didn't save this file, so it needs a new review.`}`
                 : ""}
             </p>
             {(item.state === "held" || item.state === "releasing" || item.state === "failed") && (
@@ -215,24 +216,24 @@ export function BrowserDownloads({
                     size="sm"
                     disabledReason={
                       !releaseReady
-                        ? "Turn the computer back on to release a file."
+                        ? t`Turn the computer back on to release a file.`
                         : pending
-                          ? "Another download is being checked."
+                          ? t`Another download is being checked.`
                           : undefined
                     }
                     onClick={(event) => choose(item, "release", event.currentTarget)}
                   >
-                    {item.state === "releasing" ? "Check delivery" : "Review"}
+                    {item.state === "releasing" ? t`Check delivery` : t`Review`}
                   </Button>
                 )}
                 {(item.state === "held" || item.state === "failed") && (
                   <Button
                     size="sm"
                     variant="quiet"
-                    disabledReason={pending ? "Another download is being checked." : undefined}
+                    disabledReason={pending ? t`Another download is being checked.` : undefined}
                     onClick={(event) => choose(item, "discard", event.currentTarget)}
                   >
-                    Discard
+                    {t`Discard`}
                   </Button>
                 )}
               </div>
@@ -243,16 +244,16 @@ export function BrowserDownloads({
       <div className="activity-detail-actions download-actions">
         {visible.length > limit && (
           <Button variant="quiet" size="sm" onClick={() => setLimit((shown) => shown + 12)}>
-            Show more downloads
+            {t`Show more downloads`}
           </Button>
         )}
         <Button
           variant="quiet"
           size="sm"
-          disabledReason={pending ? "Another download is being checked." : undefined}
+          disabledReason={pending ? t`Another download is being checked.` : undefined}
           onClick={() => void refresh.current()}
         >
-          Refresh downloads
+          {t`Refresh downloads`}
         </Button>
       </div>
       {message && (
@@ -271,21 +272,21 @@ export function BrowserDownloads({
           !decision
             ? undefined
             : !matches
-              ? "This file changed since you opened it. Cancel, then review it again."
+              ? t`This file changed since you opened it. Cancel, then review it again.`
               : decision.action === "discard"
-                ? "The held copy is removed. To get it back, download it again."
+                ? t`The held copy is removed. To get it back, download it again.`
                 : decision.item.state === "releasing"
-                  ? "An earlier save may not have finished. Check whether it reached your computer."
-                  : "dot downloaded this in its browser. It stays here until you choose."
+                  ? t`An earlier save may not have finished. Check whether it reached your computer.`
+                  : t`dot downloaded this in its browser. It stays here until you choose.`
         }
         facts={
           decision
             ? [
-                ["Size", size(decision.item.bytes)],
-                ["From", decision.item.source],
-                ["Kind", KIND[decision.item.kind]],
+                [t`Size`, size(decision.item.bytes)],
+                [tc("source", "From"), decision.item.source],
+                [t`Kind`, KIND[decision.item.kind]],
                 ...(decision.action === "release"
-                  ? ([["Saves to", "Downloads on your computer"]] as const)
+                  ? ([[t`Saves to`, t`Downloads on your computer`]] as const)
                   : []),
                 [
                   "SHA-256",
@@ -299,10 +300,10 @@ export function BrowserDownloads({
       >
         <Button
           variant="quiet"
-          disabledReason={pending ? "Wait for this to finish." : undefined}
+          disabledReason={pending ? t`Wait for this to finish.` : undefined}
           onClick={() => setDecision(null)}
         >
-          Cancel
+          {t`Cancel`}
         </Button>
         {decision && (
           <Button
@@ -310,18 +311,18 @@ export function BrowserDownloads({
             busy={pending}
             disabledReason={
               !matches
-                ? "This file changed. Review it again."
+                ? t`This file changed. Review it again.`
                 : decision.action === "release" && !releaseReady
-                  ? "Turn the computer back on to save a file."
+                  ? t`Turn the computer back on to save a file.`
                   : undefined
             }
             onClick={() => void confirm()}
           >
             {decision.action === "discard"
-              ? "Discard"
+              ? t`Discard`
               : decision.item.state === "releasing"
-                ? "Check delivery"
-                : "Save to computer"}
+                ? t`Check delivery`
+                : t`Save to computer`}
           </Button>
         )}
       </Dialog>

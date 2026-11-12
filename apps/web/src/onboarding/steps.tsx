@@ -1,4 +1,9 @@
-import type { ComputerSize, ComputerSizeView } from "@localdot/protocol";
+import {
+  BALANCED_AUTONOMY,
+  CAREFUL_AUTONOMY,
+  type ComputerSize,
+  type ComputerSizeView,
+} from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import type { BrowserEngineName } from "../../../../packages/protocol/src/browser-engine.ts";
@@ -7,6 +12,7 @@ import type {
   SpeechTierId,
 } from "../../../../packages/protocol/src/speech-install.ts";
 import { AUTONOMY_PRESETS } from "../copy/autonomy.ts";
+import { rich, t, tc } from "../i18n/index.ts";
 import { DOCTOR } from "../keys/Protection.tsx";
 import { ChromeTerms } from "../settings/BrowserEngineSettings.tsx";
 import { SizeSlider, tooSmall } from "../settings/ComputerSize.tsx";
@@ -60,21 +66,21 @@ export function WelcomeStep() {
       <Group roomy>
         <GroupRow
           leading={<IconTile icon="monitor" />}
-          label="My own computer"
-          detail="It runs in its own space, apart from your files"
+          label={t`My own computer`}
+          detail={t`It runs in its own space, apart from your files`}
         />
         <GroupRow
           leading={<IconTile icon="hand" />}
-          label="You stay in charge"
-          detail="Take over, pause or stop whenever you like"
+          label={t`You stay in charge`}
+          detail={t`Take over, pause or stop whenever you like`}
         />
         <GroupRow
           leading={<IconTile icon="lock" />}
-          label="Your keys stay here"
-          detail="They never leave the computer running localDot"
+          label={t`Your keys stay here`}
+          detail={t`They never leave the computer running localDot`}
         />
       </Group>
-      <p className="onboarding-note">Setup takes about two minutes.</p>
+      <p className="onboarding-note">{t`Setup takes about two minutes.`}</p>
     </>
   );
 }
@@ -93,7 +99,7 @@ export function ThinksStep({
   return (
     <RadioCards
       className="onboarding-choices"
-      aria-label="How dot thinks"
+      aria-label={t`How dot thinks`}
       mark="end"
       roomy
       value={value}
@@ -101,41 +107,41 @@ export function ThinksStep({
       options={[
         {
           value: "api",
-          label: "API key",
+          label: t`API key`,
           icon: "key-round",
-          description: "Pay for what dot uses through your API provider.",
+          description: t`Pay for what dot uses through your API provider.`,
         },
         {
           value: "chatgpt",
-          label: "ChatGPT plan",
+          label: t`ChatGPT plan`,
           icon: "message-circle",
-          description: "Use your ChatGPT subscription.",
+          description: t`Use your ChatGPT subscription.`,
           disabledReason: chatgptReason,
         },
         {
           value: "claude-code",
           label: "Claude Code",
           icon: "terminal",
-          description: "Use Claude Code installed on the computer running localDot.",
+          description: t`Use Claude Code installed on the computer running localDot.`,
           disabledReason: claudeReason,
         },
         {
           value: "plan",
-          label: "Coding plan",
+          label: t`Coding plan`,
           icon: "code",
-          description: "A monthly plan from MiniMax, Qwen and others.",
+          description: t`A monthly plan from MiniMax, Qwen and others.`,
         },
         {
           value: "local",
-          label: "Local model",
+          label: t`Local model`,
           icon: "cpu",
-          description: "Run a model on your computer with LM Studio or Ollama.",
+          description: t`Run a model on your computer with LM Studio or Ollama.`,
         },
         {
           value: "custom",
-          label: "Custom address",
+          label: t`Custom address`,
           icon: "globe",
-          description: "Any OpenAI- or Anthropic-compatible server.",
+          description: t`Any OpenAI- or Anthropic-compatible server.`,
         },
       ]}
     />
@@ -176,7 +182,7 @@ function SecretField({
           {...PLAIN}
           size="lg"
           className="onboarding-secret-field"
-          placeholder={saved ? "Paste a new key to replace it" : "Paste your key"}
+          placeholder={saved ? t`Paste a new key to replace it` : t`Paste your key`}
           readOnly={busy}
           enterKeyHint="done"
           suffix={
@@ -185,7 +191,7 @@ function SecretField({
             ) : saved ? (
               <span className="onboarding-saved">
                 <Icon name="check-circle" size={16} />
-                Saved
+                {t`Saved`}
               </span>
             ) : undefined
           }
@@ -219,7 +225,13 @@ export function KeyStep({
   const count = models.filter((model) => modelAllowed("main", model)).length;
   const help =
     secret.saved && count
-      ? `${count} ${count === 1 ? "model" : "models"} available${computer.length ? ", including ones that can use a computer" : ""}.`
+      ? count === 1
+        ? computer.length
+          ? t`${count} model available, including ones that can use a computer.`
+          : t`${count} model available.`
+        : computer.length
+          ? t`${count} models available, including ones that can use a computer.`
+          : t`${count} models available.`
       : undefined;
   return (
     <>
@@ -239,7 +251,7 @@ export function KeyStep({
         </div>
       ) : (
         <Group roomy>
-          <Field label="Plan" inline className="ui-group-row">
+          <Field label={tc("subscription", "Plan")} inline className="ui-group-row">
             <Select
               appearance="inline"
               value={provider}
@@ -247,7 +259,7 @@ export function KeyStep({
                 value: p.id,
                 label: p.name,
                 disabledReason: p.notOffered
-                  ? "Its maker allows it only in their own tools"
+                  ? t`Its maker allows it only in their own tools`
                   : undefined,
               }))}
               onValueChange={onProvider}
@@ -257,15 +269,16 @@ export function KeyStep({
       )}
       <SecretField
         {...secret}
-        label={`${name} key`}
+        label={t`${name} key`}
         hint={help ?? (spec?.rule && kind === "plan" ? spec.rule : undefined)}
       />
       {page && (
         <p className="onboarding-link">
-          Need a key?{" "}
-          <a href={page} target="_blank" rel="noopener noreferrer">
-            Get one from {name}
-          </a>
+          {rich`Need a key? ${(
+            <a href={page} target="_blank" rel="noopener noreferrer">
+              {t`Get one from ${name}`}
+            </a>
+          )}`}
           <span className="onboarding-host">{hostOf(page)}</span>
         </p>
       )}
@@ -296,9 +309,9 @@ function MoreProviders({
         {...triggerProps("menu", open)}
         onClick={() => setOpen(true)}
       >
-        {chosen?.name ?? "More…"}
+        {chosen?.name ?? t`More…`}
       </Chip>
-      <Menu open={open} onClose={() => setOpen(false)} anchor={chip} label="More providers">
+      <Menu open={open} onClose={() => setOpen(false)} anchor={chip} label={t`More providers`}>
         {more.map((p) => (
           <MenuItem key={p.id} onSelect={() => onProvider(p.id)}>
             {p.name}
@@ -313,7 +326,7 @@ export function LocalStep({ value, onChange }: { value: string; onChange(id: str
   return (
     <RadioCards
       className="onboarding-choices"
-      aria-label="App on this Mac"
+      aria-label={t`App on this Mac`}
       mark="end"
       roomy
       value={value}
@@ -324,8 +337,8 @@ export function LocalStep({ value, onChange }: { value: string; onChange(id: str
         icon: "cpu" as const,
         description:
           p.id === "lmstudio"
-            ? "Start its local server, then load a model."
-            : "Keep Ollama running with a model pulled.",
+            ? t`Start its local server, then load a model.`
+            : t`Keep Ollama running with a model pulled.`,
       }))}
     />
   );
@@ -347,23 +360,23 @@ export function CustomKeyStep({
     <>
       <div className="onboarding-center">
         <SegmentedControl
-          aria-label="Kind of server"
+          aria-label={t`Kind of server`}
           size={32}
           value={flavor}
           onValueChange={onFlavor}
           items={CUSTOM_PROVIDERS.map((p) => ({
             value: p.id,
             label:
-              p.client === "anthropic-compatible" ? "Anthropic-compatible" : "OpenAI-compatible",
+              p.client === "anthropic-compatible" ? t`Anthropic-compatible` : t`OpenAI-compatible`,
           }))}
         />
       </div>
       <Field
-        label="Address"
+        label={t`Address`}
         description={
           flavor === "anthropic-compatible"
-            ? "Use https, ending in /v1. Apps on this Mac go through Local model."
-            : "Use https. Apps on this Mac go through Local model."
+            ? t`Use https, ending in /v1. Apps on this Mac go through Local model.`
+            : t`Use https. Apps on this Mac go through Local model.`
         }
         className="onboarding-address"
       >
@@ -376,7 +389,7 @@ export function CustomKeyStep({
           onChange={(event) => onAddress(event.currentTarget.value)}
         />
       </Field>
-      <SecretField {...secret} label="Key" />
+      <SecretField {...secret} label={t`Key`} />
     </>
   );
 }
@@ -452,7 +465,7 @@ export function ModelStep({
           maxLength={64}
           autoComplete="off"
           prefix="$"
-          suffix="per million"
+          suffix={t`per million`}
           value={value[side]}
           onChange={(event) => change({ ...value, [side]: event.currentTarget.value })}
         />
@@ -462,11 +475,13 @@ export function ModelStep({
     return (
       <>
         <Field
-          label="Model"
+          label={t`Model`}
           description={
             kind === "local"
-              ? `As ${spec?.name ?? "the app"} names it, such as qwen3.`
-              : "As your server names it."
+              ? spec
+                ? t`As ${spec.name} names it, such as qwen3.`
+                : t`As the app names it, such as qwen3.`
+              : t`As your server names it.`
           }
         >
           <TextField
@@ -480,14 +495,14 @@ export function ModelStep({
         </Field>
         {kind === "custom" && (
           <Field
-            label="Fast model"
-            description="Optional. A quicker model on the same server, for summaries and purpose checks."
+            label={t`Fast model`}
+            description={t`Optional. A quicker model on the same server, for summaries and purpose checks.`}
           >
             <TextField
               {...PLAIN}
               size="lg"
               maxLength={128}
-              placeholder="Leave empty for none"
+              placeholder={t`Leave empty for none`}
               value={fastModel}
               onChange={(event) => onFastModel(event.currentTarget.value)}
             />
@@ -497,15 +512,15 @@ export function ModelStep({
           <Group roomy>
             <Switch
               className="ui-group-row"
-              label="Flat-rate plan"
-              description={plan ? "Uses the plan's own limits." : "Priced per token instead."}
+              label={t`Flat-rate plan`}
+              description={plan ? t`Uses the plan's own limits.` : t`Priced per token instead.`}
               checked={plan}
               onCheckedChange={onPlan}
             />
-            {!plan && prices(price, onPrice, "Input price", "Output price")}
+            {!plan && prices(price, onPrice, t`Input price`, t`Output price`)}
             {!plan &&
               fastModel.trim() &&
-              prices(fastPrice, onFastPrice, "Fast model input", "Fast model output")}
+              prices(fastPrice, onFastPrice, t`Fast model input`, t`Fast model output`)}
           </Group>
         )}
       </>
@@ -522,21 +537,21 @@ export function ModelStep({
       <Group roomy>
         <GroupRow
           label={
-            <span role="status">{loading ? "Loading models…" : "Model list unavailable"}</span>
+            <span role="status">{loading ? t`Loading models…` : t`Model list unavailable`}</span>
           }
           detail={
             loading
-              ? "Downloading the available models."
+              ? t`Downloading the available models.`
               : appKind(kind)
-                ? "The model list hasn't loaded. Go back and try again in a moment."
+                ? t`The model list hasn't loaded. Go back and try again in a moment.`
                 : catalogAvailable
-                  ? "No compatible models are listed for this provider. Refresh the list or choose another provider."
-                  : "The model list couldn't be downloaded. Check your connection and retry. Your saved key is kept."
+                  ? t`No compatible models are listed for this provider. Refresh the list or choose another provider.`
+                  : t`The model list couldn't be downloaded. Check your connection and retry. Your saved key is kept.`
           }
           trailing={
             onRefresh ? (
               <Button size="sm" busy={loading} onClick={onRefresh}>
-                Retry
+                {t`Retry`}
               </Button>
             ) : undefined
           }
@@ -549,14 +564,14 @@ export function ModelStep({
         <GroupNote className="onboarding-catalog-status" role="status">
           <span>
             {catalogStatus.refreshing
-              ? "Checking for new models…"
+              ? t`Checking for new models…`
               : catalogStatus.stale
-                ? "Using a saved list. The latest list couldn’t be reached."
-                : "Models checked automatically."}
+                ? t`Using a saved list. The latest list couldn’t be reached.`
+                : t`Models checked automatically.`}
           </span>
           {onRefresh && (
             <Button size="sm" busy={catalogStatus.refreshing} onClick={onRefresh}>
-              {catalogStatus.refreshFailed ? "Retry" : "Refresh"}
+              {catalogStatus.refreshFailed ? t`Retry` : t`Refresh`}
             </Button>
           )}
         </GroupNote>
@@ -567,15 +582,15 @@ export function ModelStep({
           label={
             <>
               {chosen?.name ?? main}
-              {main === recommended && <Badge>Recommended</Badge>}
+              {main === recommended && <Badge>{t`Recommended`}</Badge>}
             </>
           }
           detail={capability ? abilityLine(capability) : undefined}
           trailing={
             <Select
               appearance="inline"
-              aria-label="Main model"
-              shown="Change"
+              aria-label={t`Main model`}
+              shown={t`Change`}
               value={main}
               items={items}
               onValueChange={onMain}
@@ -587,13 +602,13 @@ export function ModelStep({
         <Group roomy>
           <Switch
             className="ui-group-row onboarding-fast"
-            label="Use a faster model for small jobs"
-            description="Summaries of long tasks and purpose checks, for less"
+            label={t`Use a faster model for small jobs`}
+            description={t`Summaries of long tasks and purpose checks, for less`}
             checked={fast}
             onCheckedChange={onFast}
           />
           {fast && (
-            <Field label="Fast model" inline className="ui-group-row">
+            <Field label={t`Fast model`} inline className="ui-group-row">
               <Select
                 appearance="inline"
                 value={fastModel}
@@ -617,15 +632,21 @@ export function PermissionsStep({
   value: string;
   onChange(preset: string): void;
 }) {
-  const icons: Record<string, IconName> = { Balanced: "sliders-horizontal", Careful: "shield" };
-  const lines: Record<string, string> = {
-    Balanced: "Asks before sending, buying, deleting or sharing your files.",
-    Careful: "Also asks before each step on its computer.",
-  };
+  // By policy rather than by name, which is in the language on show.
+  const looks = new Map<unknown, { icon: IconName; line: string }>([
+    [
+      BALANCED_AUTONOMY,
+      {
+        icon: "sliders-horizontal",
+        line: t`Asks before sending, buying, deleting or sharing your files.`,
+      },
+    ],
+    [CAREFUL_AUTONOMY, { icon: "shield", line: t`Also asks before each step on its computer.` }],
+  ]);
   return (
     <RadioCards
       className="onboarding-choices"
-      aria-label="How often dot checks with you"
+      aria-label={t`How often dot checks with you`}
       mark="end"
       roomy
       value={value}
@@ -633,9 +654,9 @@ export function PermissionsStep({
       options={AUTONOMY_PRESETS.map((preset) => ({
         value: preset.label,
         label: preset.label,
-        tag: preset.recommended ? "Recommended" : undefined,
-        icon: icons[preset.label],
-        description: lines[preset.label] ?? preset.summary,
+        tag: preset.recommended ? t`Recommended` : undefined,
+        icon: looks.get(preset.policy)?.icon,
+        description: looks.get(preset.policy)?.line ?? preset.summary,
       }))}
     />
   );
@@ -653,7 +674,7 @@ export function BrowserStep({
     <>
       <RadioCards
         className="onboarding-choices"
-        aria-label="Which web browser dot uses"
+        aria-label={t`Which web browser dot uses`}
         mark="end"
         roomy
         value={value}
@@ -662,15 +683,15 @@ export function BrowserStep({
           {
             value: "chrome",
             label: "Google Chrome",
-            tag: "Recommended",
+            tag: t`Recommended`,
             icon: "globe",
-            description: "The browser most sites are built for. It also plays protected video.",
+            description: t`The browser most sites are built for. It also plays protected video.`,
           },
           {
             value: "chromium",
             label: "Chromium",
             icon: "shield",
-            description: "Comes with localDot, with nothing more to install or accept.",
+            description: t`Comes with localDot, with nothing more to install or accept.`,
           },
         ]}
       />
@@ -709,11 +730,15 @@ export function SpeechStep({
           leading={<IconTile icon="download" />}
           label={
             <span role="status">
-              {job.state === "running" ? `Downloading on your ${computer}` : "The download stopped"}
+              {job.state !== "running"
+                ? t`The download stopped`
+                : computer === "Mac"
+                  ? t`Downloading on your Mac`
+                  : t`Downloading on your computer`}
             </span>
           }
           detail={
-            job.state === "running" ? "Setup doesn't need to wait for it. Keep going." : undefined
+            job.state === "running" ? t`Setup doesn't need to wait for it. Keep going.` : undefined
           }
         >
           <SpeechProgress job={job}>
@@ -723,11 +748,11 @@ export function SpeechStep({
                 busy={speech.pending === "install"}
                 onClick={() => void speech.install(job.tier)}
               >
-                Retry
+                {t`Retry`}
               </Button>
             )}
             <Button size="sm" variant="quiet" onClick={speech.cancel}>
-              {job.state === "failed" ? "Discard" : "Cancel"}
+              {job.state === "failed" ? t`Discard` : t`Cancel`}
             </Button>
           </SpeechProgress>
         </GroupRow>
@@ -738,11 +763,13 @@ export function SpeechStep({
       <Group roomy>
         <GroupRow
           leading={<IconTile icon="mic" />}
-          label={installed?.name ?? "Your own Whisper"}
+          label={installed?.name ?? t`Your own Whisper`}
           detail={
-            installed
-              ? `Installed on your ${computer}. Change it any time in Settings.`
-              : "You set this up, so there's nothing to install."
+            !installed
+              ? t`You set this up, so there's nothing to install.`
+              : computer === "Mac"
+                ? t`Installed on your Mac. Change it any time in Settings.`
+                : t`Installed on your computer. Change it any time in Settings.`
           }
         />
       </Group>
@@ -751,9 +778,11 @@ export function SpeechStep({
     <>
       <SpeechTierPicker status={status} language={language} value={tier} onChange={onTier} roomy />
       <p className="onboarding-note">
-        {phone
-          ? `Your ${computer} does the download, not this phone. It carries on in the background, and you can change this in Settings.`
-          : "It downloads in the background, so setup won't wait. You can change this in Settings."}
+        {!phone
+          ? t`It downloads in the background, so setup won't wait. You can change this in Settings.`
+          : computer === "Mac"
+            ? t`Your Mac does the download, not this phone. It carries on in the background, and you can change this in Settings.`
+            : t`Your computer does the download, not this phone. It carries on in the background, and you can change this in Settings.`}
       </p>
     </>
   );
@@ -787,10 +816,10 @@ export function SummaryStep({
                 <Button
                   variant="quiet"
                   size="sm"
-                  aria-label={`Change ${row.label.toLowerCase()}`}
+                  aria-label={t`Change ${row.label.toLowerCase()}`}
                   onClick={row.change}
                 >
-                  Change
+                  {t`Change`}
                 </Button>
               </>
             }
@@ -799,7 +828,7 @@ export function SummaryStep({
         {children}
       </Group>
       <p className="onboarding-note">
-        Everything here is in Settings later. There's no spending limit unless you set one.
+        {t`Everything here is in Settings later. There's no spending limit unless you set one.`}
       </p>
     </>
   );
@@ -820,7 +849,7 @@ export function SizeRow({ choice }: { choice: SizeChoice }) {
   const problem = tooSmall(view);
   if (problem)
     return (
-      <GroupRow leading={<IconTile icon="monitor" />} label="Computer size">
+      <GroupRow leading={<IconTile icon="monitor" />} label={t`Computer size`}>
         <p className="onboarding-size-problem" role="alert">
           {problem}
         </p>
@@ -829,8 +858,8 @@ export function SizeRow({ choice }: { choice: SizeChoice }) {
   return (
     <GroupRow
       leading={<IconTile icon="monitor" />}
-      label="Computer size"
-      detail={recommended && sameSize(size, recommended) ? "Recommended" : "Your choice"}
+      label={t`Computer size`}
+      detail={recommended && sameSize(size, recommended) ? t`Recommended` : t`Your choice`}
       trailing={
         <>
           <span className="onboarding-summary-value">
@@ -839,12 +868,12 @@ export function SizeRow({ choice }: { choice: SizeChoice }) {
           <Button
             variant="quiet"
             size="sm"
-            aria-label="Change computer size"
+            aria-label={t`Change computer size`}
             aria-expanded={open}
             aria-controls={id}
             onClick={() => setOpen((now) => !now)}
           >
-            {open ? "Done" : "Change"}
+            {open ? t`Done` : t`Change`}
           </Button>
         </>
       }

@@ -8,7 +8,7 @@ import {
 } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { bytes, count } from "../copy/format.ts";
+import { bytes } from "../copy/format.ts";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { RecordingFiles } from "../deliverables/RecordingFiles.tsx";
 import { exportRequest, withinRecording } from "../deliverables/replay-link.ts";
@@ -24,6 +24,7 @@ import { type HostExports, hostCanMake, useHostExports } from "../export/host-ex
 import type { ExportJob } from "../export/job.ts";
 import { exportSupport } from "../export/sink.ts";
 import { useExportProbe } from "../export/useExportProbe.ts";
+import { locale, t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { useGuest } from "../remote/guest.ts";
 import { timelineRows } from "../session/key-uses.ts";
@@ -84,29 +85,29 @@ import "./replay.css";
 // Wide enough for the chosen recording beside the list.
 export const PREVIEW_ROOM = "(width >= 1100px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
-const CONTINUE_LABEL = "Continue working";
+const CONTINUE_LABEL = t`Continue working`;
 // What was deleted and freed shows in place of the library's total for this long.
 const FREED_MS = 5000;
-const PICK_PROMPT = "Choose recordings to delete";
+const PICK_PROMPT = t`Choose recordings to delete`;
 const NOTICE_MS = 3000;
 // The transport fades this long into playback without the pointer moving over the picture.
 const TRANSPORT_STILL_MS = 2000;
 const VIEWS = [
-  { value: "work", label: "Work", description: "Follow work and screen changes" },
-  { value: "screen", label: "Screen", description: "Show the active screen" },
+  { value: "work", label: tr("Work"), description: tr("Follow work and screen changes") },
+  { value: "screen", label: tr("Screen"), description: tr("Show the active screen") },
 ] as const;
 const FIXED_SCREENS = [
-  { value: "desktop", label: "Computer" },
-  { value: "browser", label: "Browser" },
+  { value: "desktop", label: tr("Computer") },
+  { value: "browser", label: tr("Browser") },
 ] as const;
 const FILTERS = [
-  { value: "all", label: "All" },
-  { value: "finished", label: "Finished" },
-  { value: "stopped", label: "Stopped" },
+  { value: "all", label: tr("All") },
+  { value: "finished", label: tr("Finished") },
+  { value: "stopped", label: tr("Stopped") },
 ] as const;
 const RAIL_VIEWS = [
-  { value: "recordings", label: "Recordings" },
-  { value: "steps", label: "Steps" },
+  { value: "recordings", label: tr("Recordings") },
+  { value: "steps", label: tr("Steps") },
 ] as const;
 const NO_VIDEO = new Set(["none", "failed", "expired"]);
 // WebKit throws on the hundred-and-first address change in ten seconds, which would take the whole
@@ -121,7 +122,7 @@ const RESTING: DotFeed = {
   done: false,
 };
 
-export const RECORDED_TASK = "Recorded task";
+export const RECORDED_TASK = t`Recorded task`;
 
 export interface RecordedTitle {
   sessionId: string;
@@ -165,9 +166,9 @@ export function ReplayView({
   sessionId,
   onSelect,
   onLibrary,
-  backLabel = "Replay",
+  backLabel = t`Replay`,
   onGoLive,
-  liveLabel = "Watch",
+  liveLabel = t`Watch`,
   modelName,
   onDeleted,
   onTitle,
@@ -343,18 +344,23 @@ function Library({
     if (result.live.length > 0 || result.failed.length > 0)
       announce("replay-delete", deleteProblem(result), "assertive");
     if (result.deleted.length === 0) return;
-    const line = `Deleted ${count(result.deleted.length, "recording", "recordings")} · freed ${bytes(freeing.current)}`;
+    const n = result.deleted.length;
+    const freedBytes = bytes(freeing.current);
+    const line =
+      n === 1
+        ? t`Deleted ${n.toLocaleString(locale())} recording · freed ${freedBytes}`
+        : t`Deleted ${n.toLocaleString(locale())} recordings · freed ${freedBytes}`;
     setFreed(line);
     announce("replay-delete", line);
   };
   const all = pickable.length > 0 && pickedCards.length === pickable.length;
   return (
     <div className="replay" data-view="library">
-      <main className="replay-library" aria-label="Replay">
+      <main className="replay-library" aria-label={t`Replay`}>
         {phone ? (
-          <NavBar back={liveLabel} onBack={onGoLive} title="Replay" />
+          <NavBar back={liveLabel} onBack={onGoLive} title={t`Replay`} />
         ) : (
-          <h1 className="ui-visually-hidden">Replay</h1>
+          <h1 className="ui-visually-hidden">{t`Replay`}</h1>
         )}
         <div className="replay-library-head">
           <TasksSearch
@@ -365,7 +371,7 @@ function Library({
           />
           {!phone && (
             <SegmentedControl
-              aria-label="Show"
+              aria-label={t`Show`}
               size={28}
               items={FILTERS}
               value={filter}
@@ -379,7 +385,7 @@ function Library({
               <>
                 <Checkbox
                   className="replay-pick-all"
-                  label="Select all"
+                  label={t`Select all`}
                   checked={all}
                   indeterminate={!all && pickedCards.length > 0}
                   onCheckedChange={(on) =>
@@ -388,12 +394,14 @@ function Library({
                 />
                 <span className="replay-library-total num">
                   {pickedCards.length > 0
-                    ? `${pickedCards.length.toLocaleString()}${phone ? "" : " selected"} · ${bytes(totalBytes(pickedCards))}`
+                    ? phone
+                      ? `${pickedCards.length.toLocaleString()} · ${bytes(totalBytes(pickedCards))}`
+                      : t`${pickedCards.length.toLocaleString()} selected · ${bytes(totalBytes(pickedCards))}`
                     : PICK_PROMPT}
                 </span>
                 <span className="replay-library-tools">
                   <Button variant="quiet" size="sm" onClick={stopPicking}>
-                    Cancel
+                    {t`Cancel`}
                   </Button>
                   <Button
                     ref={barAction}
@@ -403,7 +411,7 @@ function Library({
                     disabledReason={pickedCards.length > 0 ? undefined : PICK_PROMPT}
                     onClick={() => setConfirming({})}
                   >
-                    Delete…
+                    {t`Delete…`}
                   </Button>
                 </span>
               </>
@@ -434,7 +442,7 @@ function Library({
                       size="sm"
                       onClick={() => setPicking(true)}
                     >
-                      Select
+                      {t`Select`}
                     </Button>
                   </span>
                 )}
@@ -444,7 +452,7 @@ function Library({
         )}
         <ScrollArea className="replay-library-scroll" fade="bottom" aria-busy={libraryLoading}>
           {libraryLoading ? (
-            <DotLoader className="replay-loading" label="Loading your recordings" />
+            <DotLoader className="replay-loading" label={t`Loading your recordings`} />
           ) : (
             <>
               {search.trim() === "" && filter === "all" && !picking && !guest && (
@@ -493,7 +501,7 @@ function Library({
         />
       </main>
       {roomy && (
-        <RailPanel label="Chosen recording" className="replay-rail">
+        <RailPanel label={t`Chosen recording`} className="replay-rail">
           {card ? (
             <RecordingPreview
               key={card.id}
@@ -510,8 +518,8 @@ function Library({
           ) : (
             <div className="replay-rail-empty">
               {showDot && <PresenceSlot name="dock" className="replay-rail-dot" />}
-              <EmptyState title="Choose a recording">
-                Its picture, what dot said and the files it made show here.
+              <EmptyState title={t`Choose a recording`}>
+                {t`Its picture, what dot said and the files it made show here.`}
               </EmptyState>
             </div>
           )}
@@ -555,7 +563,7 @@ function RecordingPreview({
             round
             size={52}
             icon="play"
-            label="Play this recording"
+            label={t`Play this recording`}
             onClick={onWatch}
           />
         </span>
@@ -563,7 +571,7 @@ function RecordingPreview({
       <div className="replay-says" data-dot={showDot ? "" : undefined}>
         {showDot && <PresenceSlot name="dock" className="replay-says-dot" />}
         <p className="replay-says-line">
-          {showDot ? <span className="ui-visually-hidden">dot: </span> : null}
+          {showDot ? <span className="ui-visually-hidden">{t`dot: `}</span> : null}
           {line}
         </p>
       </div>
@@ -581,17 +589,17 @@ function RecordingPreview({
               disabledReason={continuable(card, continueTask) ? continueTask.reason : undefined}
               onClick={() => continueTask.run(card.id)}
             >
-              {card.verdict === "live" ? "Watch it live" : CONTINUE_LABEL}
+              {card.verdict === "live" ? t`Watch it live` : CONTINUE_LABEL}
             </Button>
           )}
           <Button size="lg" icon="play" onClick={onWatch}>
-            Watch replay
+            {t`Watch replay`}
           </Button>
         </div>
         {summary && summary.files.length > 0 && !guest && (
           <section className="replay-files" aria-labelledby={`${card.id}-files`}>
             <h3 id={`${card.id}-files`} className="replay-files-title">
-              Files
+              {t`Files`}
             </h3>
             <RecordingFiles
               api={api}
@@ -605,7 +613,7 @@ function RecordingPreview({
       {!guest && (
         <div className="replay-preview-foot">
           <Button ref={remove} variant="destructive" icon="trash" onClick={() => setDeleting(card)}>
-            Delete recording…
+            {t`Delete recording…`}
           </Button>
         </div>
       )}
@@ -624,7 +632,7 @@ function RecordingPreview({
 }
 
 // The island over a recording: what dot was doing at the playhead and when; no controls.
-const LOST_LINE = "I couldn't open this recording. Shall I try again?";
+const LOST_LINE = t`I couldn't open this recording. Shall I try again?`;
 
 function ReplayIsland({
   label,
@@ -640,7 +648,7 @@ function ReplayIsland({
       <div className="island" data-shape="replay">
         <span className="island-plate" aria-hidden="true" />
         <div className="island-row">
-          <Badge className="island-tag">Replay</Badge>
+          <Badge className="island-tag">{t`Replay`}</Badge>
           <span className="island-label">
             <span className="island-label-text">{label}</span>
           </span>
@@ -689,7 +697,7 @@ function Player({
   tasks,
   onSelect,
   onLibrary,
-  backLabel = "Replay",
+  backLabel = t`Replay`,
   onGoLive,
   modelName,
   onDeleted,
@@ -912,13 +920,13 @@ function Player({
       className="replay-view-choice"
       appearance="inline"
       size="sm"
-      aria-label="Recording view"
+      aria-label={t`Recording view`}
       items={twoScreens ? undefined : VIEWS}
       groups={
         twoScreens
           ? [
-              { label: "Follow recording", items: VIEWS },
-              { label: "Fixed screen", items: FIXED_SCREENS },
+              { label: t`Follow recording`, items: VIEWS },
+              { label: t`Fixed screen`, items: FIXED_SCREENS },
             ]
           : undefined
       }
@@ -928,7 +936,7 @@ function Player({
   );
   const steps = (
     <ActivityRail
-      empty={lost ? "Steps show here once the recording loads." : undefined}
+      empty={lost ? t`Steps show here once the recording loads.` : undefined}
       rows={timelineRows(chapterRows, replay.model.keyUses)}
       agent={replay.agent}
       api={api}
@@ -954,7 +962,7 @@ function Player({
       <main
         ref={area}
         className="stage-col replay-main"
-        aria-label="Replay"
+        aria-label={t`Replay`}
         data-screen={replay.screen}
       >
         <h1 className="ui-visually-hidden">{title}</h1>
@@ -965,7 +973,7 @@ function Player({
           island={
             phone ? undefined : (
               <ReplayIsland
-                label={opening ? "Opening…" : lost ? "Couldn't load" : hud.label}
+                label={opening ? t`Opening…` : lost ? t`Couldn't load` : hud.label}
                 time={opening || lost ? "" : timeLabel(replay.tMs)}
                 action={
                   continueTask && (
@@ -980,7 +988,7 @@ function Player({
                       }
                       onClick={() => continueTask.run(sessionId)}
                     >
-                      {named?.verdict === "live" ? "Watch it live" : CONTINUE_LABEL}
+                      {named?.verdict === "live" ? t`Watch it live` : CONTINUE_LABEL}
                     </Button>
                   )
                 }
@@ -1011,19 +1019,19 @@ function Player({
             enabled={visible && !opening && !lost && !replay.compare && !exportOpen}
           />
           <Presence show={opening}>
-            <DotLoader className="replay-opening" label="Opening this recording" />
+            <DotLoader className="replay-opening" label={t`Opening this recording`} />
           </Presence>
           <GapCard kind={gapKind} />
           {replay.status === "error" && !gapKind && (
             <div className="replay-error" role="alert" data-place={lost ? "centre" : undefined}>
               <div className="replay-error-text">
                 <p className="replay-gap-title">
-                  {lost ? "This recording couldn't load" : "Part of this recording couldn't load"}
+                  {lost ? t`This recording couldn't load` : t`Part of this recording couldn't load`}
                 </p>
                 <p className="replay-gap-body">
                   {lost
-                    ? "It may still be saving. Try again in a moment."
-                    : "Its steps are still here."}
+                    ? t`It may still be saving. Try again in a moment.`
+                    : t`Its steps are still here.`}
                 </p>
               </div>
               <Button
@@ -1034,7 +1042,7 @@ function Player({
                   replay.retry();
                 }}
               >
-                Try again
+                {t`Try again`}
               </Button>
             </div>
           )}
@@ -1088,7 +1096,7 @@ function Player({
       </main>
       {phone ? (
         <>
-          <section className="replay-steps" aria-label="Steps">
+          <section className="replay-steps" aria-label={t`Steps`}>
             {steps}
           </section>
           {continueTask && (
@@ -1103,14 +1111,14 @@ function Player({
                 }
                 onClick={() => continueTask.run(sessionId)}
               >
-                {named?.verdict === "live" ? "Watch it live" : CONTINUE_LABEL}
+                {named?.verdict === "live" ? t`Watch it live` : CONTINUE_LABEL}
               </Button>
             </div>
           )}
         </>
       ) : (
         <RailPanel
-          label="Recording"
+          label={t`Recording`}
           className="replay-rail"
           views={RAIL_VIEWS}
           view={railView}

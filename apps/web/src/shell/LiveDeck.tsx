@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { type ConversationRow, STATUS_LABEL } from "../agent/conversation-list.ts";
+import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { TagMark } from "../ui/ConversationTag.tsx";
 import { Icon } from "../ui/Icon.tsx";
@@ -47,7 +48,7 @@ export function LiveDeck({
   return (
     <section className="live-deck" aria-labelledby={heading}>
       <div id={heading} className="conversations-day live-deck-head">
-        Under way <span className="live-deck-count num">{rows.length}</span>
+        {t`Under way`} <span className="live-deck-count num">{rows.length}</span>
       </div>
       <ul className="live-deck-cards" data-count={Math.min(rows.length, 3)}>
         {rows.map((row) => (
@@ -70,12 +71,14 @@ export function LiveDeck({
 }
 
 // A card's own word for a status too long for its first line.
-const CARD_WORD: Partial<Record<ConversationRow["status"], string>> = { waiting: "Waiting" };
+const CARD_WORD: Partial<Record<ConversationRow["status"], string>> = {
+  waiting: tr("Waiting"),
+};
 
 const STATUS_LINE: Partial<Record<ConversationRow["status"], string>> = {
-  "needs-you": "Waiting for your answer",
-  waiting: "Waits for its turn on the computer",
-  idle: "Ready for your next message",
+  "needs-you": tr("Waiting for your answer"),
+  waiting: tr("Waits for its turn on the computer"),
+  idle: tr("Ready for your next message"),
 };
 
 // A line under the title: what dot is doing, or what the conversation waits for, or else what was
@@ -165,7 +168,7 @@ function LiveCard({
           icon="more-horizontal"
           size={24}
           className="live-card-more"
-          label={`Actions for ${row.title}`}
+          label={t`Actions for ${row.title}`}
           {...triggerProps("menu", menuOpen)}
           onClick={(event) => onMenu(event.currentTarget)}
         />

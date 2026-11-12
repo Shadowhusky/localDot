@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { VIEW_LINES, VIEW_NAMES, VIEW_STYLES, type ViewStyle } from "../shell/view-style.ts";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import "./onboarding.css";
@@ -44,7 +45,7 @@ export function ViewStylePicker({
         value: style,
         label: VIEW_NAMES[style],
         description: VIEW_LINES[style],
-        ...(style === recommended ? { tag: "Recommended" } : {}),
+        ...(style === recommended ? { tag: t`Recommended` } : {}),
         preview: <ViewPreview style={style} />,
       }))}
     />

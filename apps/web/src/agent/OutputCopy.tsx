@@ -1,5 +1,6 @@
 import { keyLikePresent } from "@localdot/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 
 export function OutputCopy({ text, label }: { text: string; label: string }) {
@@ -24,22 +25,22 @@ export function OutputCopy({ text, label }: { text: string; label: string }) {
         variant="quiet"
         size="sm"
         disabledReason={
-          !text ? "Nothing to copy." : blocked ? "Select a shorter excerpt to copy." : undefined
+          !text ? t`Nothing to copy.` : blocked ? t`Select a shorter excerpt to copy.` : undefined
         }
         onClick={() => {
           if (!text || keyLikePresent(text)) return;
           const epoch = owner.current.epoch;
           if (!navigator.clipboard?.writeText) {
-            setStatus("Copy isn't available in this browser.");
+            setStatus(t`Copy isn't available in this browser.`);
             return;
           }
           void navigator.clipboard.writeText(text).then(
             () => {
-              if (owner.current.mounted && owner.current.epoch === epoch) setStatus("Copied");
+              if (owner.current.mounted && owner.current.epoch === epoch) setStatus(t`Copied`);
             },
             () => {
               if (owner.current.mounted && owner.current.epoch === epoch)
-                setStatus("Couldn't copy the text.");
+                setStatus(t`Couldn't copy the text.`);
             },
           );
         }}

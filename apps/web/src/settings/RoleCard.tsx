@@ -1,5 +1,6 @@
 import { isOpenRouterRouterId, providerById } from "@localdot/providers";
 import { useId, useRef } from "react";
+import { t, tr } from "../i18n/index.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
@@ -20,23 +21,27 @@ import {
 import { subscription } from "./chooser.ts";
 import { ModelChooser, modelNote, providerNote } from "./ModelChooser.tsx";
 import { ModelOptionsFields, optionsNote } from "./ModelOptionsFields.tsx";
+import { roleProblemField } from "./settings-form.ts";
 
 const ROLE: Record<ModelRole, { title: string; description: string }> = {
-  main: { title: "Main model", description: "Does the work" },
-  fast: { title: "Fast model", description: "Summarizes long tasks and answers purpose checks" },
-  local: { title: "Local model", description: "Runs on this Mac with LM Studio or Ollama" },
+  main: { title: tr("Main model"), description: tr("Does the work") },
+  fast: {
+    title: tr("Fast model"),
+    description: tr("Summarizes long tasks and answers purpose checks"),
+  },
+  local: { title: tr("Local model"), description: tr("Runs on this Mac with LM Studio or Ollama") },
 };
 // Claude Code keeps its own history, so beside it the fast model only answers purpose checks.
-const PLAN_FAST = "Answers purpose checks; Claude Code summarizes on its own";
+const PLAN_FAST = tr("Answers purpose checks; Claude Code summarizes on its own");
 
 // Models that work the screen, which the main model's heading tags; their note says no more.
 const SCREEN_TIERS = new Set(["native", "vision-tools"]);
 
 const TIER: Record<string, string> = {
-  native: "Computer use",
-  "vision-tools": "Computer use",
-  "text-only": "Tools",
-  "no-tools": "Text only",
+  native: tr("Computer use"),
+  "vision-tools": tr("Computer use"),
+  "text-only": tr("Tools"),
+  "no-tools": tr("Text only"),
 };
 
 // Picked from the Key row's list, it opens the form that adds one instead of choosing a key.
@@ -63,24 +68,18 @@ export interface RoleCardProps {
   onPrice?(value: { input: string; output: string }): void;
 }
 
-// The field that says what is wrong with a role; the model's unless it is about another.
-function problemField(problem: string | undefined): "model" | "key" | "price" | "context" | null {
-  if (!problem) return null;
-  if (problem.startsWith("enter both")) return "price";
-  if (problem.startsWith("enter a context")) return "context";
-  return /^(choose a stored key|reconnect the key|this key)/.test(problem) ? "key" : "model";
-}
+const problemField = (problem: string | undefined) => (problem ? roleProblemField(problem) : null);
 
 const capital = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 // Notes from the catalog may come without a full stop; joined into one line, each needs one.
-const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+const sentence = (text: string) => (/[.!?…。！？]$/.test(text) ? text : `${text}.`);
 
 function keyNote(provider: ReturnType<typeof providerById>): string | undefined {
   if (!provider) return undefined;
-  if (provider.plan) return "Use a key from this plan, not a pay-as-you-go key.";
+  if (provider.plan) return t`Use a key from this plan, not a pay-as-you-go key.`;
   if (provider.client === "azure" || provider.custom)
-    return "The endpoint's address is set with its key.";
+    return t`The endpoint's address is set with its key.`;
   return undefined;
 }
 
@@ -121,17 +120,17 @@ export function RoleCard({
   const notes =
     on && !inactive && value
       ? [
-          failure && `dot's last quick request to it failed: ${failure}`,
-          role === "main" && "Needs a model that can use a computer.",
+          failure && t`dot's last quick request to it failed: ${failure}`,
+          role === "main" && t`Needs a model that can use a computer.`,
           providerNote(value.provider),
-          typed && "Type the model ID as the server names it.",
+          typed && t`Type the model ID as the server names it.`,
           (!SCREEN_TIERS.has(tier ?? "") || isOpenRouterRouterId(value.provider, value.model)) &&
             modelNote(value, providers),
           value.model && optionsNote(value, false, discovered),
           provider && !provider.notOffered && !provider.local && keyNote(provider),
           manualPrice &&
             !subscription(value.provider) &&
-            "Prices are US dollars per million tokens, from 0 to 10,000; one may be 0. Used to set aside a task's spending. It isn't your bill.",
+            t`Prices are US dollars per million tokens, from 0 to 10,000; one may be 0. Used to set aside a task's spending. It isn't your bill.`,
         ].filter((note): note is string => Boolean(note))
       : [];
   const rows = (value || role === "main") && (
@@ -237,9 +236,11 @@ function RoleDetails({
   const keyed = !provider.local && !provider.availableIn;
   const keyReason =
     keyLayer !== "online"
-      ? "Keys can't be read right now. Reconnect, then choose one."
+      ? t`Keys can't be read right now. Reconnect, then choose one.`
       : !available.length && !missing
-        ? `No keys for ${provider.custom ? "your endpoint" : provider.name} yet. Add one.`
+        ? provider.custom
+          ? t`No keys for your endpoint yet. Add one.`
+          : t`No keys for ${provider.name} yet. Add one.`
         : undefined;
   const addKey = (trigger: HTMLButtonElement) => onKeys(role, provider.id, trigger);
   return (
@@ -248,7 +249,7 @@ function RoleDetails({
         <div ref={row} className="settings-key-row">
           {available.length || missing ? (
             <Field
-              label="Key"
+              label={t`Key`}
               inline
               className="ui-group-row"
               disabledReason={keyReason}
@@ -257,14 +258,14 @@ function RoleDetails({
               <Select
                 appearance="inline"
                 value={value.key ?? ""}
-                placeholder="Choose a key"
+                placeholder={t`Choose a key`}
                 items={[
                   ...(missing && value.key
                     ? [
                         {
                           value: value.key,
                           label: value.key,
-                          disabledReason: "Missing, or bound to another provider",
+                          disabledReason: t`Missing, or bound to another provider`,
                         },
                       ]
                     : []),
@@ -273,7 +274,7 @@ function RoleDetails({
                     label: key.id,
                     description: key.baseURL,
                   })),
-                  ...(keyLayer === "online" ? [{ value: ADD_KEY, label: "Add a key…" }] : []),
+                  ...(keyLayer === "online" ? [{ value: ADD_KEY, label: t`Add a key…` }] : []),
                 ]}
                 onValueChange={(key) => {
                   const trigger = row.current?.querySelector<HTMLButtonElement>("[role=combobox]");
@@ -285,18 +286,18 @@ function RoleDetails({
             </Field>
           ) : (
             <GroupRow
-              label="Key"
+              label={t`Key`}
               detail={keyReason}
               trailing={
                 <Button
                   size="sm"
                   icon="key-round"
                   disabledReason={
-                    keyLayer !== "online" ? "Keys can't be read right now" : undefined
+                    keyLayer !== "online" ? t`Keys can't be read right now` : undefined
                   }
                   onClick={(event) => addKey(event.currentTarget)}
                 >
-                  Add key
+                  {t`Add key`}
                 </Button>
               }
             />
@@ -328,13 +329,13 @@ function CustomEndpoint({
     <>
       <Switch
         className="ui-group-row"
-        label="Can see images"
-        description="Needed to work the screen."
+        label={t`Can see images`}
+        description={t`Needed to work the screen.`}
         checked={value.vision !== false}
         onCheckedChange={(checked) => onChange({ ...value, vision: checked ? undefined : false })}
       />
       <Field
-        label="Context window"
+        label={t`Context window`}
         inline
         className="ui-group-row"
         {...(problem ? { error: problem } : {})}
@@ -345,7 +346,7 @@ function CustomEndpoint({
           maxLength={9}
           placeholder="32768"
           autoComplete="off"
-          suffix="tokens"
+          suffix={t`tokens`}
           value={value.contextTokens ?? ""}
           onChange={(event) => {
             const digits = event.target.value.replace(/\D/g, "");
@@ -356,8 +357,8 @@ function CustomEndpoint({
       {tiers && (
         <Switch
           className="ui-group-row"
-          label="Supports speed tiers"
-          description="Fast and Ultrafast, as OpenAI's service tiers."
+          label={t`Supports speed tiers`}
+          description={t`Fast and Ultrafast, as OpenAI's service tiers.`}
           checked={value.speedTiers === true}
           onCheckedChange={(checked) => {
             const { speed: _, ...options } = value.options ?? {};
@@ -371,9 +372,9 @@ function CustomEndpoint({
       )}
       <Switch
         className="ui-group-row"
-        label="Flat-rate plan"
+        label={t`Flat-rate plan`}
         description={
-          value.plan ? "Uses the plan's limits, not a spending limit." : "No per-token price."
+          value.plan ? t`Uses the plan's limits, not a spending limit.` : t`No per-token price.`
         }
         checked={value.plan === true}
         onCheckedChange={(checked) =>
@@ -415,8 +416,8 @@ function ManualPrice({
   );
   return (
     <>
-      {field("input", "Input price")}
-      {field("output", "Output price")}
+      {field("input", t`Input price`)}
+      {field("output", t`Output price`)}
     </>
   );
 }

@@ -21,6 +21,7 @@ import {
   type ViewerEntry,
 } from "../deliverables/viewer/scope.tsx";
 import { TextBody } from "../deliverables/viewer/TextView.tsx";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { ErrorBoundary } from "../ui/ErrorBoundary.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -192,7 +193,7 @@ export function StepPreviewScope({
                 onClose={close}
                 returnFocus={returnFocus}
                 title={resource.name}
-                description={resource.diff ? "Recorded change" : "Recorded step output"}
+                description={resource.diff ? t`Recorded change` : t`Recorded step output`}
                 className="file-viewer step-preview-sheet"
                 style={width ? { left: 8, right: "auto", width } : undefined}
                 size="wide"
@@ -203,7 +204,7 @@ export function StepPreviewScope({
                 footer={
                   <OutputCopy
                     text={resource.text}
-                    label={resource.diff ? "Copy changes" : "Copy output"}
+                    label={resource.diff ? t`Copy changes` : t`Copy output`}
                   />
                 }
               >
@@ -220,7 +221,7 @@ export function StepPreviewScope({
                         key={resource.name + resource.text}
                         text={resource.text}
                         name={resource.name}
-                        label="Step output preview"
+                        label={t`Step output preview`}
                       />
                     ) : (
                       <TextBody
@@ -234,7 +235,7 @@ export function StepPreviewScope({
                           truncated: false,
                         }}
                         copy={false}
-                        label="Step output preview"
+                        label={t`Step output preview`}
                       />
                     )}
                   </div>
@@ -313,7 +314,7 @@ export function StepFileResources({ text }: { text: string }) {
   const files = useMemo(() => referencedFiles(text, viewer?.files ?? []), [text, viewer?.files]);
   if (!files.length) return null;
   return (
-    <section className="step-file-resources" aria-label="Output files">
+    <section className="step-file-resources" aria-label={t`Output files`}>
       {files.map((entry) => (
         <div
           className="step-file-resource step-preview-resource"
@@ -321,7 +322,7 @@ export function StepFileResources({ text }: { text: string }) {
         >
           <span>{entry.file.name}</span>
           <StepPreviewButton
-            label={`Preview ${entry.file.name}`}
+            label={t`Preview ${entry.file.name}`}
             resource={{ kind: "file", entries: [entry], index: 0 }}
           />
         </div>

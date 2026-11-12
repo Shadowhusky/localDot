@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t } from "../i18n/index.ts";
 import { copyInto, mix, ramp, sizeOf, useLift } from "../shell/phone-lift.ts";
 import { clamp } from "../shell/phone-spring.ts";
 import type { IconName } from "../ui/icons.ts";
@@ -144,7 +145,7 @@ export function BubbleMenu({ held, onClose }: { held: HeldBubble | null; onClose
         anchor={anchor}
         side="bottom"
         align={shown.mine ? "end" : "start"}
-        label="Message actions"
+        label={t`Message actions`}
       >
         {shown.note && (
           <>

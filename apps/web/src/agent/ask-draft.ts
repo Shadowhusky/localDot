@@ -1,5 +1,6 @@
 import { type KeyMatch, type QuestionAnswerRequest, scanKeyLike } from "@localdot/protocol";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { t } from "../i18n/index.ts";
 import {
   type AskField,
   answerRequest,
@@ -26,7 +27,7 @@ export interface AskState {
   readonly failed: string | null;
 }
 
-const NOT_SENT = "Your answer didn't reach dot. Check the task, then try again.";
+const NOT_SENT = t`Your answer didn't reach dot. Check the task, then try again.`;
 
 // One question's answer while it is filled in, shared by every surface that shows the question,
 // so moving between the thread, the island and a phone's sheet keeps what was typed. Only the

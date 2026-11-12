@@ -1,5 +1,6 @@
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { t } from "../../i18n/index.ts";
 import { matches, REDUCED_MOTION } from "../../ui/media.ts";
 import { ThumbnailButton } from "../../ui/Thumbnail.tsx";
 import { type PageSize, PdfPage } from "./PdfPage.tsx";
@@ -114,7 +115,7 @@ export function Thumbs({
         style={axis === "y" ? { top: start, width } : { left: start, width }}
       >
         <ThumbnailButton
-          label={`${noun} ${i + 1}`}
+          label={noun === "Slide" ? t`Slide ${i + 1}` : t`Page ${i + 1}`}
           ratio={ratio}
           current={current === i + 1}
           onClick={() => onPick(i + 1)}
@@ -126,7 +127,12 @@ export function Thumbs({
     );
   }
   return (
-    <nav ref={scroller} className="viewer-thumbs" data-axis={axis} aria-label={`${noun}s`}>
+    <nav
+      ref={scroller}
+      className="viewer-thumbs"
+      data-axis={axis}
+      aria-label={noun === "Slide" ? t`Slides` : t`Pages`}
+    >
       <div
         className="viewer-thumbs-run"
         style={

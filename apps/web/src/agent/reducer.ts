@@ -8,6 +8,7 @@ import {
   ulidTime,
 } from "@localdot/protocol";
 import { decisionWords } from "../copy/decision.ts";
+import { t } from "../i18n/index.ts";
 import {
   type AgentChild,
   type AgentConnection,
@@ -36,8 +37,8 @@ const busyStep = (before: AgentModel["state"], event: LocalDotEvent) =>
   BUSY.has(event.data.state) &&
   before.reason === event.data.reason &&
   before.detail === event.data.detail;
-const STREAM_ERROR = "Activity could not be verified. Reconnect to load it again.";
-const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
+const STREAM_ERROR = t`Activity could not be verified. Reconnect to load it again.`;
+const GAP_ERROR = t`Some activity is missing. Reconnect to load it again.`;
 const RELEVANT = new Set<LocalDotEvent["type"]>([
   "agent.state",
   "task.result",

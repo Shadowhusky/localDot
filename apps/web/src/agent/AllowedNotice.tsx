@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { allowedLine, undoAllowedLabel } from "../copy/autonomy.ts";
+import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { markdownToPlain } from "./markdown.ts";
@@ -37,13 +38,13 @@ export function AllowedNotice({
   const undone = choice?.undo === "done" || !!confirmed?.ruleRemoved;
   const text = saved
     ? undone
-      ? "Undone. You'll be asked again next time."
+      ? t`Undone. You'll be asked again next time.`
       : allowedLine(choice.actionClass, choice.option)
     : confirmed?.note
       ? markdownToPlain(confirmed.note)
       : null;
   const undoable = saved && !undone;
-  const failed = undoable && choice.undo === "failed" ? " Couldn't undo. Try again." : "";
+  const failed = undoable && choice.undo === "failed" ? t` Couldn't undo. Try again.` : "";
   // A removed or hidden Undo never reports pointer-leave or blur.
   const reachable = visible && undoable;
   useEffect(() => {
@@ -86,7 +87,7 @@ export function AllowedNotice({
               onFocus={() => setHeld((old) => ({ ...old, focus: true }))}
               onBlur={() => setHeld((old) => ({ ...old, focus: false }))}
             >
-              Undo
+              {t`Undo`}
             </Button>
           )}
         </div>

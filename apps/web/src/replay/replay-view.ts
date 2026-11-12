@@ -18,6 +18,7 @@ import {
   type TickKind,
 } from "@localdot/stage";
 import { bytes, count } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 
 export interface ChapterView {
   id: string;
@@ -101,7 +102,7 @@ export function scrubberModel(input: {
       .sort(([left], [right]) => left - right)
       .map(([, bucket]) => ({
         ...bucket,
-        label: bucket.count > 1 ? `${bucket.label} and ${bucket.count - 1} more` : bucket.label,
+        label: bucket.count > 1 ? t`${bucket.label} and ${bucket.count - 1} more` : bucket.label,
       })),
     idle: input.map.segments
       .filter((segment) => segment.idle)
@@ -127,44 +128,45 @@ export function timeLabel(ms: number): string {
     : `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
 }
 export function speedLabel(speed: ReplaySpeed, idleNow: boolean): string | null {
-  if (speed === 1) return idleNow ? "Idle skipped" : null;
-  return `Playing at ${speed === 0.5 ? "½" : speed}×${idleNow ? " · idle skipped" : ""}`;
+  if (speed === 1) return idleNow ? t`Idle skipped` : null;
+  const shown = speed === 0.5 ? "½" : speed;
+  return idleNow ? t`Playing at ${shown}× · idle skipped` : t`Playing at ${shown}×`;
 }
 export function gapCard(kind: RecordingGapReason | "none" | "expired" | "failed"): {
   title: string;
   body: string;
 } {
-  const screenshotBody = "Steps are shown from screenshots.";
+  const screenshotBody = t`Steps are shown from screenshots.`;
   switch (kind) {
     case "user-control":
       return {
-        title: "You had control here",
-        body: "Nothing was recorded while you were in control.",
+        title: t`You had control here`,
+        body: t`Nothing was recorded while you were in control.`,
       };
     case "other-task":
       return {
-        title: "Another task was on screen here",
-        body: "This task kept going; its own window comes back when it next acts.",
+        title: t`Another task was on screen here`,
+        body: t`This task kept going; its own window comes back when it next acts.`,
       };
     case "stream-lost":
       return {
-        title: "The picture dropped here",
-        body: `localDot lost the computer's stream. ${screenshotBody}`,
+        title: t`The picture dropped here`,
+        body: t`localDot lost the computer's stream. Steps are shown from screenshots.`,
       };
     case "disk-full":
       return {
-        title: "Recording stopped: the disk was full",
-        body: `${screenshotBody} Free some space and new tasks record again.`,
+        title: t`Recording stopped: the disk was full`,
+        body: t`Steps are shown from screenshots. Free some space and new tasks record again.`,
       };
     case "size-cap":
-      return { title: "Recording stopped at the size limit", body: screenshotBody };
+      return { title: t`Recording stopped at the size limit`, body: screenshotBody };
     case "recorder-error":
-      return { title: "Recording stopped", body: screenshotBody };
+      return { title: t`Recording stopped`, body: screenshotBody };
     case "expired":
-      return { title: "The video was removed to save space", body: screenshotBody };
+      return { title: t`The video was removed to save space`, body: screenshotBody };
     case "none":
     case "failed":
-      return { title: "No video for this task", body: screenshotBody };
+      return { title: t`No video for this task`, body: screenshotBody };
   }
 }
 export type ReplayCommand =
@@ -278,8 +280,8 @@ export function clockLabel(value: string): string {
 export function dayLabel(value: string, now: Date): string {
   const started = new Date(value);
   const days = Math.round((startOfDay(now) - startOfDay(started)) / 86_400_000);
-  if (days === 0) return "Today";
-  if (days === 1) return "Yesterday";
+  if (days === 0) return t`Today`;
+  if (days === 1) return t`Yesterday`;
   return started.toLocaleDateString([], {
     weekday: "long",
     day: "numeric",
@@ -289,18 +291,18 @@ export function dayLabel(value: string, now: Date): string {
 }
 export function recordedLabel(card: SessionCard, now: Date): string {
   const when = `${dayLabel(card.startedAt, now)} ${clockLabel(card.startedAt)}`;
-  return card.verdict === "live" ? `Running · ${when}` : when;
+  return card.verdict === "live" ? t`Running · ${when}` : when;
 }
 export function taskMeta(card: SessionCard): string {
-  const length = card.durationMs === null ? "Running" : timeLabel(card.durationMs);
+  const length = card.durationMs === null ? t`Running` : timeLabel(card.durationMs);
   return `${clockLabel(card.startedAt)} · ${length}`;
 }
 const OUTCOME: Record<SessionCard["verdict"], string> = {
   done: "",
-  live: "running",
-  stopped: "you stopped it",
-  error: "failed",
-  interrupted: "interrupted",
+  live: tr("running"),
+  stopped: tr("you stopped it"),
+  error: tr("failed"),
+  interrupted: tr("interrupted"),
 };
 // A library row's line under its title. A phone has no duration column, so the length joins it.
 export function rowMeta(card: SessionCard, withLength: boolean): string {
@@ -317,7 +319,7 @@ export function rowMeta(card: SessionCard, withLength: boolean): string {
 export function previewMeta(card: SessionCard, now: Date, spend?: string): string {
   return [
     `${dayLabel(card.startedAt, now)} ${clockLabel(card.startedAt)}`,
-    card.durationMs === null ? "Running" : timeLabel(card.durationMs),
+    card.durationMs === null ? t`Running` : timeLabel(card.durationMs),
     count(card.steps, "step", "steps"),
     spend ?? "",
   ]
@@ -342,7 +344,7 @@ export function cardBytes(card: SessionCard): number {
 export function libraryTotal(cards: readonly SessionCard[], more: boolean): string {
   const size = cards.reduce((sum, card) => sum + cardBytes(card), 0);
   const shown = more
-    ? `${cards.length.toLocaleString()}+ recordings`
+    ? t`${cards.length.toLocaleString()}+ recordings`
     : count(cards.length, "recording", "recordings");
   return size > 0 ? `${shown} · ${bytes(size)}` : shown;
 }
@@ -350,19 +352,19 @@ export type VerdictGlyph = { state: "doing" | "done" | "failed" | "skipped"; lab
 export function verdictGlyph(verdict: SessionCard["verdict"]): VerdictGlyph {
   switch (verdict) {
     case "done":
-      return { state: "done", label: "Done" };
+      return { state: "done", label: t`Done` };
     case "live":
-      return { state: "doing", label: "Running" };
+      return { state: "doing", label: t`Running` };
     case "stopped":
-      return { state: "skipped", label: "Stopped" };
+      return { state: "skipped", label: t`Stopped` };
     case "interrupted":
-      return { state: "failed", label: "Interrupted" };
+      return { state: "failed", label: t`Interrupted` };
     case "error":
-      return { state: "failed", label: "Failed" };
+      return { state: "failed", label: t`Failed` };
   }
 }
 export function taskTitle(card: Pick<SessionCard, "title">): string {
-  return card.title?.trim() || "Untitled task";
+  return card.title?.trim() || t`Untitled task`;
 }
 // Every word of the search appears somewhere in the title, in any order and case.
 export function matchesSearch(card: Pick<SessionCard, "title">, search: string): boolean {

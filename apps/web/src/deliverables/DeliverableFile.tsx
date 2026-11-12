@@ -3,6 +3,7 @@ import { type Ref, useCallback, useId, useRef, useState } from "react";
 import type { AgentResult } from "../agent/model.ts";
 import type { FileState, ResultDownloads } from "../agent/ResultFiles.tsx";
 import { bytes } from "../copy/format.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { FileCard, FileRow } from "../ui/Card.tsx";
@@ -121,11 +122,11 @@ export function DeliverableFile({
 
   const meta =
     state === "busy"
-      ? "Downloading…"
+      ? t`Downloading…`
       : state === "failed"
-        ? "Couldn't download. Try again."
+        ? t`Couldn't download. Try again.`
         : gone
-          ? "No longer available"
+          ? t`No longer available`
           : [
               bytes(current?.bytes ?? file.bytes),
               versions.length > 1 && current ? `v${current.label}` : null,
@@ -146,16 +147,16 @@ export function DeliverableFile({
         newest,
       })
     )
-      showToast({ title: "Open the conversation to revise this file.", tone: "neutral" });
+      showToast({ title: t`Open the conversation to revise this file.`, tone: "neutral" });
   };
   const downloadReason = !downloads.sessionId
-    ? "This task is no longer available."
+    ? t`This task is no longer available.`
     : gone
-      ? "This version is no longer available."
+      ? t`This version is no longer available.`
       : downloads.busy && state !== "busy"
-        ? "Another download is still running."
+        ? t`Another download is still running.`
         : undefined;
-  const openReason = gone ? "This version is no longer available." : undefined;
+  const openReason = gone ? t`This version is no longer available.` : undefined;
   const download = () => void downloads.request(resultId, file, own ? undefined : shown);
   const openViewer =
     viewer &&
@@ -167,7 +168,7 @@ export function DeliverableFile({
         ...(versions.length > 1 && current ? { label: current.label } : {}),
       }));
   const opener = openViewer ?? (onMac && canOpenOnMac(file.name) ? openOnMac : undefined);
-  const openLabel = viewer ? `Open ${file.name}` : `Open ${file.name} on your Mac`;
+  const openLabel = viewer ? t`Open ${file.name}` : t`Open ${file.name} on your Mac`;
   // Under the row, Open does something the card doesn't: the Mac's own app, or a viewer that can
   // show more than this card again.
   const opensMore =
@@ -184,7 +185,7 @@ export function DeliverableFile({
             disabledReason={openReason}
             onClick={() => void opensMore()}
           >
-            Open
+            {t`Open`}
           </Button>
         )}
         <Button
@@ -194,7 +195,7 @@ export function DeliverableFile({
           disabledReason={downloadReason}
           onClick={download}
         >
-          Download
+          {t`Download`}
         </Button>
       </>
     ),
@@ -211,7 +212,7 @@ export function DeliverableFile({
         }
         expanded={open}
         controls={panel}
-        toggleLabel={`${open ? "Hide" : "Show"} ${file.name}`}
+        toggleLabel={open ? t`Hide ${file.name}` : t`Show ${file.name}`}
         onToggle={() => setOpen((was) => !was)}
         actions={
           <>
@@ -224,7 +225,7 @@ export function DeliverableFile({
                 disabledReason={openReason}
                 onClick={() => void opener()}
               >
-                Open
+                {t`Open`}
               </Button>
             )}
             <span className="result-file-action" data-state={state}>
@@ -233,14 +234,14 @@ export function DeliverableFile({
                 <IconButton
                   ref={more}
                   icon="more-horizontal"
-                  label={`More for ${file.name}`}
+                  label={t`More for ${file.name}`}
                   {...triggerProps("menu", menu)}
                   onClick={() => setMenu(true)}
                 />
               ) : (
                 <IconButton
                   icon={state === "busy" ? "x" : state === "done" ? "check" : "download"}
-                  label={state === "busy" ? "Cancel download" : `Download ${file.name}`}
+                  label={state === "busy" ? t`Cancel download` : t`Download ${file.name}`}
                   disabledReason={state === "busy" ? undefined : downloadReason}
                   onClick={() => (state === "busy" ? downloads.cancel() : download())}
                 />
@@ -252,7 +253,7 @@ export function DeliverableFile({
                 onClose={() => setMenu(false)}
                 anchor={more}
                 align="end"
-                label={`Actions for ${file.name}`}
+                label={t`Actions for ${file.name}`}
               >
                 {/* The whole name, for a finger that can't hover over a shortened one. */}
                 <MenuGroup label={file.name}>
@@ -261,10 +262,10 @@ export function DeliverableFile({
                     disabledReason={openReason}
                     onSelect={() => void opener()}
                   >
-                    {viewer ? "Open" : "Open on your Mac"}
+                    {viewer ? t`Open` : t`Open on your Mac`}
                   </MenuItem>
                   <MenuItem icon="download" disabledReason={downloadReason} onSelect={download}>
-                    Download
+                    {t`Download`}
                   </MenuItem>
                 </MenuGroup>
               </Menu>
@@ -276,7 +277,7 @@ export function DeliverableFile({
         <div className="deliverable-body">
           {shows === "video" || shows === "audio" ? (
             gone ? (
-              <FileCard {...card} problem="This version is no longer available." />
+              <FileCard {...card} problem={t`This version is no longer available.`} />
             ) : (
               <MediaPreview
                 api={api}
@@ -300,10 +301,10 @@ export function DeliverableFile({
                   variant="quiet"
                   size="sm"
                   icon="compose"
-                  disabledReason={gone ? "This version is no longer available." : undefined}
+                  disabledReason={gone ? t`This version is no longer available.` : undefined}
                   onClick={revise}
                 >
-                  Revise
+                  {t`Revise`}
                 </Button>
               )}
               {pair && (
@@ -313,7 +314,7 @@ export function DeliverableFile({
                   icon="file-diff"
                   onClick={() => setComparing({ pair, open: true })}
                 >
-                  Compare v{pair[0].label} → v{pair[1].label}
+                  {t`Compare v${pair[0].label} → v${pair[1].label}`}
                 </Button>
               )}
               {versions.length > 1 && current && (
@@ -321,14 +322,14 @@ export function DeliverableFile({
                   appearance="inline"
                   size="sm"
                   className="deliverable-version"
-                  aria-label={`Version of ${file.name}`}
+                  aria-label={t`Version of ${file.name}`}
                   value={versionKey(current)}
-                  shown={`v${current.label} of ${versions.length}`}
+                  shown={t`v${current.label} of ${versions.length}`}
                   items={versions.map((v) => ({
                     value: versionKey(v),
                     label: `v${v.label}`,
                     description: versionDetail(v),
-                    ...(v.available ? {} : { disabledReason: "Replaced by a later version" }),
+                    ...(v.available ? {} : { disabledReason: t`Replaced by a later version` }),
                   }))}
                   onValueChange={(key) => {
                     const chosen = versions.find((v) => versionKey(v) === key);

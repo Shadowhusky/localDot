@@ -1,5 +1,6 @@
 import type { PremiumSpeed, SessionOrigin } from "@localdot/protocol";
 import { microsToMs, sameRunningModel, ULID_PATTERN, ulidTime } from "@localdot/protocol";
+import { t } from "../i18n/index.ts";
 import type { KeyUseRowView, TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import {
@@ -126,9 +127,9 @@ export type ThreadKind = ThreadItem["kind"];
 
 // What the divider says where the computer changed hands.
 export function controlLine(item: Extract<ThreadItem, { kind: "control" }>): string {
-  if (item.took) return item.handed ? "dot handed you the computer" : "You took control";
-  if (item.movedOn) return "You moved on with a message";
-  return item.declined ? "You said not now" : "You handed back";
+  if (item.took) return item.handed ? t`dot handed you the computer` : t`You took control`;
+  if (item.movedOn) return t`You moved on with a message`;
+  return item.declined ? t`You said not now` : t`You handed back`;
 }
 
 export interface ThreadRow {

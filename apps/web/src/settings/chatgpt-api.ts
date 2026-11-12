@@ -6,6 +6,7 @@ import {
   SubscriptionUsageData,
 } from "@localdot/protocol";
 import { z } from "zod";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { SubscriptionModel } from "./choices.ts";
 
@@ -122,10 +123,10 @@ export class ChatgptFailure extends Error {
     super(
       refusal ??
         (status === 503
-          ? "ChatGPT account changes could not be safely completed. New ChatGPT tasks are blocked; check account status before continuing."
+          ? t`ChatGPT account changes could not be safely completed. New ChatGPT tasks are blocked; check account status before continuing.`
           : uncertain
-            ? "The reply could not be verified. Check account status before another action."
-            : "ChatGPT status or the requested action is unavailable. Check the connection and try again."),
+            ? t`The reply could not be verified. Check account status before another action.`
+            : t`ChatGPT status or the requested action is unavailable. Check the connection and try again.`),
     );
     this.name = "ChatgptFailure";
   }

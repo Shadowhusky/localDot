@@ -1,6 +1,7 @@
 import { type LocalDotEvent, sessionMsOf } from "@localdot/protocol";
 import type { AgentModel, AgentStep } from "../agent/model.ts";
 import { terminalDisplayed } from "../agent/terminal-text.ts";
+import { t, tr } from "../i18n/index.ts";
 
 export const WORK_LIMITS = Object.freeze({ text: 6000, lines: 80, frames: 160, sampleMs: 500 });
 export interface WorkCard {
@@ -12,6 +13,11 @@ export interface WorkCard {
   status: string;
   image?: NonNullable<AgentStep["images"]>[number];
 }
+export const WORK_KIND_NAMES: Record<WorkCard["kind"], string> = {
+  Command: tr("Command"),
+  Files: tr("Files"),
+  Research: tr("Research"),
+};
 export function workTail(text: string): { text: string; shortened: boolean } {
   const tail = text.slice(-WORK_LIMITS.text).split("\n").slice(-WORK_LIMITS.lines).join("\n");
   return { text: tail, shortened: tail.length < text.length };
@@ -48,21 +54,21 @@ export function workCard(model: AgentModel): WorkCard | null {
   return {
     key: step.id,
     kind,
-    title: (step.intent || step.tool?.title || kind).slice(0, 200),
+    title: (step.intent || step.tool?.title || WORK_KIND_NAMES[kind]).slice(0, 200),
     ...tail,
     shortened: tail.shortened || step.outputTruncated || !!change?.truncated,
     status:
       step.status === "failed" || step.tool?.ok === false
-        ? "Failed"
+        ? t`Failed`
         : step.status === "blocked"
-          ? "Blocked"
+          ? t`Blocked`
           : step.status === "cancelled"
-            ? "Cancelled"
+            ? t`Cancelled`
             : step.endedAt !== undefined
-              ? "Finished"
+              ? t`Finished`
               : model.ended
-                ? "Stopped"
-                : "Working",
+                ? t`Stopped`
+                : t`Working`,
     image: step.images?.at(-1),
   };
 }

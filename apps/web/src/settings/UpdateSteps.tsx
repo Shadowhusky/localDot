@@ -1,3 +1,4 @@
+import { t } from "../i18n/index.ts";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 
 // The steps of an update, those behind it done and the one under way or failed marked.
@@ -14,7 +15,7 @@ export function UpdateSteps<Stage extends string>({
 }) {
   const index = stages.indexOf(at);
   return (
-    <ol className="settings-steps settings-update-steps" aria-label="Update steps">
+    <ol className="settings-steps settings-update-steps" aria-label={t`Update steps`}>
       {stages.map((stage, i) => {
         const state = i < index ? "done" : i > index ? "todo" : failed ? "failed" : "doing";
         return (

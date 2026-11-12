@@ -6,6 +6,7 @@ import {
   liveConversations,
   useRecentConversations,
 } from "../agent/conversation-list.ts";
+import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
@@ -29,8 +30,10 @@ export interface ConversationsBubbleProps {
 export function underWayElsewhere(rows: readonly ConversationRow[]): string | undefined {
   if (rows.length === 0) return undefined;
   const asking = rows.filter((row) => row.status === "needs-you").length;
-  const others = rows.length === 1 ? "1 other under way" : `${rows.length} others under way`;
-  return asking ? `${others}, ${asking} needs you` : others;
+  if (!asking) return rows.length === 1 ? t`1 other under way` : t`${rows.length} others under way`;
+  return rows.length === 1
+    ? t`1 other under way, ${asking} needs you`
+    : t`${rows.length} others under way, ${asking} needs you`;
 }
 
 // A phone's way to its conversations, in the corner over the picture. While others are under way
@@ -62,7 +65,7 @@ export function ConversationsBubble({
         size={32}
         variant="filled"
         round
-        label="Conversations"
+        label={t`Conversations`}
         attention={attention}
         aria-describedby={summary ? summaryId : undefined}
         onClick={onOpen}

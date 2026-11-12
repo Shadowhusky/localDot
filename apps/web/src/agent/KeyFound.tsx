@@ -1,6 +1,7 @@
 import { CLAUDE_PLAN_REFUSAL } from "@localdot/protocol";
 import { clsx } from "clsx";
 import { useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -43,20 +44,28 @@ export function KeyFound({
   const title = !notice
     ? ""
     : notice.kind === "overflow"
-      ? "Message cleared"
+      ? t`Message cleared`
       : notice.kind === "transfer_failed"
-        ? "Key not moved"
+        ? t`Key not moved`
         : onlyPlanTokens
           ? count === 1
-            ? "Claude plan token removed"
-            : "Claude plan tokens removed"
+            ? t`Claude plan token removed`
+            : t`Claude plan tokens removed`
           : count === 1
-            ? "Key removed before sending"
-            : "Keys removed before sending";
+            ? t`Key removed before sending`
+            : t`Keys removed before sending`;
+  const taken =
+    count === 1
+      ? within === "message"
+        ? t`A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.`
+        : t`A key in your answer was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.`
+      : within === "message"
+        ? t`${count} keys in your message were taken out before anything was sent. Move one to Keys, or discard them.`
+        : t`${count} keys in your answer were taken out before anything was sent. Move one to Keys, or discard them.`;
   return (
     <section
       className={clsx("key-found", className)}
-      aria-label={open ? "Key safeguard" : undefined}
+      aria-label={open ? t`Key safeguard` : undefined}
       aria-hidden={open ? undefined : true}
     >
       <Banner
@@ -71,16 +80,16 @@ export function KeyFound({
                 <Button
                   size="sm"
                   variant="primary"
-                  disabledReason={receive ? undefined : "Open Keys to store a key safely."}
+                  disabledReason={receive ? undefined : t`Open Keys to store a key safely.`}
                   onClick={() => {
                     if (receive) guard.move(index, receive);
                   }}
                 >
-                  Move to Keys
+                  {t`Move to Keys`}
                 </Button>
               )}
               <Button size="sm" onClick={guard.remove}>
-                {!found ? "Edit message" : count === 1 ? "Discard key" : "Discard keys"}
+                {!found ? t`Edit message` : count === 1 ? t`Discard key` : t`Discard keys`}
               </Button>
             </>
           )
@@ -90,14 +99,12 @@ export function KeyFound({
           <div className="key-found-text" role={open ? "alert" : undefined} id={noticeId}>
             <p>
               {notice.kind === "overflow"
-                ? "It was too long to check for keys. Paste keys straight into Keys."
+                ? t`It was too long to check for keys. Paste keys straight into Keys.`
                 : notice.kind === "transfer_failed"
-                  ? "Open Keys and paste it again."
+                  ? t`Open Keys and paste it again.`
                   : onlyPlanTokens
                     ? CLAUDE_PLAN_REFUSAL
-                    : count === 1
-                      ? `A key in your ${within} was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.`
-                      : `${count} keys in your ${within} were taken out before anything was sent. Move one to Keys, or discard them.`}
+                    : taken}
             </p>
             {choosing && planToken && <p>{CLAUDE_PLAN_REFUSAL}</p>}
           </div>
@@ -105,15 +112,15 @@ export function KeyFound({
         {notice && choosing && (
           <div className="key-found-choice">
             <Select
-              aria-label="Key to move"
+              aria-label={t`Key to move`}
               value={String(index)}
               onValueChange={(value) => setChoice({ notice, index: Number(value) })}
               items={notice.candidates.map((candidate, i) => ({
                 value: String(i),
-                label: `${candidate.hint} · character ${candidate.start + 1}`,
+                label: t`${candidate.hint} · character ${candidate.start + 1}`,
               }))}
             />
-            <p>Moving one key discards the others.</p>
+            <p>{t`Moving one key discards the others.`}</p>
           </div>
         )}
       </Banner>

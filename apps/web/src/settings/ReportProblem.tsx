@@ -6,6 +6,8 @@ import type {
   ReportsOverview,
   SentReport,
 } from "../../../../packages/protocol/src/reports.ts";
+import { count } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import { ApiError } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
@@ -34,54 +36,58 @@ type Step =
   | { kind: "sent"; sent: SentReport };
 
 const kb = (bytes: number) => `${Math.max(0.1, bytes / 1024).toFixed(1)} KB`;
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const SHOWN_SENT = 10;
 const STATUS: Record<ReportStatus, string> = {
-  new: "Received",
-  investigating: "Being looked at",
-  fixed: "Fixed",
-  wontfix: "Closed",
+  new: tr("Received"),
+  investigating: tr("Being looked at"),
+  fixed: tr("Fixed"),
+  wontfix: tr("Closed"),
 };
 
 // What the review lists before the full text: one line for each part of the report.
 function contents(bundle: ReportBundle): [string, string][] {
   const failed = bundle.doctor?.filter((check) => !check.ok).length ?? 0;
   const browsers = bundle.computers.filter((c) => c.browser?.state === "failed").length;
+  const tasks = bundle.tasks.length;
   return [
-    ["Summary", bundle.summary],
-    ["Your words", bundle.message ?? "None"],
+    [t`Summary`, bundle.summary],
+    [t`Your words`, bundle.message ?? t`None`],
     [
       "localDot",
       `${bundle.app.version} · ${bundle.host.os} ${bundle.host.release} · ${bundle.host.arch}`,
     ],
     [
-      "Checks",
+      t`Checks`,
       bundle.doctor
         ? failed
-          ? `${failed} of ${bundle.doctor.length} failed`
-          : `All ${bundle.doctor.length} passed`
-        : "Not run",
+          ? t`${failed} of ${bundle.doctor.length} failed`
+          : t`All ${bundle.doctor.length} passed`
+        : t`Not run`,
     ],
     [
-      "Computers",
-      `${plural(bundle.computers.length, "computer", "computers")}${browsers ? ` · web browser failed` : ""}`,
+      t`Computers`,
+      [count(bundle.computers.length, "computer", "computers"), browsers && t`web browser failed`]
+        .filter(Boolean)
+        .join(" · "),
     ],
     [
-      "Recent tasks",
-      bundle.tasks.length
-        ? `${plural(bundle.tasks.length, "task", "tasks")}: how each ended and why, nothing you or dot wrote`
-        : "None",
+      t`Recent tasks`,
+      tasks === 0
+        ? t`None`
+        : tasks === 1
+          ? t`${tasks} task: how each ended and why, nothing you or dot wrote`
+          : t`${tasks} tasks: how each ended and why, nothing you or dot wrote`,
     ],
     [
-      "Logs",
+      t`Logs`,
       bundle.logs.length
         ? bundle.logs
             .map(
               (log) =>
-                `${log.name.split("/").at(-1)} · ${plural(log.lines.length, "line", "lines")}`,
+                `${log.name.split("/").at(-1)} · ${count(log.lines.length, "line", "lines")}`,
             )
             .join(", ")
-        : "None",
+        : t`None`,
     ],
   ];
 }
@@ -112,7 +118,7 @@ export function ReportProblem({ report }: { report: ReportControl }) {
     let live = true;
     readReports(api).then(
       (value) => live && setOverview(value),
-      () => live && setLoadError("Your reports couldn't load. Close Settings and open it again."),
+      () => live && setLoadError(t`Your reports couldn't load. Close Settings and open it again.`),
     );
     return () => {
       live = false;
@@ -144,7 +150,7 @@ export function ReportProblem({ report }: { report: ReportControl }) {
       setStep({
         kind: "write",
         busy: false,
-        error: reportProblem(failure, "The report couldn't be put together. Try again."),
+        error: reportProblem(failure, t`The report couldn't be put together. Try again.`),
       });
     }
   };
@@ -163,7 +169,7 @@ export function ReportProblem({ report }: { report: ReportControl }) {
         busy: false,
         error: reportProblem(
           failure,
-          "The report couldn't be sent. Check the internet connection and try again.",
+          t`The report couldn't be sent. Check the internet connection and try again.`,
         ),
       });
     }
@@ -173,21 +179,22 @@ export function ReportProblem({ report }: { report: ReportControl }) {
     try {
       setOverview(await allowReports(api, enabled));
     } catch {
-      setLoadError("That change couldn't be saved. Try again.");
+      setLoadError(t`That change couldn't be saved. Try again.`);
     } finally {
       setSaving(false);
     }
   };
 
+  const copyId = t`Copy ID`;
+  const copiedWord = t`Copied`;
   return (
     <>
       <p className="settings-lede">
-        Something not working? Send a report so the localDot team can see what went wrong. You see
-        everything in it before it goes.
+        {t`Something not working? Send a report so the localDot team can see what went wrong. You see everything in it before it goes.`}
       </p>
       {!overview.enabled ? (
         <GroupNote>
-          Problem reports are off for this localDot. Turn them on below to send one.
+          {t`Problem reports are off for this localDot. Turn them on below to send one.`}
         </GroupNote>
       ) : step.kind === "sent" ? (
         <div className="settings-report">
@@ -195,7 +202,7 @@ export function ReportProblem({ report }: { report: ReportControl }) {
             <GroupRow
               leading={<IconTile icon="check" />}
               label={<span className="settings-report-id">{step.sent.id}</span>}
-              detail="Report sent. Quote this ID when you ask for help."
+              detail={t`Report sent. Quote this ID when you ask for help.`}
               trailing={
                 <Button
                   size="sm"
@@ -204,34 +211,31 @@ export function ReportProblem({ report }: { report: ReportControl }) {
                     void navigator.clipboard.writeText(step.sent.id).then(() => setCopied(true))
                   }
                 >
-                  <StableText
-                    choices={["Copy ID", "Copied"]}
-                    value={copied ? "Copied" : "Copy ID"}
-                  />
+                  <StableText choices={[copyId, copiedWord]} value={copied ? copiedWord : copyId} />
                 </Button>
               }
             />
           </Group>
           <div className="settings-report-actions">
             <Button variant="quiet" onClick={() => setStep({ kind: "write", busy: false })}>
-              Report another problem
+              {t`Report another problem`}
             </Button>
           </div>
         </div>
       ) : step.kind === "review" ? (
         <div className="settings-report">
           <div>
-            <GroupHead title="What will be sent" aside={`${kb(step.draft.bytes)} compressed`} />
+            <GroupHead title={t`What will be sent`} aside={t`${kb(step.draft.bytes)} compressed`} />
             <Group>
               {contents(step.draft.bundle).map(([label, value]) => (
                 <GroupRow key={label} label={label} detail={value} />
               ))}
             </Group>
             <GroupNote>
-              Keys, sign-in links, emails, addresses and your user and computer names are removed.
+              {t`Keys, sign-in links, emails, addresses and your user and computer names are removed.`}
             </GroupNote>
           </div>
-          <Disclosure summary="Everything that will be sent" className="settings-report-all">
+          <Disclosure summary={t`Everything that will be sent`} className="settings-report-all">
             <pre className="settings-well settings-report-text">
               {JSON.stringify(step.draft.bundle, null, 2)}
             </pre>
@@ -239,10 +243,10 @@ export function ReportProblem({ report }: { report: ReportControl }) {
           <div className="settings-report-actions">
             <Button
               variant="quiet"
-              disabledReason={step.busy ? "Sending…" : undefined}
+              disabledReason={step.busy ? t`Sending…` : undefined}
               onClick={() => setStep({ kind: "write", busy: false })}
             >
-              Back
+              {t`Back`}
             </Button>
             <Button
               variant="primary"
@@ -250,7 +254,7 @@ export function ReportProblem({ report }: { report: ReportControl }) {
               busy={step.busy}
               onClick={() => void send(step.draft)}
             >
-              Send report
+              {t`Send report`}
             </Button>
           </div>
           {step.error && <GroupNote role="alert">{step.error}</GroupNote>}
@@ -261,25 +265,25 @@ export function ReportProblem({ report }: { report: ReportControl }) {
             <Group>
               <GroupRow
                 leading={<IconTile icon="circle-alert" />}
-                label="About this problem"
+                label={t`About this problem`}
                 detail={about.title}
                 trailing={
                   <Button variant="quiet" size="sm" onClick={report.clear}>
-                    Remove
+                    {t`Remove`}
                   </Button>
                 }
               />
             </Group>
           )}
           <Field
-            label="What happened?"
-            description="Optional: what you were doing and what went wrong."
+            label={t`What happened?`}
+            description={t`Optional: what you were doing and what went wrong.`}
           >
             <TextArea
               value={message}
               maxLength={2000}
               maxRows={8}
-              placeholder="The task stopped after it opened the booking page."
+              placeholder={t`The task stopped after it opened the booking page.`}
               onChange={(event) => setMessage(event.target.value)}
             />
           </Field>
@@ -287,25 +291,24 @@ export function ReportProblem({ report }: { report: ReportControl }) {
             <Group>
               <Checkbox
                 className="ui-group-row"
-                label="Include what you asked dot to do"
-                description="Your request for this task, with keys and emails removed."
+                label={t`Include what you asked dot to do`}
+                description={t`Your request for this task, with keys and emails removed.`}
                 checked={includeRequest}
                 onCheckedChange={setIncludeRequest}
               />
             </Group>
           )}
           <GroupNote>
-            A report holds localDot's version, its checks, your computer's state, how recent tasks
-            ended and the last lines of its logs. Never your messages, screenshots or files.
+            {t`A report holds localDot's version, its checks, your computer's state, how recent tasks ended and the last lines of its logs. Never your messages, screenshots or files.`}
           </GroupNote>
           <div className="settings-report-actions">
             {step.busy && (
               <span className="settings-report-hint" role="status">
-                Running localDot's checks. This can take half a minute.
+                {t`Running localDot's checks. This can take half a minute.`}
               </span>
             )}
             <Button variant="primary" busy={step.busy} onClick={() => void review()}>
-              Review report
+              {t`Review report`}
             </Button>
           </div>
           {step.error && <GroupNote role="alert">{step.error}</GroupNote>}
@@ -313,7 +316,7 @@ export function ReportProblem({ report }: { report: ReportControl }) {
       )}
       {overview.sent.length > 0 && (
         <div>
-          <GroupHead title="Reports you sent" />
+          <GroupHead title={t`Reports you sent`} />
           <Group>
             {overview.sent.slice(0, SHOWN_SENT).map((sent) => (
               <SentRow
@@ -329,17 +332,17 @@ export function ReportProblem({ report }: { report: ReportControl }) {
               />
             ))}
           </Group>
-          <GroupNote>Reports are kept for 180 days, or until you delete them.</GroupNote>
+          <GroupNote>{t`Reports are kept for 180 days, or until you delete them.`}</GroupNote>
         </div>
       )}
       <div>
         <Group>
           <Switch
             className="ui-group-row"
-            label="Allow problem reports"
-            description="Off stops this localDot sending any, from here or from the command line."
+            label={t`Allow problem reports`}
+            description={t`Off stops this localDot sending any, from here or from the command line.`}
             checked={overview.enabled}
-            disabledReason={saving ? "Saving…" : undefined}
+            disabledReason={saving ? t`Saving…` : undefined}
             onCheckedChange={(on) => void allow(on)}
           />
         </Group>
@@ -367,7 +370,7 @@ function SentRow({
       (value) => live && setState(STATUS[value.status]),
       (failure) =>
         live &&
-        setState(failure instanceof ApiError && failure.status === 404 ? "No longer kept" : ""),
+        setState(failure instanceof ApiError && failure.status === 404 ? t`No longer kept` : ""),
     );
     return () => {
       live = false;
@@ -380,7 +383,7 @@ function SentRow({
       await deleteSent(report.api, sent.id);
       onDeleted();
     } catch {
-      setState("Couldn't delete. Try again.");
+      setState(t`Couldn't delete. Try again.`);
     } finally {
       setBusy(false);
     }
@@ -397,23 +400,23 @@ function SentRow({
             variant="quiet"
             size="sm"
             busy={busy}
-            aria-label={`Delete ${sent.id}`}
+            aria-label={t`Delete ${sent.id}`}
             onClick={() => setConfirming(true)}
           >
-            Delete
+            {t`Delete`}
           </Button>
           <Dialog
             open={confirming}
             onClose={() => setConfirming(false)}
             anchor={trigger}
-            title={`Delete ${sent.id}?`}
-            description="The report and its diagnostics are removed from the localDot team's service. You can't undo this."
+            title={t`Delete ${sent.id}?`}
+            description={t`The report and its diagnostics are removed from the localDot team's service. You can't undo this.`}
           >
             <Button variant="quiet" onClick={() => setConfirming(false)}>
-              Keep
+              {t`Keep`}
             </Button>
             <Button variant="destructive" onClick={() => void remove()}>
-              Delete report
+              {t`Delete report`}
             </Button>
           </Dialog>
         </>

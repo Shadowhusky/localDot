@@ -1,5 +1,6 @@
 import type { AgentRoleChoice } from "@localdot/protocol";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n/index.ts";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { providerName } from "../settings/choices.ts";
 import type { ModelNames } from "../settings/model-names.ts";
@@ -53,7 +54,7 @@ const TASK = /^\/api\/(?:agent\/)?(?:sessions|conversations)\/([^/]*)/;
 function modelName(grant: GuestGrant, provider: string, model: string): string {
   const named = grant.names?.find((each) => each.provider === provider && each.model === model);
   if (named) return named.name;
-  return model === "default" ? `Default · ${providerName(provider)}` : model;
+  return model === "default" ? t`Default · ${providerName(provider)}` : model;
 }
 
 export function guestModelName(grant: GuestGrant, choice: AgentRoleChoice): string {

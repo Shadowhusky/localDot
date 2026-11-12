@@ -1,14 +1,15 @@
 import { clsx } from "clsx";
+import { tr } from "../i18n/index.ts";
 
 export type GlyphState = "todo" | "doing" | "done" | "failed" | "skipped" | "ask";
 
 const LABELS: Record<GlyphState, string> = {
-  todo: "Not started",
-  doing: "In progress",
-  done: "Done",
-  failed: "Failed",
-  skipped: "Skipped",
-  ask: "Needs you",
+  todo: tr("Not started"),
+  doing: tr("In progress"),
+  done: tr("Done"),
+  failed: tr("Failed"),
+  skipped: tr("Skipped"),
+  ask: tr("Needs you"),
 };
 
 export interface StatusGlyphProps {

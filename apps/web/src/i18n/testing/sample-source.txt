@@ -1,0 +1,11 @@
+const a = t`Saved ${files.length} files to ${place ?? `x`}`;
+const b = tr("Done");
+const c = rich`Open ${<b>{name}</b>} now`;
+const d = count(items.filter((x) => x.ok).length, "item", "items");
+const e = format`not ${this}`; const f = obj.t`skip`;
+const g = t`Line one\nand \`two\``;
+// a comment about `at` and `t` is no message
+/* nor `t` here */
+const h = text.replace(/['`"]/g, "");
+const i = tc("button", "Reset");
+const j = <p><Kbd keys={["Escape"]} /> {t`close`}</p>;

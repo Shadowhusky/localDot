@@ -14,6 +14,7 @@ import {
 import { flushSync } from "react-dom";
 import { ApprovalValue } from "../agent/ApprovalValue.tsx";
 import { type DecisionScope, decisionWords, defaultScope, ONCE } from "../copy/decision.ts";
+import { t } from "../i18n/index.ts";
 import type { TaskTimer } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
@@ -88,7 +89,7 @@ export function ApprovalDecision({
     return (
       <div className="decision" data-layout={layout}>
         <p className="decision-invalid" role="alert">
-          This decision could not be verified. Check task status again.
+          {t`This decision could not be verified. Check task status again.`}
         </p>
       </div>
     );
@@ -100,7 +101,7 @@ export function ApprovalDecision({
   const canApprove = canDecide && !unread;
   const scopes = data.always?.length
     ? [
-        { value: ONCE, label: "Just this once" },
+        { value: ONCE, label: t`Just this once` },
         ...data.always.map((option) => ({ value: option.scope, label: option.label })),
       ]
     : [];
@@ -118,8 +119,8 @@ export function ApprovalDecision({
       if (!abort.signal.aborted)
         setLoadError(
           error instanceof Mismatch
-            ? "The full text could not be checked. Deny, or take control."
-            : "The full text could not be loaded. Try again, deny, or take control.",
+            ? t`The full text could not be checked. Deny, or take control.`
+            : t`The full text could not be loaded. Try again, deny, or take control.`,
         );
     } finally {
       if (!abort.signal.aborted) setLoading(false);
@@ -153,14 +154,14 @@ export function ApprovalDecision({
   // Pending, the pressed button spins and the other waits; otherwise each says why it can't act.
   const held = (decision: ApprovalAnswer["decision"]) =>
     expired
-      ? "This decision has expired"
+      ? t`This decision has expired`
       : pending
         ? chosen === decision
           ? undefined
-          : "Wait a moment"
+          : t`Wait a moment`
         : enabled
           ? undefined
-          : "Reconnecting to the task…";
+          : t`Reconnecting to the task…`;
   const sheet = layout === "sheet";
   return (
     <section
@@ -202,12 +203,12 @@ export function ApprovalDecision({
                         variant="quiet"
                         size="sm"
                         className="decision-show-all"
-                        aria-label={`Show all of ${label}`}
+                        aria-label={t`Show all of ${label}`}
                         busy={loading}
-                        disabledReason={expired ? "This decision has expired" : undefined}
+                        disabledReason={expired ? t`This decision has expired` : undefined}
                         onClick={() => void showAll(index, text, length)}
                       >
-                        Show all
+                        {t`Show all`}
                       </Button>
                     )}
                   </dd>
@@ -233,7 +234,7 @@ export function ApprovalDecision({
             appearance="inline"
             size="sm"
             className="decision-scope"
-            aria-label="How long this answer lasts"
+            aria-label={t`How long this answer lasts`}
             value={scope}
             items={scopes}
             onValueChange={(next) => setScope(next as DecisionScope)}
@@ -254,7 +255,7 @@ export function ApprovalDecision({
             variant={data.actionClass === "delete" ? "destructive" : "primary"}
             size={sheet ? "xxl" : "md"}
             disabledReason={
-              held("approve") ?? (unread ? "Show all of the text before you approve." : undefined)
+              held("approve") ?? (unread ? t`Show all of the text before you approve.` : undefined)
             }
             busy={pending && chosen === "approve"}
             onClick={() => decide("approve")}
@@ -270,22 +271,21 @@ export function ApprovalDecision({
 function UploadFacts({ upload }: { upload: NonNullable<ApprovalCard["upload"]> }) {
   const count = upload.files.length;
   return (
-    <section className="decision-upload" aria-label="Files to upload">
+    <section className="decision-upload" aria-label={t`Files to upload`}>
       <p className="decision-upload-to">
         <span>
-          Page receiving files
-          {upload.destination.embedded ? " · embedded frame" : ""}
+          {upload.destination.embedded
+            ? t`Page receiving files · embedded frame`
+            : t`Page receiving files`}
         </span>
         <strong>
           <bdi>{upload.destination.origin}</bdi>
         </strong>
       </p>
       <p className="decision-upload-note">
-        This page will be able to read these files and may send them elsewhere.
+        {t`This page will be able to read these files and may send them elsewhere.`}
       </p>
-      <h3>
-        {count} file{count === 1 ? "" : "s"} to upload
-      </h3>
+      <h3>{count === 1 ? t`${count} file to upload` : t`${count} files to upload`}</h3>
       <ul className="decision-files">
         {upload.files.map((file) => (
           <li key={file.path}>
@@ -293,13 +293,13 @@ function UploadFacts({ upload }: { upload: NonNullable<ApprovalCard["upload"]> }
               <strong>
                 <bdi>{file.name}</bdi>
               </strong>
-              <span className="num">{file.bytes.toLocaleString()} bytes</span>
+              <span className="num">{t`${file.bytes.toLocaleString()} bytes`}</span>
             </div>
             <p className="decision-file-path">
               <bdi>{file.path}</bdi>
             </p>
-            <Disclosure summary="File checksum">
-              <p className="decision-file-digest">SHA-256: {file.sha256}</p>
+            <Disclosure summary={t`File checksum`}>
+              <p className="decision-file-digest">{t`SHA-256: ${file.sha256}`}</p>
             </Disclosure>
           </li>
         ))}
@@ -384,12 +384,12 @@ export function DecisionSheet({ label, elapsedS, timer, children }: DecisionShee
       {/* A kit button keeps its own position, so a box holds this one in the corner. */}
       <span className="decision-sheet-expand">
         <IconButton
-          label={full ? "Collapse question" : "Expand question"}
+          label={full ? t`Collapse question` : t`Expand question`}
           icon={full ? "chevron-down" : "chevron-up"}
           size={32}
           aria-expanded={full}
           onClick={() => setExpanded(!full)}
-          disabledReason={keyboard > 0 ? "Expanded while typing" : undefined}
+          disabledReason={keyboard > 0 ? t`Expanded while typing` : undefined}
         />
       </span>
       <div className="decision-sheet-content">{children}</div>

@@ -1,6 +1,7 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
 import { presetOf } from "../copy/autonomy.ts";
 import { dollars } from "../copy/format.ts";
+import { t, tr } from "../i18n/index.ts";
 import type { DeviceState } from "../notify/this-device.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { SpendingDraft } from "./settings-form.ts";
@@ -29,20 +30,20 @@ export interface SectionInfo {
 
 // Sidebar and phone index order; each section has its own page.
 export const SECTIONS: readonly SectionInfo[] = [
-  { id: "dot", title: "Your dot", icon: "smile" },
-  { id: "models", title: "Models", icon: "cpu" },
-  { id: "autonomy", title: "Autonomy", icon: "sliders-horizontal" },
-  { id: "rules", title: "Always allow", icon: "check-circle" },
-  { id: "spending", title: "Spending", icon: "chart" },
-  { id: "appearance", title: "Appearance", icon: "contrast" },
-  { id: "voice", title: "Voice", icon: "mic" },
-  { id: "notifications", title: "Notifications", icon: "bell" },
-  { id: "knowledge", title: "What dot knows", icon: "book" },
-  { id: "accounts", title: "Accounts", icon: "globe" },
-  { id: "connectors", title: "Connectors", icon: "plug" },
-  { id: "keys", title: "Keys", icon: "key-round" },
-  { id: "computer", title: "Your computer", icon: "power" },
-  { id: "report", title: "Report a problem", icon: "circle-alert" },
+  { id: "dot", title: tr("Your dot"), icon: "smile" },
+  { id: "models", title: tr("Models"), icon: "cpu" },
+  { id: "autonomy", title: tr("Autonomy"), icon: "sliders-horizontal" },
+  { id: "rules", title: tr("Always allow"), icon: "check-circle" },
+  { id: "spending", title: tr("Spending"), icon: "chart" },
+  { id: "appearance", title: tr("Appearance"), icon: "contrast" },
+  { id: "voice", title: tr("Voice"), icon: "mic" },
+  { id: "notifications", title: tr("Notifications"), icon: "bell" },
+  { id: "knowledge", title: tr("What dot knows"), icon: "book" },
+  { id: "accounts", title: tr("Accounts"), icon: "globe" },
+  { id: "connectors", title: tr("Connectors"), icon: "plug" },
+  { id: "keys", title: tr("Keys"), icon: "key-round" },
+  { id: "computer", title: tr("Your computer"), icon: "power" },
+  { id: "report", title: tr("Report a problem"), icon: "circle-alert" },
 ];
 
 export const sectionTitle = (id: SettingsSection) =>
@@ -67,18 +68,20 @@ export function sectionInView(
 // What a phone's list of sections says at each row's end.
 export function autonomyValue(policy: AutonomyPolicy | undefined): string {
   if (!policy) return "";
-  return presetOf(policy)?.label ?? "Your own mix";
+  return presetOf(policy)?.label ?? t`Your own mix`;
 }
 
 export function spendingValue(spending: SpendingDraft | undefined, plan: boolean): string {
-  if (plan) return "Your plan";
-  if (!spending?.on) return "No limit";
-  const amount = (text: string, per: string) => {
+  if (plan) return t`Your plan`;
+  if (!spending?.on) return t`No limit`;
+  const amount = (text: string) => {
     const value = Number(text);
-    return text && Number.isFinite(value) ? `${dollars(value)} a ${per}` : null;
+    return text && Number.isFinite(value) ? dollars(value) : null;
   };
-  const limits = [amount(spending.task, "task"), amount(spending.day, "day")].filter(Boolean);
-  return limits.length ? limits.join(" · ") : "No limit";
+  const task = amount(spending.task);
+  const day = amount(spending.day);
+  const limits = [task && t`${task} a task`, day && t`${day} a day`].filter(Boolean);
+  return limits.length ? limits.join(" · ") : t`No limit`;
 }
 
 export function countValue(count: number | undefined): string {
@@ -86,8 +89,8 @@ export function countValue(count: number | undefined): string {
 }
 
 export function notificationsValue(device: DeviceState | null | undefined): string {
-  if (device?.kind === "on") return "On";
-  if (device?.kind === "off") return "Off";
-  if (device?.kind === "needs-home-screen") return "Set up";
+  if (device?.kind === "on") return t`On`;
+  if (device?.kind === "off") return t`Off`;
+  if (device?.kind === "needs-home-screen") return t`Set up`;
   return "";
 }

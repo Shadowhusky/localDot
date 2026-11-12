@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { count } from "../../copy/format.ts";
+import { t } from "../../i18n/index.ts";
 import { Button } from "../../ui/Button.tsx";
 import { Disclosure } from "../../ui/Disclosure.tsx";
 
@@ -78,7 +79,11 @@ function JsonNode({
         </span>
       }
       meta={
-        open ? undefined : count(entries.length, list ? "item" : "key", list ? "items" : "keys")
+        open
+          ? undefined
+          : list
+            ? count(entries.length, "item", "items")
+            : count(entries.length, "key", "keys")
       }
     >
       {seen && (
@@ -88,7 +93,7 @@ function JsonNode({
           ))}
           {entries.length > shown && (
             <Button variant="quiet" size="sm" onClick={() => setShown((n) => n + PAGE)}>
-              Show {Math.min(PAGE, entries.length - shown)} more
+              {t`Show ${Math.min(PAGE, entries.length - shown)} more`}
             </Button>
           )}
         </div>

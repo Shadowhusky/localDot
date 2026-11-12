@@ -26,6 +26,7 @@ import {
   DONE_TOOL_DESCRIPTION,
   HUMAN_INPUT_GUIDANCE,
   REQUEST_FIX_DESCRIPTION,
+  TAKEOVER_LAST,
 } from "@localdot/protocol/guidance";
 import { z } from "zod";
 
@@ -116,7 +117,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +
     "(such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in " +
     "the note what they need to do. For passwords and codes, ask with ask_user fields instead. Hand over a " +
-    "sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
+    "sign-in on the web browser screen: one made in the desktop's Chromium isn't kept. " +
+    TAKEOVER_LAST,
   request_fix: REQUEST_FIX_DESCRIPTION,
   remember:
     'Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping), or append to today\'s daily notes (file "notes"), which are searchable but not loaded into later tasks.',

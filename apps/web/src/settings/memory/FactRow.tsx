@@ -1,5 +1,6 @@
 import { keyLikePresent, type MemoryEntry } from "@localdot/protocol";
 import { type ReactNode, useRef, useState } from "react";
+import { t } from "../../i18n/index.ts";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../../ui/Menu.tsx";
@@ -9,12 +10,12 @@ import { TextArea } from "../../ui/TextArea.tsx";
 import { MemoryRequestError } from "./memory-api.ts";
 import { sourceLine } from "./memory-copy.ts";
 
-export const KEY_SHAPED = "That looks like a key. Add it in Keys instead.";
+export const KEY_SHAPED = t`That looks like a key. Add it in Keys instead.`;
 
 export function factProblem(text: string): string | undefined {
-  if (!text.trim()) return "Write the fact first.";
-  if (text.length > 1000) return "Keep a fact under 1,000 characters.";
-  if (text.includes("<!--") || text.includes("-->")) return "Leave out <!-- and -->.";
+  if (!text.trim()) return t`Write the fact first.`;
+  if (text.length > 1000) return t`Keep a fact under 1,000 characters.`;
+  if (text.includes("<!--") || text.includes("-->")) return t`Leave out <!-- and -->.`;
   if (keyLikePresent(text)) return KEY_SHAPED;
   return undefined;
 }
@@ -75,6 +76,7 @@ export function FactRow({
   const [busy, setBusy] = useState(false);
   const { scope, reveal } = useRevealInvalid<HTMLFormElement>();
   const source = sourceLine(entry);
+  const name = noun === "Note" ? t`Note` : t`Fact`;
   const begin = () => {
     setDraft(entry.text);
     setNote(null);
@@ -102,10 +104,12 @@ export function FactRow({
     } catch (error) {
       setNote(
         error instanceof MemoryRequestError && error.reason === "stale"
-          ? `This ${noun.toLowerCase()} changed while you were editing. Your text is kept; save again.`
+          ? noun === "Note"
+            ? t`This note changed while you were editing. Your text is kept; save again.`
+            : t`This fact changed while you were editing. Your text is kept; save again.`
           : error instanceof MemoryRequestError && error.reason === "busy"
-            ? "Memory can't change while you have control of the computer."
-            : "Couldn't reach localDot. Try again.",
+            ? t`Memory can't change while you have control of the computer.`
+            : t`Couldn't reach localDot. Try again.`,
       );
     } finally {
       setBusy(false);
@@ -124,7 +128,7 @@ export function FactRow({
           }}
         >
           <TextArea
-            aria-label={noun}
+            aria-label={name}
             aria-invalid={note ? true : undefined}
             value={draft}
             maxRows={8}
@@ -150,10 +154,10 @@ export function FactRow({
           )}
           <div className="memory-edit-actions">
             <Button variant="quiet" size="sm" onClick={end}>
-              Cancel
+              {t`Cancel`}
             </Button>
             <Button type="submit" variant="primary" size="sm" busy={busy}>
-              Save
+              {t`Save`}
             </Button>
           </div>
         </form>
@@ -173,7 +177,7 @@ export function FactRow({
           {onTogglePin && (
             <IconButton
               icon="pin"
-              label={entry.pinned ? "Stop always remembering" : "Always remember"}
+              label={entry.pinned ? t`Stop always remembering` : t`Always remember`}
               aria-pressed={entry.pinned}
               data-on={entry.pinned ? "" : undefined}
               className="memory-pin"
@@ -183,15 +187,15 @@ export function FactRow({
           <IconButton
             ref={more}
             icon="more-horizontal"
-            label={`More for this ${noun.toLowerCase()}`}
+            label={noun === "Note" ? t`More for this note` : t`More for this fact`}
             {...triggerProps("menu", menu)}
             onClick={() => setMenu(true)}
           />
         </span>
       </div>
-      <Menu open={menu} onClose={() => setMenu(false)} anchor={more} align="end" label={noun}>
-        <MenuItem onSelect={begin}>Edit</MenuItem>
-        <MenuItem onSelect={onDelete}>Delete</MenuItem>
+      <Menu open={menu} onClose={() => setMenu(false)} anchor={more} align="end" label={name}>
+        <MenuItem onSelect={begin}>{t`Edit`}</MenuItem>
+        <MenuItem onSelect={onDelete}>{t`Delete`}</MenuItem>
       </Menu>
     </li>
   );

@@ -13,6 +13,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
+import { t } from "../i18n/index.ts";
 import { Button } from "./Button.tsx";
 import { afterMotion } from "./finished.ts";
 import { canFocus, firstField, focusWithoutScroll } from "./focus.ts";
@@ -131,7 +132,7 @@ function SheetLayer({
   modal: asked,
   closeOutside = false,
   returnFocus,
-  closeLabel = "Close",
+  closeLabel = t`Close`,
   page = "main",
   back,
   footer,
@@ -441,13 +442,13 @@ function SheetLayer({
           inert={!asking}
         >
           <p id={promptId} className="ui-sheet-prompt-text">
-            Discard unsaved changes?
+            {t`Discard unsaved changes?`}
           </p>
           <div className="ui-sheet-prompt-actions">
             <Button ref={keep} variant="primary" onClick={keepEditing}>
-              Keep editing
+              {t`Keep editing`}
             </Button>
-            <Button onClick={discard}>Discard</Button>
+            <Button onClick={discard}>{t`Discard`}</Button>
           </div>
         </fieldset>
       </section>
