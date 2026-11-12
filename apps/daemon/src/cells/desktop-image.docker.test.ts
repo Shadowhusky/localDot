@@ -530,9 +530,11 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
       "-c",
       "sed -n 's,^Launcher=file://,,p' /config/.config/plank/dock1/launchers/*.dockitem | xargs ls",
     );
-    expect(launchers.trim().split("\n")).toEqual([
-      "/usr/local/share/applications/chromium.desktop",
-      ...[
+    // The web browser is the dock's one browser: the desktop's Chromium is in neither the dock nor
+    // the menus, and the label the daemon lines the browser's dock item up by counts what is there.
+    const docked = launchers.trim().split("\n");
+    expect(docked).toEqual(
+      [
         "codium",
         "gimp",
         "libreoffice-calc",
@@ -542,7 +544,24 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
         "thunar",
         "xfce4-terminal",
       ].map((app) => `/usr/share/applications/${app}.desktop`),
-    ]);
+    );
+    expect(
+      outputOf(
+        C2,
+        "grep",
+        "-x",
+        "NoDisplay=true",
+        "/usr/local/share/applications/chromium.desktop",
+      ),
+    ).toContain("NoDisplay=true");
+    const label = docker(
+      "image",
+      "inspect",
+      "--format",
+      '{{index .Config.Labels "localdot.dock-items"}}',
+      DESKTOP_IMAGE,
+    );
+    expect(Number(label.trim())).toBe(docked.length);
   });
 
   // WhiteSur draws the Apple logo for its start-here icons and its GNOME Shell activities button.
