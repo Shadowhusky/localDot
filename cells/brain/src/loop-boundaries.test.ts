@@ -10,6 +10,7 @@ import {
   call,
   calls,
   fakeApi,
+  restored,
   say,
   scriptedModel,
   type Turn,
@@ -83,7 +84,7 @@ function setup(
     api: f.api,
     sink,
     models: { main: main.model, ...(fast ? { fast: fast.model } : {}) },
-    history: opts.history ?? [],
+    history: opts.history ?? restored(),
     storedTranscript: opts.stored,
     hooks: opts.hooks,
     sleep: opts.sleep ?? (async () => {}),
@@ -751,6 +752,32 @@ describe("a resumed task's harness context", () => {
       expect(JSON.stringify(next.main.prompts[0])).toContain(`Follow-up ${seq}`);
       expect(JSON.stringify(next.main.prompts[0]).split("Office conversions")).toHaveLength(2);
     }
+  });
+});
+
+// Nov 12: the automatic dot pick restarted "login to bilibili" 0.9 s in, before the brain had saved
+// anything. Told it had been restarted and to continue its saved task, dot went looking for one, found
+// "Log in to Douyin" among the user's recent tasks and offered only that.
+describe("a brain restarted before it saved anything", () => {
+  const RESTARTED = "localDot restarted your process";
+  it("starts the task afresh, with no word of a saved task", async () => {
+    const t = setup([done()], { boot: { task: "login to bilibili" }, history: [] });
+    expect(await t.run()).toBe("done");
+    const first = JSON.stringify(t.main.prompts[0]);
+    expect(first).toContain("login to bilibili");
+    expect(first).not.toContain(RESTARTED);
+    expect(first).not.toContain("saved task");
+  });
+  it("still says so to one that has a conversation to come back to", async () => {
+    const f = fakeApi();
+    const sessionId = ulid();
+    const before = setup([done()], { f, boot: { sessionId, resume: false } });
+    expect(await before.run()).toBe("done");
+    const stored = await f.api.transcript();
+    const history = await fromTranscript(stored, async () => undefined);
+    const after = setup([done()], { f, stored, history, boot: { sessionId } });
+    expect(await after.run()).toBe("done");
+    expect(JSON.stringify(after.main.prompts[0])).toContain(RESTARTED);
   });
 });
 

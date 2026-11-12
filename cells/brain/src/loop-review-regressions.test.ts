@@ -9,6 +9,7 @@ import {
   call,
   calls,
   fakeApi,
+  restored,
   say,
   scriptedModel,
 } from "./testing/scripted.ts";
@@ -139,7 +140,7 @@ it("discards an after-tool hook result once its active run is cancelled", async 
     api: f.api,
     sink,
     models: { main: main.model },
-    history: [],
+    history: restored(),
     hooks: {
       afterToolCall: async () => {
         entered();

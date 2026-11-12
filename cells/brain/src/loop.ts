@@ -351,7 +351,10 @@ export class Agent {
   async #loop(signal: AbortSignal): Promise<RunOutcome> {
     const { boot, sink } = this.#o;
     signal.throwIfAborted();
-    if (!boot.resume) {
+    // A restart before anything was saved, as a change of dot right after the start makes, has no
+    // conversation to come back to: the task starts afresh, and nothing tells dot of a saved one.
+    const resumed = boot.resume && this.#history.length > 0;
+    if (!resumed) {
       const earlier = earlierRecord(
         boot.earlier ?? [],
         Math.min(EARLIER_CHARS, Math.floor(this.#binding().contextTokens * EARLIER_SHARE * 3.5)),
@@ -381,7 +384,7 @@ export class Agent {
     // Fetch and durably include every waiting boot message before any model can finish the task.
     const bootInbox = await this.#drain(0, signal, true);
     if (bootInbox === "stopped") return "stopped";
-    if (boot.resume)
+    if (resumed)
       this.#history.push({
         role: "user",
         content: bootInbox.some((i) => i.kind !== "resume")
