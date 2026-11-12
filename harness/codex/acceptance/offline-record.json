@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "d2ff222b91c04cdd4a9d2f533628a3919d22de55266b874dd485589fbe5ca3fc",
+  "inputSha256": "1b78a3070f077d1d311bc96f03d301dd6c4c26ad2c517764747a74cabb39cec8",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -471,7 +471,7 @@
     "apps/daemon/src/cells/computer-update.docker.test.ts": "1d39379d25ea6f8c67af2d7b13935f4497692663e2dc065d8cc9580d4656fc69",
     "apps/daemon/src/cells/computer-update.test.ts": "826554a67f238b903101c099cb18171a5fa6dfbe4d51520ea20af4597d5bd56e",
     "apps/daemon/src/cells/computer-update.ts": "f74acf18da7f6202f93122ecbf4a27a58520516eacd32a88414a8f2b9d7de90c",
-    "apps/daemon/src/cells/desktop-image.docker.test.ts": "3fc646b8629dc2b1f57248866e56fee045f1cf75b28219862ed54c8aa85292d3",
+    "apps/daemon/src/cells/desktop-image.docker.test.ts": "a6ce82205f2501c361c3c1f34b0cf4750b867000b01f3c503ec7e7b3d7729012",
     "apps/daemon/src/cells/desktop-keyd-files.docker.test.ts": "487ac10cf8189fbf636e8d127a98932944804144ea05e6fb1569234ff5ae2bf6",
     "apps/daemon/src/cells/desktop-preview.docker.test.ts": "96f64b6341c78718c4cd94bd51624c398b0aad5f170e994b8f20ed1b77809a1d",
     "apps/daemon/src/cells/desktopd-cdp.docker.test.ts": "898cb5669536d6e4c3552fd0a3ebeb95668a05fe602c4a123675882524405630",
@@ -1302,7 +1302,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "f6c1f7a9a74e81c1d88f65a7471675d2c155d04d253757d1bb65b88341bdf67c",
+  "reportSha256": "9049fcdf2ea3585381f6cecb93bbbbb04200ce68844250534fe131e69572d575",
   "exit": {
     "code": 0,
     "signal": null
