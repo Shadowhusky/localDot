@@ -422,6 +422,8 @@
     /* A long name, the widest thing here, starts at the gutter, less its button's padding and border. */
     padding: 0 calc(var(--_gutter) - var(--spacing) / 2 - 1px);
     overflow-x: auto;
+    /* Sideways only: what pokes out of a pin, such as its press area, never scrolls it up and down. */
+    overflow-y: hidden;
     scrollbar-width: none;
     touch-action: pan-x pan-y;
   }

@@ -218,6 +218,7 @@
     margin: 0 calc(var(--spacing) * -2);
     padding: var(--spacing) var(--_gutter) calc(var(--spacing) * 2);
     overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
     list-style: none;
     scroll-padding-inline: var(--_gutter);

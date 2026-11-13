@@ -134,7 +134,13 @@ test("many tags keep to a row, the rest found under All tags", async ({ page, ui
   const row = filters(page);
   await expect(row.getByRole("button", { name: /^All tags · \d+$/ })).toBeVisible();
   expect(await row.locator(".conversations-tag .ui-tag-dot").count()).toBeLessThanOrEqual(8);
-  expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  // Nothing in the row scrolls, sideways or up and down.
+  expect(
+    await row.evaluate(
+      (element) =>
+        element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight,
+    ),
+  ).toBe(true);
   await row.getByRole("button", { name: /^All tags/ }).click();
   const all = page.getByRole("dialog", { name: "All tags" });
   await all.getByRole("textbox", { name: "Find a tag" }).fill("Topic 12");

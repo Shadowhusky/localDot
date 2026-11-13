@@ -51,6 +51,7 @@ import { isMenuKey, Menu, MenuItem } from "../ui/Menu.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { type SwipeAction, SwipeActions } from "../ui/SwipeActions.tsx";
+import { sidewaysWheel } from "../ui/sideways-wheel.ts";
 import { TextField } from "../ui/TextField.tsx";
 import { useEscape } from "../ui/useEscape.ts";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
@@ -671,7 +672,7 @@ export function PhoneList({
         />
         <div ref={body} className="phone-list-body" aria-busy={recent.loading || matches.pending}>
           {pinned.length > 0 && (
-            <ul className="phone-rail" aria-label={t`Pinned`}>
+            <ul ref={sidewaysWheel} className="phone-rail" aria-label={t`Pinned`}>
               {pinned.map((row) => (
                 <RailItem
                   key={row.entry.sessionId}
