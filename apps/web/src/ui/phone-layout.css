@@ -665,7 +665,8 @@
     box-shadow: 0 0 0 2px var(--color-void);
   }
 
-  /* What the row's gestures do, for the keyboard and a screen reader: drawn only with the focus. */
+  /* What the row's gestures do, for the keyboard and a screen reader: drawn with the focus, and
+     for a pointer over the row. Not for a menu a right click opened: the pointer has left the row. */
   .phone-row-actions.ui-icon-button {
     position: absolute;
     z-index: 2;
@@ -676,10 +677,21 @@
     pointer-events: none;
   }
 
-  .phone-row-actions.ui-icon-button:focus-visible,
-  .phone-row-actions.ui-icon-button[aria-expanded="true"] {
+  .phone-row-actions.ui-icon-button:focus-visible {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  @media (hover: hover) {
+    .phone-row-wrap:hover > .phone-row-actions.ui-icon-button {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Its room is kept at the row's end, so it sits beside the date, never over it. */
+    .phone-row > .ui-button-content {
+      padding-inline-end: calc(var(--spacing) * 6);
+    }
   }
 
   .phone-row-renaming {
@@ -690,6 +702,7 @@
      the foot. */
   .phone-list-screen[data-selecting] .phone-row > .ui-button-content {
     grid-template-columns: 48px minmax(0, 1fr) auto;
+    padding-inline-end: 0;
   }
 
   .phone-row-check {
@@ -1951,6 +1964,11 @@
   .phone-details-row > .ui-button-content {
     width: 100%;
     gap: calc(var(--spacing) * 3);
+  }
+
+  .phone-details-tags {
+    padding: calc(var(--spacing) * 3) 0;
+    box-shadow: inset 0 -1px 0 var(--color-hairline);
   }
 
   .phone-details-row small {

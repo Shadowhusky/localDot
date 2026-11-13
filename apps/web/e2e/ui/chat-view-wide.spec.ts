@@ -242,6 +242,27 @@ test.describe("a desktop", () => {
     await expect(page.getByRole("menuitem", { name: /Pin|Unpin/ })).toBeVisible();
   });
 
+  // A row's More shows for the pointer over the row, beside its date, never over it; a menu opened
+  // with a right click doesn't bring it up.
+  test("a row's More shows under the pointer, clear of the date", async ({ page, ui }) => {
+    await ui.open("conversations");
+    await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+    const wrap = page.locator(".phone-row-wrap").nth(1);
+    const more = wrap.locator(".phone-row-actions");
+    await expect(more).toHaveCSS("opacity", "0");
+    await wrap.hover();
+    await expect(more).toHaveCSS("opacity", "1");
+    const button = await more.boundingBox();
+    const date = await wrap.locator(".phone-row-time").boundingBox();
+    if (!button || !date) throw new Error("Nothing to measure");
+    expect(date.x + date.width).toBeLessThanOrEqual(button.x);
+    await wrap.locator(".phone-row").click({ button: "right" });
+    const menu = page.getByRole("menu").last();
+    await expect(menu).toBeVisible();
+    await menu.getByRole("menuitem").first().hover();
+    await expect(more).toHaveCSS("opacity", "0");
+  });
+
   test("Replay comes up with the top bar, and back", async ({ page, ui }) => {
     await ui.open("done");
     await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
