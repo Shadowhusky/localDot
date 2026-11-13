@@ -3601,6 +3601,36 @@ function requestApproval(
       .catch((e) => effects.push(`approval-error:${String(e)}`));
     return;
   }
+  if (kind === "key-place") {
+    // A key going to a place no saved key goes to, from a task that has read outside words: the
+    // credentials tool's own card, through the real authorization.
+    session.taint.add("app", "api.sunoapi.org");
+    void authorizePrepared(ctx, {
+      tool: "credentials",
+      input: { key: "sunoapi", goes_to: ["api.sunoapi.org"] },
+      target: null,
+      facts: {
+        operation: "connector",
+        connector: {
+          app: "Keys",
+          tool: "Add a key",
+          exposed: "keys__add",
+          actionClass: "network",
+          asks: true,
+          once: true,
+          host: "api.sunoapi.org",
+          card: {
+            title: "Send a new key to a new place",
+            why: "This task has read things from outside, which can steer it. Check you expected a key to go here before you add one.",
+          },
+        },
+      },
+      revalidate: async () => true,
+    })
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
   if (kind === "purpose") {
     // A tainted task opening an unrelated site with data in its address, through the real purpose
     // check, its judge finding the site unrelated.
@@ -3999,13 +4029,25 @@ function readsMessage(owned: AgentSession) {
   }, replyMs);
 }
 // A quick choice, asked as dot's ask_user tool asks one.
-function ask(): string | undefined {
+function ask(long = false): string | undefined {
   if (!session) return "no session";
-  const question = {
-    question: "Which report format should I use?",
-    options: ["Markdown", "Plain text", "PDF"],
-    recommended: 0,
-  };
+  // ?long=1: a question as dot asked it on Nov 13, whose choices are each a sentence.
+  const question = long
+    ? {
+        question:
+          "I found your SunoAPI key and tried it, but it was refused before it left this computer: it is saved as a plain secret with no web address attached. How should the track be made?",
+        options: [
+          "Paste the key one more time, this time tied to api.sunoapi.org",
+          "Make the track with ElevenLabs instead (works right now, about 3 tries of credit)",
+          "Skip the music for now, camera fix only",
+        ],
+        recommended: 0,
+      }
+    : {
+        question: "Which report format should I use?",
+        options: ["Markdown", "Plain text", "PDF"],
+        recommended: 0,
+      };
   const owned = session;
   void session
     .askFields(
@@ -4691,7 +4733,7 @@ routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/actions", () => reply(liveActions()));
 routes.post("/__qa/ask", (c) => {
   const form = c.req.query("fields");
-  return reply(form ? askForm(form) : ask());
+  return reply(form ? askForm(form) : ask(c.req.query("long") === "1"));
 });
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),

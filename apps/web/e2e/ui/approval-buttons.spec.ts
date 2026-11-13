@@ -70,3 +70,26 @@ test("a phone's decision keeps its answers above the message field as it grows",
     })
     .toBeLessThanOrEqual(0);
 });
+
+// A key going to a new place is the task's own decision, though a network one: Nov 13 its card
+// stayed on "Reconnecting to the task…" for good, as the page filed it with an app's connection
+// while the daemon kept it as the task's decision, and the two never agreed.
+test("a key going to a new place can be allowed, and says what it is", async ({ page, ui }) => {
+  const fixture = await ui.open("running");
+  await page.request.post(`${fixture.origin}/__qa/approval?kind=key-place`);
+  await expect(page.getByText("Send a new key to a new place").first()).toBeVisible();
+  const allow = page.getByRole("button", { name: "Allow", exact: true });
+  await expect(allow).toBeVisible();
+  await expect(allow).not.toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByText(/trying to reach a new server/)).toHaveCount(0);
+  await allow.click();
+  await expect
+    .poll(async () => {
+      const state = (await (await page.request.get(`${fixture.origin}/__qa/state`)).json()) as {
+        effects: string[];
+      };
+      return state.effects;
+    })
+    .toContain("approval:approve");
+  await expect(allow).toHaveCount(0);
+});

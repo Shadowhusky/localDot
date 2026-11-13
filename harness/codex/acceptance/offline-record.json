@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "4700120021a9ed6877a1ee55207cf3f3355bac1ab41e17986f7ec735da56b896",
+  "inputSha256": "087b350663d3e5a771cc17a06d9cb2390939a45e44cd4826564e4087ce07ec59",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -29,8 +29,8 @@
     "apps/daemon/src/agent/claude-code/account.ts": "765d9974ebac46f4a2820e4dcd6efc7424b62102e2e93e1e2df52af74d77cd3d",
     "apps/daemon/src/agent/claude-code/answer.test.ts": "aa96c44faaf6e0791335943e09f5f83810054561a2e889afba578f8bcedcac12",
     "apps/daemon/src/agent/claude-code/answer.ts": "7e3eac6e30366d0cbecfca9093ff373d12ab7a16a249c07a7a86115a47bf230c",
-    "apps/daemon/src/agent/claude-code/driver.test.ts": "67b6ed66eb8e5674bd00ee700afd360fb1cde050c1f4396595ea6aa09d86d4ae",
-    "apps/daemon/src/agent/claude-code/driver.ts": "126295592d79977e8ec3cd08adddeff73e0dbca8bfcff2b3bb8cd1a87210142e",
+    "apps/daemon/src/agent/claude-code/driver.test.ts": "15f1aacb4b496918ba1b3d3de6f6c72b814d78d1aed799af9be7392e04722a6a",
+    "apps/daemon/src/agent/claude-code/driver.ts": "fb36c5db1fed5f16c4afc231bcf25555b698d204e63f3affbcb085184acf343b",
     "apps/daemon/src/agent/claude-code/events.test.ts": "a2200b5500bad3da062b64f3dd83845bbfc55e65098a53817434389f07c63ce7",
     "apps/daemon/src/agent/claude-code/events.ts": "83f21e04c96576d45050ce794e709f24504b45e376674389ca127808c61b5070",
     "apps/daemon/src/agent/claude-code/fixtures/claude-code-2.1.314.json": "4a62ba2fc285320960673b45e10d3f0627abd588534ff24235dfa710c7198c35",
@@ -1303,7 +1303,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "2582417fc0ebc9fbab89af888a2186b90b2d731020cf2e89a65d8fd1c2c89df0",
+  "reportSha256": "53a55150e59e849f88cbeb8a81f868265a9a07569724ab82d118cca81c677bd1",
   "exit": {
     "code": 0,
     "signal": null

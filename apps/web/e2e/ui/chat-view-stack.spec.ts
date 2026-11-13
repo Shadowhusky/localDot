@@ -331,6 +331,44 @@ test.describe("minimal mode", () => {
     await expect(page.locator(".presence-frame[data-shown]")).toBeVisible();
   });
 
+  // Hidden, dot still says what it is doing now, as its line did beside it: not just Working.
+  test("the typing bubble says dot's own line", async ({ page, ui }) => {
+    await ui.open("running");
+    const line = page.locator(".dot-strip .narration-line");
+    await expect(line).toHaveText(/\S/);
+    const said = ((await line.textContent()) ?? "").replace(/^dot: /, "").trim();
+    await page.getByRole("button", { name: "Your dot" }).click();
+    await page.getByRole("menuitem", { name: "Hide dot" }).click();
+    await expect(page.locator(".dot-typing-text")).toHaveText(said);
+  });
+
+  // The typing bubble says dot is at work: over a finished task it read as work still going on.
+  test("over a finished task, nothing types in dot's place", async ({ page, ui }) => {
+    await ui.open("done");
+    await page.getByRole("button", { name: "Your dot" }).click();
+    await page.getByRole("menuitem", { name: "Hide dot" }).click();
+    await expect(page.locator(".dot-strip .narrator-dot")).toHaveCount(0);
+    await expect(page.locator(".dot-strip")).not.toHaveAttribute("data-typing");
+    await expect(page.locator(".dot-typing")).toHaveCount(0);
+  });
+
+  // Without dot's line under the picture, the steps kept to its edge, their heading under the
+  // shadow the picture casts.
+  test("with dot hidden, the computer's steps keep clear of the picture", async ({ page, ui }) => {
+    await ui.open("running");
+    await page.getByRole("button", { name: "Your dot" }).click();
+    await page.getByRole("menuitem", { name: "Hide dot" }).click();
+    await page.getByRole("button", { name: /^Open the computer/ }).click();
+    await expect(stack(page)).toHaveAttribute("data-level", "2");
+    const heading = page.locator(".phone-latest-steps > h3");
+    await expect(heading).toBeVisible();
+    await ui.settle();
+    const picture = await page.locator(".phone-picture-room").boundingBox();
+    const title = await heading.boundingBox();
+    if (!picture || !title) throw new Error("Nothing to measure");
+    expect(title.y - (picture.y + picture.height)).toBeGreaterThanOrEqual(24);
+  });
+
   test("under reduced motion the dot just goes", async ({ page, ui }) => {
     await ui.open("running");
     await page.getByRole("button", { name: "Your dot" }).click();
@@ -363,6 +401,25 @@ test.describe("keeping working", () => {
     await page.getByRole("button", { name: "More", exact: true }).first().click();
     await page.getByRole("menuitem", { name: "Replay" }).click();
     await expect(page).toHaveURL(/replay=/);
+  });
+
+  // The details hold what the row's menu does, beside the conversation's own places.
+  test("the name's details hold what the row's menu does", async ({ page, ui }) => {
+    await ui.open("done");
+    await page.getByRole("button", { name: /Conversation details$/ }).click();
+    const sheet = page.getByRole("dialog", { name: "Details" });
+    for (const name of ["Rename", "Change look", "Pin to top", "Archive", "Delete conversation"])
+      await expect(sheet.getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(
+      sheet.getByRole("group", { name: "Tag" }).or(sheet.getByRole("radiogroup", { name: "Tag" })),
+    ).toBeVisible();
+    await sheet.getByRole("button", { name: "Pin to top", exact: true }).click();
+    await page.getByRole("button", { name: /Conversation details$/ }).click();
+    await expect(sheet.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
+    await sheet.getByRole("button", { name: "Delete conversation", exact: true }).click();
+    await expect(
+      page.getByRole("alertdialog", { name: "Delete this conversation?" }),
+    ).toBeVisible();
   });
 
   test("the name opens the details, which rename it", async ({ page, ui }) => {

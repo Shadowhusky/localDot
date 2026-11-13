@@ -112,6 +112,33 @@ for (const appearance of ["graphite", "daylight"] as const)
         await expect(tiles(page)).toHaveCount(9);
       });
 
+      test("its rail button and the rail's conversations both lead back out of it", async ({
+        page,
+        ui,
+      }) => {
+        test.skip(isPhone(page), "A phone's overview has its own Back");
+        await ui.open("overview");
+        const rail = page.getByRole("navigation", { name: "Conversations" });
+        const shown = rail.getByRole("button", { name: /^Sample · monthly report/ });
+        await expect(shown).toHaveAttribute("aria-current", "true");
+        await openFromRail(page);
+        // Pressed again, Overview goes back to the conversation that was on show.
+        await rail.getByRole("button", { name: "Overview", exact: true }).click();
+        await expect(overview(page)).toBeHidden();
+        await expect(page.locator(".stage-col")).toBeVisible();
+        await expect(shown).toHaveAttribute("aria-current", "true");
+        // A conversation in the rail opens itself, and Back comes back to the overview.
+        await openFromRail(page);
+        await rail.getByRole("button", { name: /^Breakout, starring dot/ }).click();
+        await expect(overview(page)).toBeHidden();
+        await expect(rail.getByRole("button", { name: /^Breakout, starring dot/ })).toHaveAttribute(
+          "aria-current",
+          "true",
+        );
+        await page.goBack();
+        await expect(overview(page)).toBeVisible();
+      });
+
       test("the palette opens it, and it reflows to the window at each size", async ({
         page,
         ui,

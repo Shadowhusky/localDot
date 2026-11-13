@@ -62,6 +62,9 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "model.retry",
   "subscription.usage",
 ]);
+const isConnection = (card: Pick<ApprovalCard, "actionClass">, kind: string) =>
+  card.actionClass === "network" && kind === "permission";
+
 function put<T>(
   old: ReadonlyMap<string, T>,
   id: string,
@@ -202,12 +205,14 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       };
       break;
     case "approval.request": {
-      const { kind: _kind, target: _target, preview, ...card } = e.data;
+      const { kind, target: _target, preview, ...card } = e.data;
       const parsed = ApprovalCard.parse({ ...card, fields: preview.fields });
-      next =
-        parsed.actionClass === "network"
-          ? { ...next, connection: parsed }
-          : { ...next, approval: parsed };
+      // Filed where the daemon's status keeps it: an app's connection comes from its own queue,
+      // as a permission; a network decision of the task's own (a key going to a new place) is the
+      // task's approval. Filed apart, the two never agreed and the card could not be answered.
+      next = isConnection(parsed, kind)
+        ? { ...next, connection: parsed }
+        : { ...next, approval: parsed };
       break;
     }
     case "approval.resolve": {
@@ -230,7 +235,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
                 card.approvalId,
                 {
                   approvalId: card.approvalId,
-                  title: decisionWords(card).title,
+                  title: decisionWords(card, { connection: card === model.connection }).title,
                   seq: e.seq,
                   time: ulidTime(e.id),
                   at: e.t,

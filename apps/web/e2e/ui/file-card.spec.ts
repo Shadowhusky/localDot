@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, runAt, test } from "./harness.ts";
+import { PANEL_NAME } from "../../src/shell/panel-name.ts";
+import { expect, isPhone, runAt, test } from "./harness.ts";
 
 // A file that can't be shown where it is shows its card: its name, kind and size, and what can be
 // done with it. One the browser can play shows its player.
@@ -170,4 +171,34 @@ test("a file that failed says so, with room for all it can do on a phone", async
   expect(report.name).toBeGreaterThan(100);
   await card.scrollIntoViewIfNeeded();
   await shoot(page, "failed");
+});
+
+// The Workspace's list of files has the room for Open beside each one, as the chat's has; the name
+// keeps enough to read.
+test("each file the Workspace lists has its Open, and room for its name", async ({ page, ui }) => {
+  const fixture = await ui.open("running");
+  await handed(page, fixture.origin);
+  if (isPhone(page)) await page.getByRole("button", { name: PANEL_NAME, exact: true }).click();
+  else
+    await page.locator(".rail-chat").getByRole("radio", { name: PANEL_NAME, exact: true }).click();
+  await page.getByRole("tab", { name: /^Files/ }).click();
+  const list = page.getByRole("list", { name: "Handed over" });
+  const row = list.getByRole("listitem", { name: "walkthrough.mp4" });
+  const openButton = row.getByRole("button", { name: /^Open/ });
+  await expect(openButton).toBeVisible();
+  const report = await row.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return {
+      name: (node.querySelector(".ui-file-name") as HTMLElement).getBoundingClientRect().width,
+      outside: [...node.querySelectorAll("button")].filter((button) => {
+        const place = button.getBoundingClientRect();
+        return place.width > 0 && (place.left < box.left - 0.5 || place.right > box.right + 0.5);
+      }).length,
+    };
+  });
+  expect(report.outside).toBe(0);
+  expect(report.name).toBeGreaterThan(90);
+  await shoot(page, "workspace-files");
+  await openButton.click();
+  await expect(page.locator(".file-viewer video, .file-viewer audio").first()).toBeVisible();
 });

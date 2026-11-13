@@ -146,6 +146,7 @@ export function ConversationMenuItems({
   stop,
   onStop,
   onChatSettings,
+  onSettings,
 }: {
   dotHidden: boolean;
   look: readonly Wearable[];
@@ -170,6 +171,8 @@ export function ConversationMenuItems({
   onStop(): void;
   // A shared link's own settings, in Settings' place.
   onChatSettings?(): void;
+  // This localDot's Settings: the computer pill over the list has them, and the list may be away.
+  onSettings?(): void;
 }) {
   // A shared link's guest has what the link allows: no workspace, organizing or other views.
   const guest = useGuest();
@@ -245,6 +248,11 @@ export function ConversationMenuItems({
       {!guest && (
         <MenuItem icon="layout-grid" onSelect={switchView.run}>
           {switchView.label}
+        </MenuItem>
+      )}
+      {!guest && onSettings && (
+        <MenuItem icon="settings" onSelect={onSettings}>
+          {t`Settings`}
         </MenuItem>
       )}
       {stop && (

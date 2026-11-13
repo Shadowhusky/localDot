@@ -55,8 +55,15 @@ export function useAttention(
     let opened = false;
     const doc = opts.doc ?? document;
     const win = opts.win ?? window;
+    const worker = typeof navigator === "undefined" ? undefined : navigator.serviceWorker;
     const page: PageNotificationHost = opts.page ?? {
       ...(typeof Notification === "undefined" ? {} : { Notification }),
+      ...(worker?.controller
+        ? {
+            show: async (title: string, options: NotificationOptions) =>
+              (await worker.ready).showNotification(title, options),
+          }
+        : {}),
       focus: () => window.focus(),
       openSession: (id) => open.current(id),
     };

@@ -52,4 +52,27 @@ describe("task links", () => {
     consumer?.({ targetURL: `http://127.0.0.1:4750/#session=${SESSION}` });
     expect(open).toHaveBeenCalledOnce();
   });
+
+  it("tells the worker whether this window is the installed app's", async () => {
+    for (const standalone of [true, false]) {
+      const worker = new EventTarget();
+      const stop = listenForSessionLinks(
+        vi.fn(),
+        window,
+        worker as unknown as ServiceWorkerContainer,
+        undefined,
+        () => standalone,
+      );
+      const { port1, port2 } = new MessageChannel();
+      const answer = new Promise((resolve) => {
+        port1.onmessage = (event) => resolve(event.data);
+      });
+      worker.dispatchEvent(
+        new MessageEvent("message", { data: { type: "display-mode" }, ports: [port2] }),
+      );
+      expect(await answer).toEqual({ standalone });
+      port1.close();
+      stop();
+    }
+  });
 });

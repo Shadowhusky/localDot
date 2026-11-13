@@ -130,6 +130,19 @@ for (const [name, texts] of [
     }
   });
 
+// The open card is part of the panel, edged as its other cards are: a popover's long shadow fell
+// over the tabs above it and the steps below it.
+test("the open plan casts no long shadow over the tabs or the steps", async ({ page, ui }) => {
+  const card = await openPlan(page, ui, SHORT);
+  const shadows = await card.evaluate((node) =>
+    [...getComputedStyle(node).boxShadow.matchAll(/(-?[\d.]+)px (-?[\d.]+)px ([\d.]+)px/g)].map(
+      ([, x, y, blur]) => Math.abs(Number(y)) + Number(blur),
+    ),
+  );
+  expect(shadows.length).toBeGreaterThan(0);
+  expect(Math.max(...shadows)).toBeLessThanOrEqual(4);
+});
+
 test("a long plan scrolls inside its card, which stays in the panel", async ({ page, ui }) => {
   const card = await openPlan(page, ui, LONG);
   const report = await expectWholeCard(card);

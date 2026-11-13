@@ -296,6 +296,7 @@
     position: absolute;
     inset: 0;
     display: block;
+    container: phone-list / inline-size;
   }
 
   .phone-list-scroll {
@@ -317,6 +318,14 @@
     display: grid;
     grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
     justify-items: start;
+  }
+
+  /* A list too narrow for the computer's name and the buttons at its end keeps the buttons: the
+     pill keeps its icon and its menu. */
+  @container phone-list (width < 340px) {
+    .phone-list-bar-row .phone-pill-name {
+      display: none;
+    }
   }
 
   .phone-pill.ui-button {
@@ -656,7 +665,8 @@
     box-shadow: 0 0 0 2px var(--color-void);
   }
 
-  /* What the row's gestures do, for the keyboard and a screen reader: drawn only with the focus. */
+  /* What the row's gestures do, for the keyboard and a screen reader: drawn with the focus, and
+     for a pointer over the row. Not for a menu a right click opened: the pointer has left the row. */
   .phone-row-actions.ui-icon-button {
     position: absolute;
     z-index: 2;
@@ -667,10 +677,21 @@
     pointer-events: none;
   }
 
-  .phone-row-actions.ui-icon-button:focus-visible,
-  .phone-row-actions.ui-icon-button[aria-expanded="true"] {
+  .phone-row-actions.ui-icon-button:focus-visible {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  @media (hover: hover) {
+    .phone-row-wrap:hover > .phone-row-actions.ui-icon-button {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Its room is kept at the row's end, so it sits beside the date, never over it. */
+    .phone-row > .ui-button-content {
+      padding-inline-end: calc(var(--spacing) * 6);
+    }
   }
 
   .phone-row-renaming {
@@ -681,6 +702,7 @@
      the foot. */
   .phone-list-screen[data-selecting] .phone-row > .ui-button-content {
     grid-template-columns: 48px minmax(0, 1fr) auto;
+    padding-inline-end: 0;
   }
 
   .phone-row-check {
@@ -777,8 +799,9 @@
       calc(var(--spacing) * 3 + var(--_safe-left));
   }
 
+  /* A run's bubbles stand apart, a little, as a messenger's do. */
   .phone-thread .thread-row {
-    margin-top: calc(var(--spacing) / 2);
+    margin-top: calc(var(--spacing) * 1.5);
   }
 
   .phone-thread .thread-row[data-group-start] {
@@ -867,6 +890,21 @@
     width: 100%;
   }
 
+  /* A new message grows out of its speaker's side as it eases in, as a messenger's does. */
+  .phone-thread .thread-row[data-new] {
+    transform-origin: left bottom;
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      translate var(--dur-default) var(--ease-spring),
+      scale var(--dur-default) var(--ease-spring);
+  }
+
+  @starting-style {
+    .phone-thread .thread-row[data-new]:not([data-kind="message"][data-speaker="user"]) {
+      scale: 0.96;
+    }
+  }
+
   .phone-thread .thread-bubble {
     max-width: min(86%, 560px);
     padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.25) calc(var(--spacing) * 2.5);
@@ -907,7 +945,7 @@
   }
 
   .phone-thread .result-card {
-    gap: calc(var(--spacing) * 0.75);
+    gap: calc(var(--spacing) * 1.5);
   }
 
   .phone-thread .result-summary {
@@ -987,8 +1025,15 @@
     gap: calc(var(--spacing) * 1.5);
   }
 
+  /* A choice that is a sentence wraps inside the thread rather than running off it. */
   :is(.ask-quick, .phone-thread .thread-suggestions) .ui-chip {
     position: relative;
+    height: auto;
+    max-width: 100%;
+    padding-block: calc(var(--spacing) * 2);
+    white-space: normal;
+    text-align: start;
+    overflow-wrap: anywhere;
     min-height: calc(var(--spacing) * 9.5);
     padding-inline: calc(var(--spacing) * 3.5);
     border-radius: var(--radius-full);
@@ -1073,11 +1118,19 @@
       var(--font-ui);
   }
 
+  /* Two lines at most, as dot's line beside it. */
   .dot-typing-text {
+    display: -webkit-box;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .dot-typing-time {
+    flex: none;
+    align-self: flex-end;
   }
 
   .dot-typing-dots {
@@ -1552,6 +1605,11 @@
     display: none;
   }
 
+  /* With dot hidden its line is gone: the steps keep clear of the shadow the picture casts. */
+  .phone-picture-room + .phone-steps {
+    margin-top: calc(var(--spacing) * 6);
+  }
+
   .phone-latest-steps > h3 {
     margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) / 2);
     color: var(--color-fg-3);
@@ -1916,6 +1974,11 @@
     gap: calc(var(--spacing) * 3);
   }
 
+  .phone-details-tags {
+    padding: calc(var(--spacing) * 3) 0;
+    box-shadow: inset 0 -1px 0 var(--color-hairline);
+  }
+
   .phone-details-row small {
     margin-inline-start: auto;
     color: var(--color-fg-2);
@@ -1925,10 +1988,10 @@
   /* A tablet: the list beside the conversation. */
   .phone-stack[data-split] {
     --_split: clamp(300px, 38%, 368px);
-    --_reading: 760px;
+    --_reading: 960px;
   }
 
-  /* However wide the screen, a thread stays a comfortable measure, its foot under it. */
+  /* A wide screen gives the thread its room, up to a measure that still reads, its foot under it. */
   .phone-stack[data-split] :is(.thread-content, .thread-dock) {
     width: 100%;
     max-width: var(--_reading);
@@ -1975,8 +2038,15 @@
     display: none;
   }
 
-  .phone-stack[data-split] .phone-thread :is(.thread-message[data-role="dot"], .thread-bubble) {
-    max-width: min(76%, 560px);
+  /* dot's long replies, as a messenger's, take most of it; the user's bubbles a little less. */
+  .phone-stack[data-split]
+    .phone-thread
+    :is(.thread-message[data-role="dot"], .thread-row[data-kind="result"]) {
+    max-width: min(86%, 760px);
+  }
+
+  .phone-stack[data-split] .phone-thread .thread-bubble {
+    max-width: min(76%, 640px);
   }
 
   /* A phone held sideways: the picture fills the height, its controls in the margin beside it. */
@@ -2060,6 +2130,12 @@
     .phone-thread .thread-message[data-holding][data-role="dot"],
     .phone-thread .thread-message[data-holding] .thread-bubble {
       scale: 1;
+    }
+
+    @starting-style {
+      .phone-thread .thread-row[data-new]:not([data-kind="message"][data-speaker="user"]) {
+        scale: none;
+      }
     }
 
     .phone-coach,

@@ -267,3 +267,29 @@ describe("an unfolded step", () => {
     expect(within(container).getByText("npm test").tagName).toBe("CODE");
   });
 });
+
+describe("a step's time", () => {
+  // Nov 13, under the computer: a step with nothing to unfold had its time where the chevron of the
+  // others is, out of line with theirs.
+  it("keeps the chevron's room on a step with nothing to unfold", async () => {
+    const { ActivityRow } = await import("./ActivityRow.tsx");
+    const view = {
+      key: "s",
+      title: "Calling api.sunoapi.org",
+      meta: "",
+      time: "0:01",
+      state: "done" as const,
+      stateLabel: "Done",
+      testId: "step-row",
+    };
+    const { container } = render(
+      <>
+        <ActivityRow id="a" view={view as never} />
+        <ActivityRow id="b" view={view as never} onToggle={vi.fn()} />
+      </>,
+    );
+    const trailing = [...container.querySelectorAll(".activity-row-trailing")];
+    expect(trailing[0]?.lastElementChild?.className).toBe("activity-row-chevron-room");
+    expect(trailing[1]?.lastElementChild?.getAttribute("class")).toContain("activity-row-chevron");
+  });
+});

@@ -199,7 +199,7 @@ import { ChatToggle } from "./shell/ChatToggle.tsx";
 import { CoachMark } from "./shell/CoachMark.tsx";
 import { ComputerScreen } from "./shell/ComputerScreen.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
-import { ConversationDetails } from "./shell/ConversationDetails.tsx";
+import { ConversationDetails, detailActions } from "./shell/ConversationDetails.tsx";
 import { ConversationList, ConversationsButton } from "./shell/ConversationList.tsx";
 import { ConversationsBubble } from "./shell/ConversationsBubble.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
@@ -497,6 +497,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const appearance = useAppearance();
   const localDots = useLocalDots(api);
   const showDot = useShowDot();
+  const showDotNow = useRef(showDot);
+  showDotNow.current = showDot;
   const streamChoice = useStreamPreference(showToast);
   const [replayId, setReplayId] = useState<string | null>(() =>
     canReplay ? replayAddress(new URLSearchParams(window.location.search).get("replay")) : null,
@@ -1036,6 +1038,14 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     () =>
       !sheets && (
         <RowMenu label={t`More`} size={32}>
+          {!showDot.value && (
+            <>
+              <MenuItem icon="eye" onSelect={() => showDotNow.current.change(true)}>
+                {t`Show dot`}
+              </MenuItem>
+              <MenuSeparator />
+            </>
+          )}
           <MenuItem icon="search" kbd={["Mod", "K"]} onSelect={() => openPalette("actions")}>
             {t`Search actions`}
           </MenuItem>
@@ -1055,7 +1065,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           </MenuItem>
         </RowMenu>
       ),
-    [sheets, viewStyle.value, stopAll.running, stopAll.run, openPalette],
+    [sheets, viewStyle.value, stopAll.running, stopAll.run, openPalette, showDot.value],
   );
   const island = useRef<HTMLDivElement>(null);
   const toastAnchor = useRef<HTMLDivElement>(null);
@@ -1921,6 +1931,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     <ApprovalDecision
       key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
       card={approval}
+      connection={!stepApproval}
       enabled={safety.canApprove}
       pending={safety.pending === "approval"}
       onDecision={safety.answerApproval}
@@ -2081,23 +2092,27 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   // Once opened it stays, out of sight, so coming back finds it as it was left.
   const [overviewMounted, setOverviewMounted] = useState(overviewShown);
   if (overviewShown && !overviewMounted) setOverviewMounted(true);
+  // Pressed again, the rail's Overview goes back to what was on show.
   const railOverview = useMemo(
-    () => ({ open: overviewShown, onOpen: openOverview }),
-    [overviewShown, openOverview],
+    () => ({ open: overviewShown, onPress: overviewShown ? closeOverview : openOverview }),
+    [overviewShown, openOverview, closeOverview],
   );
-  // A tile opens its conversation in an entry of its own, so Back comes back to the overview.
-  const openFromOverview = useHandler((row: ConversationRow) => {
-    const id = row.entry.sessionId;
+  // A tile, or a conversation in the rail beside it, opens its conversation in an entry of its
+  // own, so Back comes back to the overview.
+  const leaveOverviewFor = (id: string, sessions?: readonly string[]) => {
     const address = new URL(window.location.href);
     address.searchParams.delete(OVERVIEW);
     if (stack) address.hash = phoneHash({ level: 1, id });
     window.history.pushState(stack ? { phone: 1 } : null, "", address);
     setOverviewOpen(false);
-    if (!stack) return pickConversation(id, row.entry.sessions);
-    takeUpConversation(id, row.entry.sessions);
+    if (!stack) return pickConversation(id, sessions);
+    takeUpConversation(id, sessions);
     nav.asked.current = id;
     nav.replace({ level: 1, id });
-  });
+  };
+  const openFromOverview = useHandler((row: ConversationRow) =>
+    leaveOverviewFor(row.entry.sessionId, row.entry.sessions),
+  );
   const conversationList = {
     api,
     current: switching ? switching.to : (viewedConversation?.id ?? currentTask),
@@ -2119,7 +2134,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   // The conversations rail, beside the stage while Watch shows on anything wider than a phone.
   const railShown = !sheets && !replayId && !full && !onboarding.open;
   const railExpanded = panels.sessions ?? railByDefault;
-  const pickFromRail = useHandler(pickConversation);
+  const pickFromRail = useHandler((id: string, sessions?: readonly string[]) =>
+    overviewShown ? leaveOverviewFor(id, sessions) : pickConversation(id, sessions),
+  );
   const newFromRail = useHandler(newConversation.run);
   const deletedFromRail = useHandler(conversationList.onDeleted);
   const expandRail = useHandler((sessions: boolean) => updatePanels({ sessions }));
@@ -2187,7 +2204,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const narration = noticed
     ? ""
     : sheets && approvalView && approval
-      ? decisionWords(approval).line
+      ? decisionWords(approval, { connection: !stepApproval }).line
       : yours && confirming
         ? CONFIRMING_LINE
         : yours && sheets
@@ -2595,6 +2612,42 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [dotMenu, setDotMenu] = useState(false);
   const [dressing, setDressing] = useState<ConversationEntry | null>(null);
+  // dot's own menu, from a press on it in either house: another dot, this conversation's look, or
+  // dot out of sight.
+  const dotMenuView = (
+    <>
+      <Menu
+        open={dotMenu}
+        onClose={() => setDotMenu(false)}
+        anchor={dotAnchor}
+        side="top"
+        align="start"
+        label={t`Your dot`}
+      >
+        <MenuItem icon="bot" onSelect={() => setChoosingDot(true)}>
+          {t`Change dot`}
+        </MenuItem>
+        {shown.entry && (
+          <MenuItem icon="smile" onSelect={() => setDressing(shown.entry ?? null)}>
+            {t`Change look`}
+          </MenuItem>
+        )}
+        <MenuItem icon="eye-off" onSelect={tuck.hide}>
+          {t`Hide dot`}
+        </MenuItem>
+      </Menu>
+      <LookChooser
+        entry={dressing}
+        anchor={dotAnchor}
+        onChange={(entry, look) => {
+          void organizeConversation(api, entry.sessionId, { look }).catch(() =>
+            showToast({ title: t`That change couldn't be saved`, tone: "danger" }),
+          );
+        }}
+        onClose={() => setDressing(null)}
+      />
+    </>
+  );
   // Going back leaves what had opened over the screen it left: Safari's own Back knows of no sheet.
   const levelShown = useRef(level);
   useEffect(() => {
@@ -2771,6 +2824,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const phoneMenu = (
     <ConversationMenuItems
       onChatSettings={guest?.grant.settings ? () => setGuestSettings(true) : undefined}
+      onSettings={() => goToSettings(null)}
       dotHidden={!showDot.value}
       look={shown.look}
       seed={shown.seed}
@@ -2897,17 +2951,18 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 dot={
                   settings.saved
                     ? {
-                        label: t`Change your dot, now ${personaName(personaOf(taskDot ?? settings.saved.persona).id)}`,
-                        open: choosingDot,
+                        label: t`Your dot`,
+                        open: dotMenu || choosingDot,
                         onPress: (trigger) => {
                           dotAnchor.current = trigger;
-                          setChoosingDot(true);
+                          setDotMenu(true);
                         },
                       }
                     : undefined
                 }
                 onHover={setOverBand}
               />
+              {dotMenuView}
               {dotChooser}
               {full && !focus && (
                 <div className="fullscreen-stream-controls">
@@ -3257,9 +3312,11 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         !viewedConversation && (
           <DotStrip
             live={!!foot && (sentThinking || !session.ended)}
+            working={sentThinking || atWork(appStatus.row)}
             hidden={!showDot.value}
             band={level < 2 && phoneBand}
-            status={level < 2 && statusWord}
+            status={level < 2 && (footLine || appStatus.label)}
+            statusTime={taskTime}
             thumb={
               holding && showDot.value && level > 0 && !switching
                 ? {
@@ -3656,37 +3713,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               {t`Bring it back any time from this menu.`}
             </CoachMark>
           )}
-          <Menu
-            open={dotMenu}
-            onClose={() => setDotMenu(false)}
-            anchor={dotAnchor}
-            side="top"
-            align="start"
-            label={t`Your dot`}
-          >
-            <MenuItem
-              icon="smile"
-              onSelect={() => {
-                if (shown.entry) setDressing(shown.entry);
-                else setChoosingDot(true);
-              }}
-            >
-              {t`Change dot`}
-            </MenuItem>
-            <MenuItem icon="eye-off" onSelect={tuck.hide}>
-              {t`Hide dot`}
-            </MenuItem>
-          </Menu>
-          <LookChooser
-            entry={dressing}
-            anchor={dotAnchor}
-            onChange={(entry, look) => {
-              void organizeConversation(api, entry.sessionId, { look }).catch(() =>
-                showToast({ title: t`That change couldn't be saved`, tone: "danger" }),
-              );
-            }}
-            onClose={() => setDressing(null)}
-          />
+          {dotMenuView}
           {dotChooser}
           <ConversationDetails
             open={detailsOpen}
@@ -3706,6 +3733,31 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                       () => showToast({ title: t`The new name couldn't be saved`, tone: "danger" }),
                     );
                   }
+                : undefined
+            }
+            actions={
+              shown.entry && !guest
+                ? detailActions(shown.entry, {
+                    working: taskWorking,
+                    organize: (change) => {
+                      const id = shown.entry?.sessionId;
+                      if (id)
+                        void organizeConversation(api, id, change).then(
+                          () => readConversationsAgain(api),
+                          () =>
+                            showToast({ title: t`That change couldn't be saved`, tone: "danger" }),
+                        );
+                    },
+                    dress: () => setDressing(shown.entry ?? null),
+                    remove: () => {
+                      if (!shown.entry) return;
+                      deleteFrom.current = document.activeElement as HTMLElement | null;
+                      setDeletingCurrent({
+                        sessionId: shown.entry.sessionId,
+                        sessions: shown.entry.sessions,
+                      });
+                    },
+                  })
                 : undefined
             }
             rows={[

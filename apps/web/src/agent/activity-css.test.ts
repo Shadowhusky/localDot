@@ -14,7 +14,6 @@ it("shows every word of a step that has nothing to unfold, with its time where t
   expect(activity).toMatch(
     /\.activity-row\[data-open\] :is\(\.activity-row-title, \.activity-row-meta\),\s*\.activity-timeline div\.activity-row-head :is\(\.activity-row-title, \.activity-row-meta\) \{\s*display: block;/,
   );
-  expect(activity).toMatch(
-    /\.activity-timeline div\.activity-row-head \.activity-row-time \{\s*margin-inline-end: calc\(var\(--spacing\) \* 5\);/,
-  );
+  // Every list's step keeps the chevron's room, not only Activity's.
+  expect(activity).toMatch(/\.activity-row-chevron-room \{\s*flex: none;\s*width: 12px;/);
 });

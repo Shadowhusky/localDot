@@ -6,12 +6,16 @@ import "../ui/phone-layout.css";
 export interface DotStripProps {
   // dot at work stays at the foot while the thread scrolls; at rest it scrolls with the thread.
   live: boolean;
+  // dot is working now, not waiting on the user or done: what the typing bubble says.
+  working: boolean;
   // Minimal mode: dot has gone into the ⋯ menu.
   hidden: boolean;
   // dot and its one sentence.
   band: ReactNode;
-  // What dot is doing, said in a typing bubble while dot itself is hidden.
+  // What dot is doing, said in a typing bubble while dot itself is hidden: its own line.
   status?: ReactNode;
+  // How long it has run, after what the bubble says.
+  statusTime?: ReactNode;
   // This task holds the computer: its picture, a tap from the computer screen.
   thumb?: {
     light: "dot" | "you" | "none";
@@ -25,8 +29,17 @@ export interface DotStripProps {
 
 // The foot of the thread: one dot, one sentence and, while this task has it, the computer. With dot
 // hidden, a task at work still shows it is going on, as a messenger shows the other side typing.
-export function DotStrip({ live, hidden, band, status, thumb, time }: DotStripProps) {
-  const typing = hidden && live && !!status;
+export function DotStrip({
+  live,
+  working,
+  hidden,
+  band,
+  status,
+  statusTime,
+  thumb,
+  time,
+}: DotStripProps) {
+  const typing = hidden && live && working && !!status;
   const away = hidden && !typing;
   return (
     <div
@@ -45,6 +58,7 @@ export function DotStrip({ live, hidden, band, status, thumb, time }: DotStripPr
                 <i />
               </span>
               <span className="dot-typing-text">{status}</span>
+              {statusTime && <span className="dot-typing-time num">{statusTime}</span>}
             </div>
           ) : (
             band

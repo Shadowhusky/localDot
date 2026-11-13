@@ -55,7 +55,9 @@ test.describe("a desktop", () => {
       if (!chat) throw new Error("No conversation");
       const field = await page.getByPlaceholder("Message dot").boundingBox();
       const content = await page.locator(".phone-thread .thread-content").boundingBox();
-      expect(content?.width).toBeLessThanOrEqual(760);
+      // A wide window gives the thread room, up to a measure that still reads.
+      expect(content?.width).toBeLessThanOrEqual(960);
+      expect(content?.width).toBeGreaterThanOrEqual(Math.min(960, chat.width - 48));
       expect((field?.x ?? 0) + (field?.width ?? 0)).toBeLessThanOrEqual(chat.x + chat.width);
       await ui.settle();
       await page.screenshot({ path: test.info().outputPath("thread.png") });
@@ -73,6 +75,88 @@ test.describe("a desktop", () => {
       await expect(stack).not.toHaveAttribute("data-level", "2");
     });
   }
+
+  // Nov 13, a window 786 px wide: the list's New conversation button ran off its edge, a choice
+  // longer than the thread ran off the window and pushed dot's bubbles with it, and bubbles of a
+  // run sat with no gap between them, a replay's row against the files above it.
+  test("a narrow window keeps the list's buttons, dot's choices and its bubbles in reach, apart", async ({
+    page,
+    ui,
+  }) => {
+    await page.setViewportSize({ width: 786, height: 935 });
+    const fixture = await ui.open("done");
+    await page.request.post(`${fixture.origin}/__qa/say?text=Thanks.%20Asking%20for%20your%20key.`);
+    await page.request.post(`${fixture.origin}/__qa/ask?long=1`);
+    const chip = page.locator(".ask-quick .ui-chip").filter({ hasText: "ElevenLabs" });
+    await expect(chip).toBeVisible();
+    await ui.settle();
+    const chat = await page.locator(".phone-chat").boundingBox();
+    const list = await page.locator(".phone-list").boundingBox();
+    if (!chat || !list) throw new Error("Nothing to measure");
+    const inside = (box: { x: number; width: number } | null, room: { x: number; width: number }) =>
+      !!box && box.x >= room.x - 1 && box.x + box.width <= room.x + room.width + 1;
+    for (const name of ["Select", "Overview", "New conversation"]) {
+      const button = page.locator(".phone-list-bar-end").getByRole("button", { name, exact: true });
+      expect(inside(await button.boundingBox(), list), name).toBe(true);
+    }
+    for (const element of await page
+      .locator(".phone-thread :is(.ask-quick .ui-chip, .thread-message[data-role='dot'])")
+      .all())
+      expect(inside(await element.boundingBox(), chat), (await element.textContent()) ?? "").toBe(
+        true,
+      );
+    // Apart: a run's bubbles, and a replay's row from what is above and below it.
+    const gaps = await page.locator(".phone-thread .thread-content").evaluate((content) => {
+      const parts = [
+        ...content.querySelectorAll<HTMLElement>(
+          ".thread-message[data-role='dot'], .result-card > *, .thread-question-text",
+        ),
+      ].map((element) => element.getBoundingClientRect());
+      const out: number[] = [];
+      for (let n = 1; n < parts.length; n++) {
+        const above = parts[n - 1],
+          below = parts[n];
+        if (above && below && below.top >= above.bottom - 1) out.push(below.top - above.bottom);
+      }
+      return out;
+    });
+    expect(gaps.length).toBeGreaterThan(2);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(6);
+    await page.screenshot({ path: test.info().outputPath("narrow.png") });
+  });
+
+  // With the list put away, the computer pill and its Settings go with it: the conversation's ⋯
+  // has them too.
+  test("the conversation's ⋯ opens Settings, with the list put away", async ({ page, ui }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await ui.open("done");
+    await page.locator(".phone-chat-bar").getByRole("button").first().click();
+    await expect(page.locator(".phone-stack")).toHaveAttribute("data-list-hidden");
+    await page.getByRole("button", { name: "More", exact: true }).first().click();
+    await page.getByRole("menuitem", { name: "Settings" }).click();
+    await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  });
+
+  // A long reply uses the room a wide window has, as a messenger's does, and a short one stays short.
+  test("a long reply takes the room a wide window gives it", async ({ page, ui }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const fixture = await ui.open("running");
+    const words = "The totals line up with the sheet once the returns are taken off each month, ";
+    await page.request.post(
+      `${fixture.origin}/__qa/say?text=${encodeURIComponent(words.repeat(6).trim())}`,
+    );
+    const thread = page.locator(".phone-thread");
+    const long = thread
+      .locator(".thread-message[data-role='dot']")
+      .filter({ hasText: words.trim() });
+    await expect(long).toBeVisible();
+    const column = await thread.locator(".thread-content").boundingBox();
+    const box = await long.boundingBox();
+    if (!column || !box) throw new Error("Nothing to measure");
+    expect(box.width).toBeGreaterThanOrEqual(700);
+    expect(box.width).toBeLessThanOrEqual(column.width * 0.86 + 1);
+    await page.screenshot({ path: test.info().outputPath("long-reply.png") });
+  });
 
   // Nov 12: with the user holding the web browser, the sign-in offer under the controls stood
   // narrower than the picture and ran off the bottom of the window, the message box with it.
@@ -156,6 +240,27 @@ test.describe("a desktop", () => {
     await page.keyboard.press("Escape");
     await page.locator(".phone-row").first().click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: /Pin|Unpin/ })).toBeVisible();
+  });
+
+  // A row's More shows for the pointer over the row, beside its date, never over it; a menu opened
+  // with a right click doesn't bring it up.
+  test("a row's More shows under the pointer, clear of the date", async ({ page, ui }) => {
+    await ui.open("conversations");
+    await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+    const wrap = page.locator(".phone-row-wrap").nth(1);
+    const more = wrap.locator(".phone-row-actions");
+    await expect(more).toHaveCSS("opacity", "0");
+    await wrap.hover();
+    await expect(more).toHaveCSS("opacity", "1");
+    const button = await more.boundingBox();
+    const date = await wrap.locator(".phone-row-time").boundingBox();
+    if (!button || !date) throw new Error("Nothing to measure");
+    expect(date.x + date.width).toBeLessThanOrEqual(button.x);
+    await wrap.locator(".phone-row").click({ button: "right" });
+    const menu = page.getByRole("menu").last();
+    await expect(menu).toBeVisible();
+    await menu.getByRole("menuitem").first().hover();
+    await expect(more).toHaveCSS("opacity", "0");
   });
 
   test("Replay comes up with the top bar, and back", async ({ page, ui }) => {
