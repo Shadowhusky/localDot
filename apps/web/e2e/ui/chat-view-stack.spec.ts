@@ -341,6 +341,23 @@ test.describe("minimal mode", () => {
     await expect(page.locator(".dot-typing")).toHaveCount(0);
   });
 
+  // Without dot's line under the picture, the steps kept to its edge, their heading under the
+  // shadow the picture casts.
+  test("with dot hidden, the computer's steps keep clear of the picture", async ({ page, ui }) => {
+    await ui.open("running");
+    await page.getByRole("button", { name: "Your dot" }).click();
+    await page.getByRole("menuitem", { name: "Hide dot" }).click();
+    await page.getByRole("button", { name: /^Open the computer/ }).click();
+    await expect(stack(page)).toHaveAttribute("data-level", "2");
+    const heading = page.locator(".phone-latest-steps > h3");
+    await expect(heading).toBeVisible();
+    await ui.settle();
+    const picture = await page.locator(".phone-picture-room").boundingBox();
+    const title = await heading.boundingBox();
+    if (!picture || !title) throw new Error("Nothing to measure");
+    expect(title.y - (picture.y + picture.height)).toBeGreaterThanOrEqual(24);
+  });
+
   test("under reduced motion the dot just goes", async ({ page, ui }) => {
     await ui.open("running");
     await page.getByRole("button", { name: "Your dot" }).click();

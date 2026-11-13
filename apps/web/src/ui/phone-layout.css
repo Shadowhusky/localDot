@@ -296,6 +296,7 @@
     position: absolute;
     inset: 0;
     display: block;
+    container: phone-list / inline-size;
   }
 
   .phone-list-scroll {
@@ -313,20 +314,18 @@
   }
 
   /* The title stays centred while it fits between the two sides, and gives way to them when not. */
-  /* The buttons at the end keep their room; the computer's name gives way first, in a narrow list. */
   .phone-list-bar-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
+    grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
     justify-items: start;
   }
 
-  .phone-list-bar-row > .phone-pill.ui-button {
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .phone-list-bar-row > .phone-pill > .ui-button-content {
-    min-width: 0;
+  /* A list too narrow for the computer's name and the buttons at its end keeps the buttons: the
+     pill keeps its icon and its menu. */
+  @container phone-list (width < 340px) {
+    .phone-list-bar-row .phone-pill-name {
+      display: none;
+    }
   }
 
   .phone-pill.ui-button {
@@ -343,7 +342,6 @@
 
   .phone-pill-name {
     display: block;
-    min-width: 0;
     max-width: 110px;
     overflow: hidden;
     white-space: nowrap;
@@ -1584,6 +1582,11 @@
 
   .phone-steps::-webkit-scrollbar {
     display: none;
+  }
+
+  /* With dot hidden its line is gone: the steps keep clear of the shadow the picture casts. */
+  .phone-picture-room + .phone-steps {
+    margin-top: calc(var(--spacing) * 6);
   }
 
   .phone-latest-steps > h3 {
