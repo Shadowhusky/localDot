@@ -203,7 +203,12 @@ for (const appearance of ["graphite", "daylight"])
       );
       await expect(sheet.getByRole("row").nth(0)).toContainText("Clean up my Downloads");
 
-      // A short swipe left rests open on More and Archive.
+      // A short swipe left rests open on More and Archive. The finger lands on the row itself, in
+      // the middle of the list, never on a heading held over it.
+      await ui.settle();
+      await row(/Clean up my Downloads/).evaluate((element) =>
+        element.scrollIntoView({ block: "center", behavior: "instant" }),
+      );
       await hand.swipe(row(/Clean up my Downloads/), -0.35);
       const faces = row(/Clean up my Downloads/).locator(".ui-swipe-faces[data-side='trailing']");
       await expect(faces).toBeVisible();

@@ -124,7 +124,12 @@ for (const appearance of ["graphite", "daylight"])
         page.getByRole("list", { name: "Pinned" }).getByRole("button", { name: /^Clean up my/ }),
       ).toBeVisible();
 
-      // A short swipe left rests open on More and Archive.
+      // A short swipe left rests open on More and Archive. The finger lands on the row itself, in
+      // the middle of the list, never on a heading held over it.
+      await ui.settle();
+      await row(/Draft a reply to the landlord/).evaluate((element) =>
+        element.scrollIntoView({ block: "center", behavior: "instant" }),
+      );
       await hand.swipe(row(/Draft a reply to the landlord/), -0.35);
       const faces = row(/Draft a reply to the landlord/).locator(
         ".ui-swipe-faces[data-side='trailing']",

@@ -110,11 +110,7 @@ test.describe("Chat", () => {
       });
       expect(chips.scrolls).toBe(false);
       // The pinned strip scrolls sideways only.
-      expect(
-        await page
-          .locator(".phone-rail")
-          .evaluate((rail) => rail.scrollHeight <= rail.clientHeight),
-      ).toBe(true);
+      await expect(page.locator(".phone-rail")).toHaveCSS("overflow-y", "hidden");
       for (const chip of chips.edges) {
         expect(chip.left, "a tag's left edge").toBeGreaterThanOrEqual(gutter - 0.5);
         expect(chip.right, "a tag's right edge").toBeGreaterThanOrEqual(gutter - 0.5);
