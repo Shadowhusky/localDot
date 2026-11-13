@@ -75,7 +75,12 @@ export function ActivityRow({
         <span className="activity-row-time num">
           {runningFrom === undefined ? view.time : <RunningTime from={runningFrom} nowMs={nowMs} />}
         </span>
-        {onToggle && <Icon name="chevron-right" size={12} className="activity-row-chevron" />}
+        {/* A step with nothing to unfold keeps the chevron's room, so its time lines up. */}
+        {onToggle ? (
+          <Icon name="chevron-right" size={12} className="activity-row-chevron" />
+        ) : (
+          <span className="activity-row-chevron-room" aria-hidden="true" />
+        )}
       </span>
     </>
   );

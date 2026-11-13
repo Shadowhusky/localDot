@@ -950,6 +950,11 @@ button.activity-usage-trigger:active {
 }
 
 /* The chevron shows where it helps: on the row a pointer is over, and on the open one. */
+.activity-row-chevron-room {
+  flex: none;
+  width: 12px;
+}
+
 .activity-row-chevron {
   color: var(--color-fg-3);
   opacity: 0;
@@ -963,10 +968,6 @@ button.activity-usage-trigger:active {
 }
 .activity-row[data-open] .activity-row-chevron {
   rotate: 90deg;
-}
-/* A step with no chevron keeps its room (12 px and the 8 px gap), so every step's time lines up. */
-.activity-timeline div.activity-row-head .activity-row-time {
-  margin-inline-end: calc(var(--spacing) * 5);
 }
 /* A group of read-only steps sits on the rows' grid: its mark in the status column, its count and
    chevron where a row has its time. */
