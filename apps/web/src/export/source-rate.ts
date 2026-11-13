@@ -1,5 +1,5 @@
 import { EncodedPacketSink } from "mediabunny";
-import { openRecording } from "../replay/recording-source.ts";
+import { openRecording } from "../replay/recording-input.ts";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
 
 const RATES = [10, 15, 24, 25, 30, 50, 60, 120];

@@ -18,6 +18,7 @@ import { providerById, sameModelOptions } from "@localdot/providers";
 import { stepsRevision } from "@localdot/stage";
 import {
   type CSSProperties,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -131,20 +132,15 @@ import { useAttention } from "./notify/useAttention.ts";
 import { useAttentionToasts } from "./notify/useAttentionToasts.ts";
 import { useOpenSession } from "./notify/useOpenSession.ts";
 import { FinishSetup } from "./onboarding/FinishSetup.tsx";
-import { Onboarding } from "./onboarding/Onboarding.tsx";
+
 import { setupSteps } from "./onboarding/setup.ts";
 import { useAppearance } from "./onboarding/useAppearance.ts";
 import { useOnboarding } from "./onboarding/useOnboarding.ts";
 import { STEP_DOT } from "./onboarding/wizard.ts";
-import { Overview } from "./overview/Overview.tsx";
+
 import { PreviewNotice } from "./previews/PreviewNotice.tsx";
 import { usePreviewsState } from "./previews/PreviewsContext.tsx";
-import {
-  PREVIEW_ROOM,
-  RECORDED_TASK,
-  type RecordedTitle,
-  ReplayView,
-} from "./replay/ReplayView.tsx";
+import { PREVIEW_ROOM, RECORDED_TASK, type RecordedTitle } from "./replay/replay-title.ts";
 import { type RoutinesControl, useProvideRoutines } from "./routines/context.ts";
 import { RoutineSheet, type RoutineTarget } from "./routines/RoutineSheet.tsx";
 import { RoutinesPanel } from "./routines/RoutinesPanel.tsx";
@@ -177,7 +173,7 @@ import { modelNames } from "./settings/model-names.ts";
 import { type ModelOption, modelGroups, optionId } from "./settings/model-options.ts";
 import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import type { ReportAbout, ReportControl } from "./settings/reports-api.ts";
-import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
+import type { SettingsSection } from "./settings/SettingsSheet.tsx";
 import { loadKeyModels } from "./settings/settings-api.ts";
 import { NAME_PROBLEM, needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { listenForSettingsLinks, type SettingsTip } from "./settings/settings-link.ts";
@@ -227,6 +223,7 @@ import {
 import { LocalDotSwitcher } from "./shell/LocalDotSwitcher.tsx";
 import { LookChooser } from "./shell/LookChooser.tsx";
 import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
+import { lazyScreen } from "./shell/lazy-screen.tsx";
 import { forgetLocalDot, useOtherLocalDots } from "./shell/localdot-handoff.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
@@ -322,6 +319,28 @@ const RETRY_CHECK_MS = 2000;
 const OPENING_NOTICE_MS = 10_000;
 // How long the task's feed may be out of touch before the island says it is reconnecting.
 const LINK_LOST_MS = 3000;
+// Screens the app opens on demand load apart from it, so the first screen comes up sooner; once it is
+// up and nothing else is going on, they load ahead, so each still opens at once.
+const SettingsSheet = lazyScreen(() =>
+  import("./settings/SettingsSheet.tsx").then((module) => module.SettingsSheet),
+);
+const Overview = lazyScreen(() =>
+  import("./overview/Overview.tsx").then((module) => module.Overview),
+);
+const ReplayView = lazyScreen(() =>
+  import("./replay/ReplayView.tsx").then((module) => module.ReplayView),
+);
+const Onboarding = lazyScreen(() =>
+  import("./onboarding/Onboarding.tsx").then((module) => module.Onboarding),
+);
+const LOAD_AHEAD_MS = 1500;
+function loadAhead(): () => void {
+  const timer = setTimeout(() => {
+    for (const screen of [SettingsSheet, Overview, ReplayView])
+      void screen.preload().catch(() => {});
+  }, LOAD_AHEAD_MS);
+  return () => clearTimeout(timer);
+}
 const FROM_WATCH = { fromWatch: true };
 const FROM_LIBRARY = { fromLibrary: true };
 // Replay's address names the recording that plays, or this for the library of recordings.
@@ -2143,6 +2162,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     sessionId: string;
     sessions: readonly string[];
   } | null>(null);
+  useEffect(loadAhead, []);
   const deleteFrom = useRef<HTMLElement | null>(null);
   const [tagging, setTagging] = useState<ConversationEntry | null>(null);
   const [sortingTags, setSortingTags] = useState(false);
@@ -3983,284 +4003,293 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         {overviewMounted && (
           <ErrorBoundary className="overview-failed">
             <main className="overview-col" aria-label={t`Overview`} hidden={!overviewShown}>
-              <Overview
-                api={api}
-                rows={overviewRows}
-                shown={overviewShown}
-                current={conversationList.current}
-                reason={conversationList.reason}
-                heading={
-                  sheets ? (
-                    <div className="overview-heading">
-                      <IconButton
-                        icon="chevron-left"
-                        size={36}
-                        label={stack ? t`Conversations` : t`Back`}
-                        onClick={closeOverview}
-                      />
-                      <h1 className="overview-heading-title">{t`Overview`}</h1>
-                    </div>
-                  ) : undefined
-                }
-                onOpen={openFromOverview}
-              />
+              <Suspense fallback={null}>
+                <Overview
+                  api={api}
+                  rows={overviewRows}
+                  shown={overviewShown}
+                  current={conversationList.current}
+                  reason={conversationList.reason}
+                  heading={
+                    sheets ? (
+                      <div className="overview-heading">
+                        <IconButton
+                          icon="chevron-left"
+                          size={36}
+                          label={stack ? t`Conversations` : t`Back`}
+                          onClick={closeOverview}
+                        />
+                        <h1 className="overview-heading-title">{t`Overview`}</h1>
+                      </div>
+                    ) : undefined
+                  }
+                  onOpen={openFromOverview}
+                />
+              </Suspense>
             </main>
           </ErrorBoundary>
         )}
         {replayId && (
           <ErrorBoundary className="replay-failed">
-            <ReplayView
-              api={api}
-              sessionId={playing}
-              onSelect={selectReplay}
-              backLabel={
-                !window.history.state?.fromWatch
-                  ? t`Replay`
-                  : stack && level === 0
-                    ? t`Conversations`
-                    : t`Conversation`
-              }
-              onLibrary={() => selectReplay(window.history.state?.fromWatch ? null : LIBRARY)}
-              onGoLive={() => selectReplay(null)}
-              liveLabel={!stack ? t`Watch` : level === 0 ? t`Conversations` : t`Conversation`}
-              modelName={names.name}
-              onDeleted={(id) => {
-                deletedRecordings.current.add(id);
-                if (id === newestReplayId) setNewestReplayId(null);
-                historyOwner.current++;
-                setHistoryRevision(historyOwner.current);
-                if (id === replayId) selectReplay(LIBRARY, "replace");
-              }}
-              onTitle={setRecorded}
-              continueTask={guest ? undefined : replayContinue}
-              exportJob={exportJob}
-              hostExports={hostExports}
-              visible={!settings.open && !safety.approval}
-              showDot={showDot.value}
-              dotLook={(id, dot) => {
-                const entry = shown.entryOf(id);
-                return entry ? conversationLook(entry, dot) : taskOutfit(id, dot);
-              }}
-            />
+            <Suspense fallback={null}>
+              <ReplayView
+                api={api}
+                sessionId={playing}
+                onSelect={selectReplay}
+                backLabel={
+                  !window.history.state?.fromWatch
+                    ? t`Replay`
+                    : stack && level === 0
+                      ? t`Conversations`
+                      : t`Conversation`
+                }
+                onLibrary={() => selectReplay(window.history.state?.fromWatch ? null : LIBRARY)}
+                onGoLive={() => selectReplay(null)}
+                liveLabel={!stack ? t`Watch` : level === 0 ? t`Conversations` : t`Conversation`}
+                modelName={names.name}
+                onDeleted={(id) => {
+                  deletedRecordings.current.add(id);
+                  if (id === newestReplayId) setNewestReplayId(null);
+                  historyOwner.current++;
+                  setHistoryRevision(historyOwner.current);
+                  if (id === replayId) selectReplay(LIBRARY, "replace");
+                }}
+                onTitle={setRecorded}
+                continueTask={guest ? undefined : replayContinue}
+                exportJob={exportJob}
+                hostExports={hostExports}
+                visible={!settings.open && !safety.approval}
+                showDot={showDot.value}
+                dotLook={(id, dot) => {
+                  const entry = shown.entryOf(id);
+                  return entry ? conversationLook(entry, dot) : taskOutfit(id, dot);
+                }}
+              />
+            </Suspense>
           </ErrorBoundary>
         )}
         <ErrorBoundary floating>
           <Held hidden={!settings.open}>
-            <SettingsSheet
-              section={settingsAt.section}
-              sectionRequest={settingsAt.request}
-              tip={settingsAt.tip}
-              appearance={appearance}
-              showDot={showDot}
-              view={{ ...viewStyle, change: setView }}
-              persona={{
-                value: settings.draft?.persona ?? settings.saved?.persona ?? DEFAULT_PERSONA,
-                onChange: settings.changePersona,
-                auto: {
-                  on: settings.draft?.autoPersona ?? settings.saved?.autoPersona === true,
-                  onChange: settings.changeAutoPersona,
-                  disabledReason: autoDotReason(
-                    settings.draft ? settings.draft.choices.main : settings.saved?.main,
-                  ),
-                },
-              }}
-              look={{
-                name: settings.draft?.name ?? settings.saved?.name ?? "",
-                accessory: settings.draft ? settings.draft.accessory : settings.saved?.accessory,
-                problem: settings.validation?.find((line) => line === NAME_PROBLEM),
-                onName: (name) => settings.changeLook({ name }),
-                onAccessory: (accessory) => settings.changeLook({ accessory }),
-                others: settings.draft?.localDots ?? settings.saved?.localDots ?? [],
-                known: otherLocalDots.list,
-                onOthers: (localDots) => settings.changeLook({ localDots }),
-                onForget: forgetLocalDot,
-              }}
-              voice={{
-                prefs: voicePrefs.value,
-                saved: voicePrefs.saved,
-                change: voicePrefs.change,
-                route: voiceRoute(voiceSupport.support, voicePrefs.value.online, voiceLanguage),
-                browser: voiceBrowser,
-                downloading: voiceSupport.downloading,
-                download: voiceSupport.download,
-                speech: speechInstall,
-              }}
-              stopNote={stopNote}
-              stream={streamChoice}
-              stop={sheetStopControl}
-              stopAll={settingsStopAll}
-              startAtLogin={settingsLogin}
-              appUpdate={appUpdate}
-              remoteApi={api}
-              dots={localDots}
-              report={report}
-              update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
-              freshStart={
-                freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined
-              }
-              open={settings.open}
-              keysPanel={keysPanel}
-              choices={settings.draft?.choices ?? {}}
-              chatgpt={settings.chatgpt}
-              claudeCode={settings.claudeCode}
-              subscriptionModels={settings.subscriptionModels}
-              providers={settings.index?.providers ?? []}
-              keys={settings.index ? pickerKeys(settings.index) : []}
-              keyLayer={settings.index?.keyLayer ?? "unknown"}
-              fastFailure={settings.index?.fastFailure}
-              catalog={
-                settings.phase === "refreshing" || settings.index?.catalog?.refreshing
-                  ? "refreshing"
-                  : settings.phase === "loading"
-                    ? "loading"
-                    : settings.phase === "error"
-                      ? "offline"
-                      : !settings.index?.catalog
-                        ? "empty"
-                        : settings.index.catalog.stale ||
-                            Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 300_000
-                          ? "stale"
-                          : "ready"
-              }
-              catalogAt={settings.index?.catalog?.fetchedAt}
-              dirty={settings.dirty}
-              busy={settings.busy}
-              loading={settings.phase === "loading" || !settings.draft}
-              error={settings.error}
-              validation={settings.validation}
-              onClose={settings.close}
-              onChange={settings.change}
-              library={
-                settings.draft
-                  ? {
-                      draft: settings.draft,
-                      index: settings.index,
-                      keys: settings.index ? pickerKeys(settings.index) : [],
-                      providers: settings.index?.providers ?? [],
-                      modelName: names.name,
-                      onModels: settings.changeModels,
-                      onRole: settings.takeRole,
-                      list: (keyId, signal) => loadKeyModels(api, keyId, signal),
-                      keyStore: keys,
-                      plans: {
-                        chatgpt: settings.chatgpt,
-                        claudeCode: settings.claudeCode,
-                        browse: settings.browseAccounts,
-                      },
-                    }
-                  : undefined
-              }
-              onKeys={(role, providerId, trigger) => {
-                const provider = providerById(providerId);
-                if (
-                  !provider ||
-                  provider.local ||
-                  provider.availableIn ||
-                  provider.notOffered ||
-                  !settings.open ||
-                  settings.busy ||
-                  !LLM_PROVIDERS.some((kind) => kind === provider.keyd)
-                )
-                  return;
-                const request = ++keyRequest.current;
-                keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
-                setKeyPreset({
-                  requestId: request,
-                  provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
-                  ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
-                });
-                goToSettings(trigger, "keys");
-              }}
-              onRefresh={() => void settings.refresh()}
-              onReload={settings.reload}
-              save={{
-                enabled: settings.saveEnabled && settings.dirty,
-                run: settings.save,
-              }}
-              manualPrices={Object.fromEntries(
-                (["main", "fast", "local"] as const)
-                  .filter(
-                    (role) =>
-                      needsPrice(settings.draft?.choices[role], settings.index) &&
-                      (role === "main" ||
-                        !["chatgpt", "claude-code"].includes(
-                          settings.draft?.choices.main?.provider ?? "",
-                        )),
+            <Suspense fallback={null}>
+              <SettingsSheet
+                section={settingsAt.section}
+                sectionRequest={settingsAt.request}
+                tip={settingsAt.tip}
+                appearance={appearance}
+                showDot={showDot}
+                view={{ ...viewStyle, change: setView }}
+                persona={{
+                  value: settings.draft?.persona ?? settings.saved?.persona ?? DEFAULT_PERSONA,
+                  onChange: settings.changePersona,
+                  auto: {
+                    on: settings.draft?.autoPersona ?? settings.saved?.autoPersona === true,
+                    onChange: settings.changeAutoPersona,
+                    disabledReason: autoDotReason(
+                      settings.draft ? settings.draft.choices.main : settings.saved?.main,
+                    ),
+                  },
+                }}
+                look={{
+                  name: settings.draft?.name ?? settings.saved?.name ?? "",
+                  accessory: settings.draft ? settings.draft.accessory : settings.saved?.accessory,
+                  problem: settings.validation?.find((line) => line === NAME_PROBLEM),
+                  onName: (name) => settings.changeLook({ name }),
+                  onAccessory: (accessory) => settings.changeLook({ accessory }),
+                  others: settings.draft?.localDots ?? settings.saved?.localDots ?? [],
+                  known: otherLocalDots.list,
+                  onOthers: (localDots) => settings.changeLook({ localDots }),
+                  onForget: forgetLocalDot,
+                }}
+                voice={{
+                  prefs: voicePrefs.value,
+                  saved: voicePrefs.saved,
+                  change: voicePrefs.change,
+                  route: voiceRoute(voiceSupport.support, voicePrefs.value.online, voiceLanguage),
+                  browser: voiceBrowser,
+                  downloading: voiceSupport.downloading,
+                  download: voiceSupport.download,
+                  speech: speechInstall,
+                }}
+                stopNote={stopNote}
+                stream={streamChoice}
+                stop={sheetStopControl}
+                stopAll={settingsStopAll}
+                startAtLogin={settingsLogin}
+                appUpdate={appUpdate}
+                remoteApi={api}
+                dots={localDots}
+                report={report}
+                update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
+                freshStart={
+                  freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined
+                }
+                open={settings.open}
+                keysPanel={keysPanel}
+                choices={settings.draft?.choices ?? {}}
+                chatgpt={settings.chatgpt}
+                claudeCode={settings.claudeCode}
+                subscriptionModels={settings.subscriptionModels}
+                providers={settings.index?.providers ?? []}
+                keys={settings.index ? pickerKeys(settings.index) : []}
+                keyLayer={settings.index?.keyLayer ?? "unknown"}
+                fastFailure={settings.index?.fastFailure}
+                catalog={
+                  settings.phase === "refreshing" || settings.index?.catalog?.refreshing
+                    ? "refreshing"
+                    : settings.phase === "loading"
+                      ? "loading"
+                      : settings.phase === "error"
+                        ? "offline"
+                        : !settings.index?.catalog
+                          ? "empty"
+                          : settings.index.catalog.stale ||
+                              Date.now() - Date.parse(settings.index.catalog.fetchedAt) > 300_000
+                            ? "stale"
+                            : "ready"
+                }
+                catalogAt={settings.index?.catalog?.fetchedAt}
+                dirty={settings.dirty}
+                busy={settings.busy}
+                loading={settings.phase === "loading" || !settings.draft}
+                error={settings.error}
+                validation={settings.validation}
+                onClose={settings.close}
+                onChange={settings.change}
+                library={
+                  settings.draft
+                    ? {
+                        draft: settings.draft,
+                        index: settings.index,
+                        keys: settings.index ? pickerKeys(settings.index) : [],
+                        providers: settings.index?.providers ?? [],
+                        modelName: names.name,
+                        onModels: settings.changeModels,
+                        onRole: settings.takeRole,
+                        list: (keyId, signal) => loadKeyModels(api, keyId, signal),
+                        keyStore: keys,
+                        plans: {
+                          chatgpt: settings.chatgpt,
+                          claudeCode: settings.claudeCode,
+                          browse: settings.browseAccounts,
+                        },
+                      }
+                    : undefined
+                }
+                onKeys={(role, providerId, trigger) => {
+                  const provider = providerById(providerId);
+                  if (
+                    !provider ||
+                    provider.local ||
+                    provider.availableIn ||
+                    provider.notOffered ||
+                    !settings.open ||
+                    settings.busy ||
+                    !LLM_PROVIDERS.some((kind) => kind === provider.keyd)
                   )
-                  .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
-              )}
-              onPrice={settings.changePrice}
-              autonomy={settings.draft?.autonomy}
-              savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
-              onAutonomy={settings.changeAutonomy}
-              knowledge={settingsKnowledge}
-              known={whatDotKnows}
-              recentActivity={
-                settings.draft
-                  ? { on: settings.draft.recentActivity, change: settings.recentActivity }
-                  : undefined
-              }
-              autoContinue={
-                settings.draft
-                  ? { on: settings.draft.autoContinue, change: settings.autoContinue }
-                  : undefined
-              }
-              onOpenTask={(id) => {
-                settings.close();
-                selectReplay(id);
-              }}
-              notifications={settingsNotifications}
-              accounts={settingsAccounts}
-              engine={settingsEngine}
-              browser={settingsBrowser}
-              signIn={signIn}
-              connectors={settingsConnectors}
-              rules={rules}
-              spending={
-                settings.draft
-                  ? { value: settings.draft.spending, change: settings.spending }
-                  : undefined
-              }
-              checkIns={
-                settings.draft
-                  ? { value: settings.draft.checkIns, change: settings.checkIn }
-                  : undefined
-              }
-              research={
-                settings.draft
-                  ? { value: settings.draft.research, change: settings.research }
-                  : undefined
-              }
-              purposeCheck={
-                settings.draft
-                  ? {
-                      on: settings.draft.purposeCheck,
-                      api,
-                      keyId: keys.keys
-                        .filter(isJevKey)
-                        .map((key) => key.id)
-                        .sort()[0],
-                      fullAccess: settings.saved?.permissionMode === "full",
-                      manageJevKey: (trigger) => goToSettings(trigger, "keys"),
-                      change: settings.purposeCheck,
-                      judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
-                      ...(subscription(settings.draft.choices.main?.provider)
-                        ? { plan: settings.draft.choices.main?.provider }
-                        : {}),
-                      addJevKey: (trigger) => {
-                        keyCapture.current = null;
-                        setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
-                        goToSettings(trigger, "keys");
-                      },
-                    }
-                  : undefined
-              }
-              spent={agent.model.spend}
-              onSetup={() => {
-                settings.close();
-                onboarding.reopen("thinks");
-              }}
-            />
+                    return;
+                  const request = ++keyRequest.current;
+                  keyCapture.current = { request, capture: settings.captureKey(role, providerId) };
+                  setKeyPreset({
+                    requestId: request,
+                    provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
+                    ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
+                  });
+                  goToSettings(trigger, "keys");
+                }}
+                onRefresh={() => void settings.refresh()}
+                onReload={settings.reload}
+                save={{
+                  enabled: settings.saveEnabled && settings.dirty,
+                  run: settings.save,
+                }}
+                manualPrices={Object.fromEntries(
+                  (["main", "fast", "local"] as const)
+                    .filter(
+                      (role) =>
+                        needsPrice(settings.draft?.choices[role], settings.index) &&
+                        (role === "main" ||
+                          !["chatgpt", "claude-code"].includes(
+                            settings.draft?.choices.main?.provider ?? "",
+                          )),
+                    )
+                    .map((role) => [
+                      role,
+                      settings.draft?.prices[role] ?? { input: "", output: "" },
+                    ]),
+                )}
+                onPrice={settings.changePrice}
+                autonomy={settings.draft?.autonomy}
+                savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
+                onAutonomy={settings.changeAutonomy}
+                knowledge={settingsKnowledge}
+                known={whatDotKnows}
+                recentActivity={
+                  settings.draft
+                    ? { on: settings.draft.recentActivity, change: settings.recentActivity }
+                    : undefined
+                }
+                autoContinue={
+                  settings.draft
+                    ? { on: settings.draft.autoContinue, change: settings.autoContinue }
+                    : undefined
+                }
+                onOpenTask={(id) => {
+                  settings.close();
+                  selectReplay(id);
+                }}
+                notifications={settingsNotifications}
+                accounts={settingsAccounts}
+                engine={settingsEngine}
+                browser={settingsBrowser}
+                signIn={signIn}
+                connectors={settingsConnectors}
+                rules={rules}
+                spending={
+                  settings.draft
+                    ? { value: settings.draft.spending, change: settings.spending }
+                    : undefined
+                }
+                checkIns={
+                  settings.draft
+                    ? { value: settings.draft.checkIns, change: settings.checkIn }
+                    : undefined
+                }
+                research={
+                  settings.draft
+                    ? { value: settings.draft.research, change: settings.research }
+                    : undefined
+                }
+                purposeCheck={
+                  settings.draft
+                    ? {
+                        on: settings.draft.purposeCheck,
+                        api,
+                        keyId: keys.keys
+                          .filter(isJevKey)
+                          .map((key) => key.id)
+                          .sort()[0],
+                        fullAccess: settings.saved?.permissionMode === "full",
+                        manageJevKey: (trigger) => goToSettings(trigger, "keys"),
+                        change: settings.purposeCheck,
+                        judge: purposeJudge(keys.keys.some(isJevKey), settings.draft.choices),
+                        ...(subscription(settings.draft.choices.main?.provider)
+                          ? { plan: settings.draft.choices.main?.provider }
+                          : {}),
+                        addJevKey: (trigger) => {
+                          keyCapture.current = null;
+                          setKeyPreset({ requestId: ++keyRequest.current, web: JEV_KEY });
+                          goToSettings(trigger, "keys");
+                        },
+                      }
+                    : undefined
+                }
+                spent={agent.model.spend}
+                onSetup={() => {
+                  settings.close();
+                  onboarding.reopen("thinks");
+                }}
+              />
+            </Suspense>
           </Held>
         </ErrorBoundary>
         {phone && (
@@ -4379,30 +4408,32 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         )}
         <Presence show={onboarding.open}>
           <ErrorBoundary floating>
-            <Onboarding
-              api={api}
-              control={onboarding}
-              phone={layout === "phone"}
-              keys={keys}
-              index={settings.index}
-              modelsLoading={settings.phase === "loading" || settings.phase === "refreshing"}
-              onRefreshModels={settings.refreshModels}
-              onCheckModels={settings.checkModels}
-              saved={settings.saved}
-              onSaved={settings.reload}
-              turnOn={
-                computerAction && computerAction.kind !== "stop"
-                  ? {
-                      run: () => onComputer[computerAction.kind](),
-                      reason: computerAction.enabled ? undefined : t`Wait a moment`,
-                    }
-                  : null
-              }
-              showDot={showDot.value}
-              view={viewStyle}
-              speech={speechInstall}
-              language={voiceLanguage}
-            />
+            <Suspense fallback={null}>
+              <Onboarding
+                api={api}
+                control={onboarding}
+                phone={layout === "phone"}
+                keys={keys}
+                index={settings.index}
+                modelsLoading={settings.phase === "loading" || settings.phase === "refreshing"}
+                onRefreshModels={settings.refreshModels}
+                onCheckModels={settings.checkModels}
+                saved={settings.saved}
+                onSaved={settings.reload}
+                turnOn={
+                  computerAction && computerAction.kind !== "stop"
+                    ? {
+                        run: () => onComputer[computerAction.kind](),
+                        reason: computerAction.enabled ? undefined : t`Wait a moment`,
+                      }
+                    : null
+                }
+                showDot={showDot.value}
+                view={viewStyle}
+                speech={speechInstall}
+                language={voiceLanguage}
+              />
+            </Suspense>
           </ErrorBoundary>
         </Presence>
         {showDot.value && dotArrival.look && (

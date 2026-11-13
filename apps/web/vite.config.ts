@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import { build, defineConfig, type Plugin, type Rolldown } from "vite";
 
 const SRC = fileURLToPath(new URL("./src/", import.meta.url));
+const ZOD_CHUNK = /[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?zod[\\/]|[\\/]protocol[\\/]src[\\/]csp\.ts$/;
 const KIT = `${SRC}ui/`;
 const LAYERS = "@layer theme, base, components, kit, utilities;";
 const CUSTOM_MEDIA = /^@custom-media [^;]+;$/gm;
@@ -87,7 +88,13 @@ export default defineConfig({
     target: "es2024",
     sourcemap: true,
     // export.html is the daemon's own page: its headless browser makes videos there.
-    rolldownOptions: { input: { index: "index.html", export: "export.html" } },
+    rolldownOptions: {
+      input: { index: "index.html", export: "export.html" },
+      // Zod and the switch that keeps it from generating code share a chunk of their own, so the
+      // switch is set before any chunk builds a schema: code split apart could build one first, and
+      // Zod's probe for Function() breaks the page's policy even when caught.
+      output: { codeSplitting: { groups: [{ name: "zod", test: ZOD_CHUNK }] } },
+    },
   },
   worker: { format: "es" },
 });

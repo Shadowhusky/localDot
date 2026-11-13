@@ -1,7 +1,7 @@
 import { EncodedPacketSink, type Input, type VideoSample, VideoSampleSink } from "mediabunny";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
 import { type DecodeMode, nextDecodeStep } from "./decode-policy.ts";
-import { openRecording } from "./recording-source.ts";
+import { openRecording } from "./recording-input.ts";
 
 export interface ReplayVideoStats {
   openFrames: number;

@@ -1,7 +1,8 @@
 import { emptyManifest } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
-import { openRecording, recordingSnapshot, recordingUrl } from "./recording-source.ts";
+import { openRecording } from "./recording-input.ts";
+import { recordingSnapshot, recordingUrl } from "./recording-source.ts";
 
 const source: ReplaySource = {
   sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N",

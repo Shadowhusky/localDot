@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 import { emptyManifest, type SessionCard, ulid } from "@localdot/protocol";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import { TOKEN_KEY } from "../lib/token.ts";
 import { providerFixture } from "../settings/testing.ts";
+import { preloadScreens } from "../shell/lazy-screen.tsx";
 import { FakeWebSocket } from "../testing/fake-websocket.ts";
+
+// The screens that load apart from the app are there before it renders, as they are once it is up.
+beforeAll(preloadScreens);
 
 beforeEach(() => {
   localStorage.clear();

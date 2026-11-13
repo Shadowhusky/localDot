@@ -2,16 +2,20 @@
 
 import { type ApprovalCard, type LocalDotEvent, ulid } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { STILL_MS } from "./shell/focus.ts";
+import { preloadScreens } from "./shell/lazy-screen.tsx";
 import { VIEW_STYLE_KEY } from "./shell/view-style.ts";
 import { closeStreams } from "./stage/live-stream.ts";
 import { fakeChromium, presentFrame } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
+
+// The screens that load apart from the app are there before it renders, as they are once it is up.
+beforeAll(preloadScreens);
 
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), {

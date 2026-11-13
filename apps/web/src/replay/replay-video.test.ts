@@ -11,7 +11,7 @@ const fixture = vi.hoisted(() => ({
   getSample: vi.fn(),
   samples: vi.fn(),
 }));
-vi.mock("./recording-source.ts", () => ({
+vi.mock("./recording-input.ts", () => ({
   openRecording: () => ({
     dispose: fixture.dispose,
     getPrimaryVideoTrack: async () => ({ canDecode: fixture.canDecode, codec: "avc" }),
