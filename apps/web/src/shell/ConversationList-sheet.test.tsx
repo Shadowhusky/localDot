@@ -143,11 +143,14 @@ describe("the phone's conversations", () => {
   });
 
   it("shows the tags in use as filters, each a toggle", async () => {
-    const blue = entry("Book the hotel", { tag: "blue" });
-    const red = entry("Pay the rent", { tag: "red" });
-    const liveRed = entry("Find a plumber", { tag: "red", ...live("working") });
+    const blue = entry("Book the hotel", { tags: [{ id: "blue", color: "blue" }] });
+    const red = entry("Pay the rent", { tags: [{ id: "red", color: "red" }] });
+    const liveRed = entry("Find a plumber", {
+      tags: [{ id: "red", color: "red" }],
+      ...live("working"),
+    });
     open([blue, red, liveRed, entry("Untagged")]);
-    const filters = await screen.findByRole("group", { name: "Show only a colour tag" });
+    const filters = await screen.findByRole("group", { name: "Show only a tag" });
     const chips = within(filters).getAllByRole("button");
     expect(chips.map((chip) => chip.textContent)).toEqual(["Red", "Blue"]);
     fireEvent.click(within(filters).getByRole("button", { name: "Red" }));
@@ -203,7 +206,10 @@ describe("the phone's conversations", () => {
   });
 
   it("magnifies a held row into its preview with its menu, and letting go chooses nothing", async () => {
-    const hotel = entry("Book the hotel", { said: "Book a hotel in Lisbon for May", tag: "blue" });
+    const hotel = entry("Book the hotel", {
+      said: "Book a hotel in Lisbon for May",
+      tags: [{ id: "blue", color: "blue" }],
+    });
     const { onPick } = open([hotel]);
     await screen.findAllByRole("row");
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

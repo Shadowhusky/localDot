@@ -416,6 +416,10 @@ test.describe("keeping working", () => {
     await sheet.getByRole("button", { name: "Pin to top", exact: true }).click();
     await page.getByRole("button", { name: /Conversation details$/ }).click();
     await expect(sheet.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
+    await sheet.getByRole("button", { name: "Tags…", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Tags" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /Conversation details$/ }).click();
     await sheet.getByRole("button", { name: "Delete conversation", exact: true }).click();
     await expect(
       page.getByRole("alertdialog", { name: "Delete this conversation?" }),

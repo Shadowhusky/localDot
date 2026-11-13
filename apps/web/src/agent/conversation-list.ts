@@ -1,17 +1,27 @@
 import {
+  type ChangeTag,
   CONVERSATION_TAGS,
   type ConversationEntry,
   ConversationList,
   type ConversationLive,
   ConversationLiveEvent,
   ConversationOrganizedEvent,
-  type ConversationTag,
+  ConversationTag,
+  ConversationTagsEvent,
+  type CreateTag,
   type LookWearables,
+  NamedTag,
   type PersonaId,
+  type SmartTagOptions,
+  type SmartTagRequest,
+  SmartTagResult,
+  type TagId,
+  type TagOnConversation,
   taskOutfit,
   type Wearable,
 } from "@localdot/protocol";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { z } from "zod";
 import { t, tr } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
@@ -132,11 +142,27 @@ export function mostUrgent(rows: readonly ConversationRow[]): ConversationRow[] 
     .map(({ row }) => row);
 }
 
-// The colour tags given to any of `rows`, in the order the swatches show them.
-export function tagsInUse(rows: readonly ConversationRow[]): ConversationTag[] {
-  const used = new Set(rows.map((row) => row.entry.tag));
-  return CONVERSATION_TAGS.filter((tag) => used.has(tag));
+// A tag ready to show, by its id: a colour, or one of the user's named tags; none once it is gone.
+export function tagOf(id: TagId, library: readonly NamedTag[]): TagOnConversation | undefined {
+  const colour = ConversationTag.safeParse(id);
+  if (colour.success) return { id, color: colour.data };
+  const named = library.find((tag) => tag.id === id);
+  return named && { id, color: named.color, name: named.name };
 }
+
+// The tags given to any of `rows`: the colours in the order the swatches show them, then the
+// user's own by name.
+export function tagsInUse(rows: readonly ConversationRow[]): TagOnConversation[] {
+  const used = new Map<string, TagOnConversation>();
+  for (const row of rows) for (const tag of row.entry.tags ?? []) used.set(tag.id, tag);
+  const named = [...used.values()].filter((tag) => tag.name);
+  named.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+  return [...CONVERSATION_TAGS.flatMap((colour) => used.get(colour) ?? []), ...named];
+}
+
+// Whether it carries the tag.
+export const carries = (entry: ConversationEntry, id: TagId) =>
+  !!entry.tags?.some((tag) => tag.id === id);
 
 export function groupConversations(
   rows: readonly ConversationRow[],
@@ -253,25 +279,40 @@ export function renameConversation(
   return api.post(`/api/conversations/${sessionId}/title`, { title: title?.trim() || null });
 }
 
-// How the user files a conversation: a colour tag, pinned to the top, or archived out of the list.
+// How the user files a conversation: all the tags it carries, pinned to the top, or archived out of
+// the list.
 export type Organize =
-  | { tag: ConversationTag | null }
+  | { tags: readonly TagId[] }
   | { pinned: boolean }
   | { archived: boolean }
   | { look: LookWearables | null };
 
 type Filing = Partial<{
-  tag: ConversationTag | null;
+  tags: readonly TagOnConversation[];
   pinned: boolean;
   archived: boolean;
   look: LookWearables | null;
 }>;
 
+const filingOf = (change: Organize, library: readonly NamedTag[]): Filing =>
+  "tags" in change
+    ? { tags: change.tags.flatMap((id) => tagOf(id, library) ?? []) }
+    : (change as Filing);
+
+// The tags with one given or taken off; none takes them all off.
+export function toggledTag(ids: readonly TagId[], tag: TagId | null): TagId[] {
+  if (tag === null) return [];
+  return ids.includes(tag) ? ids.filter((id) => id !== tag) : [...ids, tag];
+}
+
+export const tagIds = (entry: ConversationEntry | null | undefined): TagId[] =>
+  entry?.tags?.map((tag) => tag.id) ?? [];
+
 const organized = (entry: ConversationEntry, change: Filing): ConversationEntry => {
-  const { tag, pinned, archived, look, ...rest } = { ...entry, ...change };
+  const { tags, pinned, archived, look, ...rest } = { ...entry, ...change };
   return {
     ...rest,
-    ...(tag ? { tag } : {}),
+    ...(tags?.length ? { tags: [...tags] } : {}),
     ...(pinned ? { pinned } : {}),
     ...(archived ? { archived } : {}),
     ...(look ? { look } : {}),
@@ -291,9 +332,9 @@ export async function organizeConversation(
   change: Organize,
 ): Promise<void> {
   const lists = [...(stores.get(api)?.values() ?? [])];
-  for (const list of lists) list.patch(sessionId, change);
+  for (const list of lists) list.patch(sessionId, filingOf(change, list.state.tags));
   const route =
-    "tag" in change ? "tag" : "pinned" in change ? "pin" : "look" in change ? "look" : "archive";
+    "tags" in change ? "tags" : "pinned" in change ? "pin" : "look" in change ? "look" : "archive";
   try {
     await api.post(`/api/conversations/${sessionId}/${route}`, change);
   } finally {
@@ -308,7 +349,61 @@ export function readConversationsAgain(api: ApiClient): void {
 
 // Shows a change to several at once, in one commit, however the saves that follow are spaced.
 export function showOrganized(api: ApiClient, ids: readonly string[], change: Organize): void {
-  for (const list of stores.get(api)?.values() ?? []) for (const id of ids) list.patch(id, change);
+  for (const list of stores.get(api)?.values() ?? [])
+    for (const id of ids) list.patch(id, filingOf(change, list.state.tags));
+}
+
+// The user's own tags: made, renamed, recoloured or deleted, then every list reads again.
+export async function createTag(api: ApiClient, tag: CreateTag): Promise<NamedTag> {
+  const made = NamedTag.parse(await api.post("/api/tags", tag));
+  readConversationsAgain(api);
+  return made;
+}
+
+export async function changeTag(api: ApiClient, id: string, change: ChangeTag): Promise<NamedTag> {
+  const changed = NamedTag.parse(await api.post(`/api/tags/${id}`, change));
+  readConversationsAgain(api);
+  return changed;
+}
+
+export async function deleteTag(api: ApiClient, id: string): Promise<void> {
+  await api.del(`/api/tags/${id}`);
+  readConversationsAgain(api);
+}
+
+const SmartTagsRead = z.object({
+  smart: z.object({
+    granularity: z.enum(["broad", "balanced", "detailed"]),
+    create: z.boolean(),
+    auto: z.boolean(),
+  }),
+});
+
+// How dot sorts conversations into tags, as last chosen.
+export async function readSmartTagOptions(
+  api: ApiClient,
+  signal?: AbortSignal,
+): Promise<SmartTagOptions> {
+  return SmartTagsRead.parse(await api.get("/api/tags", signal ? { signal } : {})).smart;
+}
+
+export function saveSmartTagOptions(api: ApiClient, options: SmartTagOptions): Promise<void> {
+  return api.post("/api/tags/smart", options);
+}
+
+// Sorts with the user's model; done once it answers, however long that is.
+export async function sortConversations(
+  api: ApiClient,
+  request: SmartTagRequest,
+): Promise<SmartTagResult> {
+  const result = SmartTagResult.parse(await api.post("/api/conversations/smart-tags", request));
+  readConversationsAgain(api);
+  return result;
+}
+
+export async function undoSort(api: ApiClient, run: string): Promise<void> {
+  await api.post("/api/conversations/smart-tags/undo", { run });
+  readConversationsAgain(api);
 }
 
 // While conversations are being deleted the lists keep their rows, whatever a read would say, so
@@ -331,6 +426,7 @@ export type ConversationView = "recent" | "archived";
 export interface RecentConversations {
   entries: readonly ConversationEntry[];
   archivedCount: number;
+  tags: readonly NamedTag[];
   // Nothing read yet.
   loading: boolean;
   failed: boolean;
@@ -340,6 +436,8 @@ export interface RecentConversations {
 interface ListState {
   entries: readonly ConversationEntry[] | null;
   archivedCount: number;
+  // The user's named tags.
+  tags: readonly NamedTag[];
   failed: boolean;
 }
 
@@ -404,13 +502,14 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
       .get(path, { signal: controller.signal })
       .then((data) => ConversationList.parse(data))
       .then(
-        ({ conversations, archivedCount = 0 }) => {
+        ({ conversations, archivedCount = 0, tags = [] }) => {
           if (!controller.signal.aborted)
             set({
               entries: conversations.map((entry) =>
                 pushed.has(entry.sessionId) ? withLive(entry, pushed.get(entry.sessionId)) : entry,
               ),
               archivedCount,
+              tags,
               failed: false,
             });
         },
@@ -467,11 +566,11 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     if (entries?.some((entry) => ids.includes(entry.sessionId)))
       set({ ...store.state, entries: entries.filter((entry) => !ids.includes(entry.sessionId)) });
   };
-  const reorganized = ({ sessionId, tag, pinned, archived, look }: ConversationOrganizedEvent) => {
+  const reorganized = ({ sessionId, tags, pinned, archived, look }: ConversationOrganizedEvent) => {
     const { entry } = held(sessionId);
     // One that comes into the view or leaves it, and the count of those archived, need a read.
     if (entry && !!entry.archived === archived)
-      patch(sessionId, { tag, pinned, ...(look === undefined ? {} : { look }) });
+      patch(sessionId, { tags, pinned, ...(look === undefined ? {} : { look }) });
     else refresh();
   };
   const start = () => {
@@ -499,6 +598,7 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
                 if (live.success) change(live.data);
                 const filed = ConversationOrganizedEvent.safeParse(value);
                 if (filed.success) reorganized(filed.data);
+                if (ConversationTagsEvent.safeParse(value).success) refresh();
               },
             },
           });
@@ -518,7 +618,7 @@ function listStore(api: ApiClient, view: ConversationView): ListStore {
     };
   };
   const store: ListStore = {
-    state: { entries: null, archivedCount: 0, failed: false },
+    state: { entries: null, archivedCount: 0, tags: [], failed: false },
     subscribe(onChange) {
       listeners.add(onChange);
       return () => listeners.delete(onChange);
@@ -551,7 +651,7 @@ export function useRecentConversations(
   view: ConversationView = "recent",
 ): RecentConversations {
   const store = listStore(api, view);
-  const { entries, archivedCount, failed } = useSyncExternalStore(
+  const { entries, archivedCount, tags, failed } = useSyncExternalStore(
     store.subscribe,
     () => store.state,
   );
@@ -563,6 +663,7 @@ export function useRecentConversations(
   return {
     entries: shown,
     archivedCount,
+    tags,
     loading: entries === null && !failed,
     failed: failed && entries === null,
     retry: store.read,

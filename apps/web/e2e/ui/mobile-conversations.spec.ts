@@ -30,13 +30,13 @@ async function underWay(page: Page) {
       json: {
         archivedCount,
         conversations: conversations.map(
-          (entry: { sessionId: string; title: string | null; tag?: string }) => {
+          (entry: { sessionId: string; title: string | null; tags?: unknown[] }) => {
             const title = entry.title ?? "";
             const state = live.find(([name]) => name.test(title))?.[1];
             const tag = tags.find(([name]) => name.test(title))?.[1];
             return {
               ...entry,
-              ...(tag && !entry.tag ? { tag } : {}),
+              ...(tag && !entry.tags?.length ? { tags: [{ id: tag, color: tag }] } : {}),
               ...(state ? { ended: null, live: { ...state, since: SINCE } } : {}),
             };
           },
@@ -161,7 +161,7 @@ for (const appearance of ["graphite", "daylight"])
       expect((await deck.boundingBox())?.y).toBeGreaterThan(viewport * 0.4);
       // Those under way are cards only; the rows below are the rest, by day.
       await expect(sheet.getByRole("row")).toHaveCount(3);
-      await expect(sheet.getByRole("group", { name: "Show only a colour tag" })).toContainText(
+      await expect(sheet.getByRole("group", { name: "Show only a tag" })).toContainText(
         "OrangeBluePurple",
       );
       await shot(page, ui, `${appearance}-sheet`);
@@ -295,7 +295,7 @@ test("the desktop rail keeps its marks, rows and menu", async ({ page, ui }) => 
   // None of the phone's parts reach it.
   for (const part of [".live-deck", ".ui-swipe", ".conversations-tags", ".conversations-ring"])
     await expect(page.locator(part)).toHaveCount(0);
-  const rows = await rail.locator(".sessions-row").evaluateAll((all) =>
+  const rows = await rail.locator(".sessions-row:not(.sessions-overview)").evaluateAll((all) =>
     all.slice(1).map((row) => {
       const glyph = row.querySelector(".ui-session-glyph")?.getBoundingClientRect();
       return { height: Math.round(row.getBoundingClientRect().height), glyph: glyph?.width };

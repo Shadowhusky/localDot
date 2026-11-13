@@ -252,10 +252,12 @@ import { RailPanel } from "./shell/RailPanel.tsx";
 import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SessionRail, useRailExpandedByDefault } from "./shell/SessionRail.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
+import { SmartTagsDialog } from "./shell/SmartTagsDialog.tsx";
 import { StageExpand } from "./shell/StageExpand.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { StreamMenu } from "./shell/StreamMenu.tsx";
 import { changeCalmly } from "./shell/switch-motion.ts";
+import { TagChooser } from "./shell/TagChooser.tsx";
 import { TaskTime } from "./shell/TaskTime.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
@@ -1732,6 +1734,17 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     settings.chatgpt.canStart || settings.claudeCode.canStart,
     taskWorking,
   );
+  // What sorts conversations into tags: the user's fast model, else their main one. A ChatGPT plan
+  // has none to spare beside its tasks.
+  const sortingChoice = settings.saved?.fast ?? settings.saved?.main;
+  const sortingModel = sortingChoice
+    ? names.name(sortingChoice.provider, sortingChoice.model)
+    : t`Your model`;
+  const sortingReason = !settings.saved?.main
+    ? t`Choose a model in Settings first.`
+    : settings.saved.main.provider === "chatgpt" && !settings.saved.fast
+      ? t`A ChatGPT plan has no model to spare for sorting. Choose a fast model in Settings.`
+      : undefined;
   const modelLabel = guest
     ? guestModelName(guest.grant, guest.grant.model)
     : (modelSaving?.name ?? (taskChoice ? names.name(taskChoice.provider, taskChoice.model) : ""));
@@ -2131,6 +2144,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     sessions: readonly string[];
   } | null>(null);
   const deleteFrom = useRef<HTMLElement | null>(null);
+  const [tagging, setTagging] = useState<ConversationEntry | null>(null);
+  const [sortingTags, setSortingTags] = useState(false);
+  const sortTags = useHandler(() => setSortingTags(true));
   // The conversations rail, beside the stage while Watch shows on anything wider than a phone.
   const railShown = !sheets && !replayId && !full && !onboarding.open;
   const railExpanded = panels.sessions ?? railByDefault;
@@ -2426,6 +2442,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         deleteFrom.current = trigger;
         setDeletingCurrent({ sessionId: currentTask, sessions: conversation.sessions });
       },
+      sortTags,
     },
     replay: {
       reason: hasRecordings ? undefined : t`No recordings yet`,
@@ -3537,6 +3554,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           onReplay={() => selectReplay(LIBRARY)}
           onOverview={openOverview}
           onDeleted={conversationList.onDeleted}
+          {...(guest ? {} : { onSortTags: sortTags })}
           computer={{
             name: settings.saved?.name || t`This computer`,
             onOpen: localDots.refresh,
@@ -3749,6 +3767,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                         );
                     },
                     dress: () => setDressing(shown.entry ?? null),
+                    tag: () => setTagging(shown.entry ?? null),
                     remove: () => {
                       if (!shown.entry) return;
                       deleteFrom.current = document.activeElement as HTMLElement | null;
@@ -4299,6 +4318,16 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             />
           </Held>
         </ErrorBoundary>
+        <TagChooser api={api} entry={tagging} anchor={dotAnchor} onClose={() => setTagging(null)} />
+        {!guest && (
+          <SmartTagsDialog
+            api={api}
+            open={sortingTags}
+            onClose={() => setSortingTags(false)}
+            model={sortingModel}
+            {...(sortingReason ? { unavailable: sortingReason } : {})}
+          />
+        )}
         <DeleteConversationDialog
           api={api}
           conversations={deletingCurrent && [deletingCurrent]}
@@ -4320,6 +4349,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
               {...conversationList}
               layout="sheet"
               open={conversationsOpen}
+              onSortTags={() => {
+                setConversationsOpen(false);
+                sortTags();
+              }}
               onPick={(id, sessions) => {
                 setConversationsOpen(false);
                 conversationList.onPick(id, sessions);

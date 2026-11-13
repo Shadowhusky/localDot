@@ -267,6 +267,8 @@ export interface AgentRunnerDeps {
     Partial<Pick<LiveSessions, "subscribeLeases">>;
   // A task's live status changed; undefined once it has ended.
   liveChanged?(sessionId: string, live: ConversationLive | undefined): void;
+  // A task's end was recorded.
+  ended?(sessionId: string, reason: "done" | "stopped" | "error"): void;
   // Turns on the computer its tasks share, and which of its windows are whose.
   computer?: Pick<ComputerTurns, "take" | "owners">;
   cell(cellId: string): CellSummary | undefined;
@@ -1671,6 +1673,26 @@ export class AgentRunner {
         )
       ).text;
   }
+  // One short question with no task, as the user's settings would run one: their fast model, then
+  // their main one. A ChatGPT plan has none to spare.
+  async askQuick(system: string, prompt: string, signal: AbortSignal): Promise<string> {
+    const saved = this.deps.settings();
+    if (!saved.main) throw new SideQuestionError(409, "no-model");
+    let selection: ModelSelection;
+    try {
+      ({ selection } = await this.#selection(saved, undefined, signal));
+    } catch (error) {
+      if (error instanceof AgentError) throw new SideQuestionError(409, "no-model", error.message);
+      throw error;
+    }
+    const helpers = this.#helpers(selection);
+    if (!helpers.length) throw new SideQuestionError(409, "no-model");
+    return (
+      await this.#answerFrom(helpers, system, prompt, signal, (model, reason) =>
+        console.warn(`quick question: ${model} ${loggedReason(reason)}`),
+      )
+    ).text;
+  }
   // Why the fast model last failed to answer a quick request, until it next answers one.
   fastFailure(): { provider: string; model: string; reason: string } | undefined {
     return this.#fastFailure;
@@ -2881,6 +2903,11 @@ export class AgentRunner {
       liveSignal.removeEventListener("abort", stop);
       this.sessions.delete(session.id);
       this.#runtime.delete(session.id);
+      try {
+        this.deps.ended?.(session.id, reason);
+      } catch {
+        console.error("a task's end could not be told");
+      }
       if (rt.live)
         try {
           this.deps.liveChanged?.(session.id, undefined);

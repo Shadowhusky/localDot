@@ -94,6 +94,7 @@ import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
+import { TagSorter } from "../../../daemon/src/agent/smart-tags.ts";
 import { plainForm } from "../../../daemon/src/agent/tools/ask.ts";
 import { createApp } from "../../../daemon/src/app.ts";
 import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
@@ -393,6 +394,26 @@ const log = new EventLog(HOME, clock);
 // Made before anything is seeded, as the daemon makes it before any task, so it follows every task.
 const overview = new OverviewTracker(log, (id) => index.card(id));
 const conversations = new Conversations(HOME, log);
+// The user's model sorting conversations into tags: reports and numbers under one tag, the rest
+// under another, so a test knows what each gets.
+const sorter = new TagSorter({
+  shelf: conversations,
+  ask: async (_system, prompt) => {
+    const tags: Record<string, string[]> = {};
+    for (const [, n, body] of prompt.matchAll(
+      /<conversation n="(\d+)">([\s\S]*?)<\/conversation>/g,
+    ))
+      if (n && body) tags[n] = [/Q3|deck|total|numbers/i.test(body) ? "Reports" : "Errands"];
+    return JSON.stringify({
+      new: [
+        { name: "Reports", color: "green" },
+        { name: "Errands", color: "orange" },
+      ],
+      tags,
+    });
+  },
+  changed: () => appEvents.publish({ type: "conversation.tags" }),
+});
 let lastTurnModel: string | undefined;
 const cells = new FakeOrchestrator();
 const tickets = new TicketRegistry();
@@ -2498,6 +2519,7 @@ const agent: AgentRoutesDeps = {
     },
   ],
   conversations,
+  tags: { sorter, changed: () => appEvents.publish({ type: "conversation.tags" }) },
   keyModels: { list: async () => endpointModels },
   canChangeMemory: () => !session?.controlHeld && !killSwitch.isBusy(cellId),
   taskMutationReady: (owner) =>

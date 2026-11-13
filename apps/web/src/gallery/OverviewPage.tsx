@@ -1,4 +1,9 @@
-import type { ConversationEntry, OverviewTile, Wearable } from "@localdot/protocol";
+import type {
+  ConversationEntry,
+  ConversationTag,
+  OverviewTile,
+  Wearable,
+} from "@localdot/protocol";
 import { useState } from "react";
 import chart from "../../e2e/fixtures/ui-assets/overview/screen-chart.webp";
 import code from "../../e2e/fixtures/ui-assets/overview/screen-code.webp";
@@ -27,7 +32,7 @@ interface Sample {
   onScreen?: boolean;
   activity?: string;
   line?: string;
-  tag?: ConversationEntry["tag"];
+  tag?: ConversationTag;
   pinned?: boolean;
   tile: Omit<OverviewTile, "sessionId" | "frame">;
 }
@@ -128,7 +133,7 @@ const ENTRIES: ConversationEntry[] = SAMPLES.map((sample, at) => ({
   ended: sample.ended ?? null,
   look: sample.look,
   ...(sample.line ? { line: sample.line } : {}),
-  ...(sample.tag ? { tag: sample.tag } : {}),
+  ...(sample.tag ? { tags: [{ id: sample.tag, color: sample.tag }] } : {}),
   ...(sample.pinned ? { pinned: true } : {}),
   ...(sample.state
     ? {

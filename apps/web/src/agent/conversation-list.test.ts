@@ -11,7 +11,9 @@ import {
   liveConversations,
   renameConversation,
   spreadLooks,
+  tagOf,
   tagsInUse,
+  toggledTag,
   whenLabel,
 } from "./conversation-list.ts";
 
@@ -190,16 +192,34 @@ describe("tags in use", () => {
   it("lists each tag given once, in the swatches' order", () => {
     const rows = conversationRows(
       [
-        entry({ tag: "purple" }),
+        entry({ tags: [{ id: "purple", color: "purple" }] }),
         entry({}),
-        entry({ tag: "red" }),
-        entry({ tag: "purple" }),
-        entry({ tag: "green", archived: true }),
+        entry({ tags: [{ id: "red", color: "red" }] }),
+        entry({ tags: [{ id: "purple", color: "purple" }] }),
+        entry({ tags: [{ id: "green", color: "green" }], archived: true }),
       ],
       QUIET,
     );
-    expect(tagsInUse(rows)).toEqual(["red", "green", "purple"]);
+    expect(tagsInUse(rows).map((tag) => tag.id)).toEqual(["red", "green", "purple"]);
     expect(tagsInUse([])).toEqual([]);
+  });
+
+  it("lists the user's own tags after the colours, by name", () => {
+    const trips = { id: "01HZ00000000000000000000T1", color: "orange" as const, name: "Trips" };
+    const bills = { id: "01HZ00000000000000000000T2", color: "blue" as const, name: "Bills" };
+    const rows = conversationRows(
+      [entry({ tags: [trips, { id: "red", color: "red" }] }), entry({ tags: [bills] })],
+      QUIET,
+    );
+    expect(tagsInUse(rows).map((tag) => tag.name ?? tag.id)).toEqual(["red", "Bills", "Trips"]);
+  });
+
+  it("gives a tag or takes it off, and none takes every tag off", () => {
+    expect(toggledTag(["red"], "blue")).toEqual(["red", "blue"]);
+    expect(toggledTag(["red", "blue"], "red")).toEqual(["blue"]);
+    expect(toggledTag(["red", "01HZ00000000000000000000T1"], null)).toEqual([]);
+    expect(tagOf("green", [])).toEqual({ id: "green", color: "green" });
+    expect(tagOf("01HZ00000000000000000000T1", [])).toBeUndefined();
   });
 });
 

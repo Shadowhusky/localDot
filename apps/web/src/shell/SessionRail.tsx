@@ -31,7 +31,7 @@ import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { CheckMark } from "../ui/CheckMark.tsx";
-import { TAG_NAMES } from "../ui/ConversationTag.tsx";
+import { tagWords } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -85,7 +85,7 @@ export interface SessionRailProps {
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
 export function conversationLabel(row: ConversationRow, now: Date): string {
   const parts = [row.title];
-  if (row.entry.tag) parts.push(t`${TAG_NAMES[row.entry.tag].toLowerCase()} tag`);
+  for (const tag of row.entry.tags ?? []) parts.push(tagWords(tag));
   parts.push(STATUS_LABEL[row.status].toLowerCase());
   if (row.entry.live?.onScreen) parts.push(t`on screen`);
   parts.push(whenLabel(row.since, now).toLowerCase());
@@ -543,6 +543,7 @@ export const SessionRail = memo(function SessionRail({
         />
       )}
       <ConversationMenu
+        api={api}
         entry={action?.entry ?? null}
         anchor={actionAnchor}
         row={actionRow}

@@ -1,7 +1,7 @@
 import { type RefObject, useRef } from "react";
 import { type ConversationRow, STATUS_LABEL, whenLabel } from "../agent/conversation-list.ts";
 import { t } from "../i18n/index.ts";
-import { TAG_NAMES, TagMark } from "../ui/ConversationTag.tsx";
+import { markOf, TagMark, tagName } from "../ui/ConversationTag.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { LayerPortal } from "../ui/LayerStack.tsx";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
@@ -110,7 +110,7 @@ export function ConversationPeek({ peek, now, cardRef, onPlaced }: ConversationP
       <LayerPortal kind="popover" closing={leaving} rootRef={flight} className="lift-layer">
         <div ref={plate} className="peek-plate" aria-hidden="true" />
         <div ref={card} className="peek-card" data-status={row.status} aria-hidden="true">
-          <TagMark tag={row.entry.tag} />
+          <TagMark tag={markOf(row.entry)} />
           <div className="peek-state">
             <ConversationAvatar row={row} size={28} tagged={false} />
             <span className="peek-word">{STATUS_LABEL[row.status]}</span>
@@ -129,7 +129,7 @@ export function ConversationPeek({ peek, now, cardRef, onPlaced }: ConversationP
             {[
               tasks === 1 ? t`1 task` : t`${tasks} tasks`,
               t`Started ${startedAt(row.entry.startedAt)}`,
-              row.entry.tag && t`${TAG_NAMES[row.entry.tag]} tag`,
+              ...(row.entry.tags ?? []).map((tag) => t`${tagName(tag)} tag`),
               row.entry.pinned && t`Pinned`,
             ]
               .filter(Boolean)

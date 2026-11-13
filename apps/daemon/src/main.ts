@@ -622,6 +622,7 @@ agent = createAgent({
     appEvents.publish({ type: "conversation.live", sessionId, ...(state ? { live: state } : {}) });
     idlePages?.changed(slots.keyOf(sessionId) ?? live.cellOf(sessionId));
   },
+  tagsChanged: () => appEvents.publish({ type: "conversation.tags" }),
   keydPorts,
   toolPort,
   relay,

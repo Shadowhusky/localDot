@@ -9,7 +9,7 @@ import {
 import { Dot } from "../dot/Dot.tsx";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
 import type { DotState } from "../dot/engine/states.ts";
-import { TagMark } from "../ui/ConversationTag.tsx";
+import { markOf, TagMark } from "../ui/ConversationTag.tsx";
 import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 
 // A conversation under way moves: at a badge's size that is a blink now and then.
@@ -66,7 +66,7 @@ export function ConversationAvatar({
       ) : (
         row.status === "needs-you" && <span className="conversation-avatar-point" />
       )}
-      {tagged && <TagMark tag={row.entry.tag} />}
+      {tagged && <TagMark tag={markOf(row.entry)} />}
     </span>
   );
 }

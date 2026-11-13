@@ -301,14 +301,18 @@ describe("replay APIs", () => {
     const listed = (archived = false) =>
       new Conversations(f.home, f.log).list(undefined, archived).conversations;
 
-    expect((await post(first, "tag", { tag: "purple" })).status).toBe(204);
+    expect((await post(first, "tags", { tags: ["purple"] })).status).toBe(204);
     expect((await post(first, "pin", { pinned: true })).status).toBe(204);
-    expect(listed()[0]).toMatchObject({ sessionId: latest, tag: "purple", pinned: true });
+    expect(listed()[0]).toMatchObject({
+      sessionId: latest,
+      tags: [{ id: "purple" }],
+      pinned: true,
+    });
     expect(f.published).toEqual([
       {
         type: "conversation.organized",
         sessionId: latest,
-        tag: "purple",
+        tags: [{ id: "purple", color: "purple" }],
         pinned: false,
         archived: false,
         look: null,
@@ -316,7 +320,7 @@ describe("replay APIs", () => {
       {
         type: "conversation.organized",
         sessionId: latest,
-        tag: "purple",
+        tags: [{ id: "purple", color: "purple" }],
         pinned: true,
         archived: false,
         look: null,
@@ -339,7 +343,11 @@ describe("replay APIs", () => {
     f.liveIds.clear();
     expect((await post(first, "archive", { archived: true })).status).toBe(204);
     expect(listed().map((entry) => entry.sessionId)).not.toContain(latest);
-    expect(listed(true)[0]).toMatchObject({ sessionId: latest, archived: true, tag: "purple" });
+    expect(listed(true)[0]).toMatchObject({
+      sessionId: latest,
+      archived: true,
+      tags: [{ id: "purple" }],
+    });
     expect(f.published.at(-1)).toMatchObject({ sessionId: latest, archived: true });
     // Its name changes by any of its tasks while it is archived.
     expect(
@@ -358,14 +366,15 @@ describe("replay APIs", () => {
     expect(listed()[0]).toMatchObject({ sessionId: latest, title: "Lisbon" });
 
     for (const [action, body] of [
-      ["tag", { tag: "pink" }],
-      ["tag", {}],
-      ["tag", { tag: "red", pinned: true }],
+      ["tags", { tags: ["pink"] }],
+      ["tags", {}],
+      ["tags", { tags: ["red", "red"] }],
+      ["tags", { tags: ["red"], pinned: true }],
       ["pin", { pinned: "yes" }],
       ["archive", { archived: null }],
     ] as const)
       expect((await post(latest, action, body)).status).toBe(400);
-    expect((await post(ulid(), "tag", { tag: "red" })).status).toBe(404);
+    expect((await post(ulid(), "tags", { tags: ["red"] })).status).toBe(404);
     expect((await post("not-a-task", "pin", { pinned: true })).status).toBe(404);
     expect(f.published).toHaveLength(4);
   });

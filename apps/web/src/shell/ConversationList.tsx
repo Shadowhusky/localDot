@@ -5,8 +5,8 @@
 import {
   CONVERSATION_NAME_CHARS,
   type ConversationEntry,
-  type ConversationTag,
   RenameConversation,
+  type TagId,
 } from "@localdot/protocol";
 import {
   type KeyboardEvent,
@@ -22,6 +22,7 @@ import {
   type ConversationGroup,
   type ConversationRow,
   type ConversationView,
+  carries,
   conversationRows,
   groupConversations,
   type LiveFacts,
@@ -41,7 +42,7 @@ import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { CheckMark } from "../ui/CheckMark.tsx";
-import { TAG_NAMES, TagDot } from "../ui/ConversationTag.tsx";
+import { tagName } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -59,6 +60,7 @@ import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
 import { fileConversations } from "./conversation-leave.ts";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import { LiveDeck } from "./LiveDeck.tsx";
+import { TagFilter } from "./TagFilter.tsx";
 import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
 import "./rails.css";
@@ -85,8 +87,10 @@ export interface ConversationListProps {
   onReplay(): void;
   onDeleted?(sessions: readonly string[]): void;
   // A popover's compact list, or a phone's sheet: the conversations under way as cards over the
-  // rest, rows a finger swipes to pin or archive and holds to preview, and a filter by colour tag.
+  // rest, rows a finger swipes to pin or archive and holds to preview, and a filter by tag.
   layout?: "popover" | "sheet";
+  // Sorts the conversations into tags with the user's model.
+  onSortTags?(): void;
 }
 
 // The recent conversations, those pinned and those under way first and the rest by day, a search
@@ -103,6 +107,7 @@ export function ConversationList({
   onReplay,
   onDeleted,
   layout = "popover",
+  onSortTags,
 }: ConversationListProps) {
   const sheet = layout === "sheet";
   const listId = useId();
@@ -149,12 +154,12 @@ export function ConversationList({
   const matches = useTaskSearch(api, query);
   const [now] = useState(() => new Date());
   const all = useMemo(() => conversationRows(recent.entries, facts), [recent.entries, facts]);
-  // The sheet's colour filter, kept only while a conversation still has that tag.
-  const [tag, setTag] = useState<ConversationTag | null>(null);
+  // The sheet's tag filter, kept only while a conversation still has that tag.
+  const [tag, setTag] = useState<TagId | null>(null);
   const tags = useMemo(() => (sheet ? tagsInUse(all) : []), [sheet, all]);
-  const tagged = tag && tags.includes(tag) ? tag : null;
+  const tagged = tag && tags.some((each) => each.id === tag) ? tag : null;
   const shown = useMemo(
-    () => (tagged ? all.filter((row) => row.entry.tag === tagged) : all),
+    () => (tagged ? all.filter((row) => carries(row.entry, tagged)) : all),
     [all, tagged],
   );
   const found = useMemo(
@@ -430,7 +435,7 @@ export function ConversationList({
         <EmptyState
           layout="start"
           icon="tag"
-          title={t`No conversations have the ${TAG_NAMES[tagged].toLowerCase()} tag`}
+          title={t`No conversations carry “${tagName(tags.find((each) => each.id === tagged) ?? { color: "blue" })}”`}
         />
       )
     );
@@ -653,22 +658,13 @@ export function ConversationList({
           {renameError}
         </p>
       )}
-      {tags.length > 0 && (
-        <div className="conversations-tags" role="group" aria-label={t`Show only a colour tag`}>
-          {tags.map((each) => (
-            <Button
-              key={each}
-              variant="quiet"
-              size="sm"
-              className="conversations-tag"
-              aria-pressed={tagged === each}
-              onClick={() => setTag(tagged === each ? null : each)}
-            >
-              <TagDot tag={each} />
-              {TAG_NAMES[each]}
-            </Button>
-          ))}
-        </div>
+      {sheet && (
+        <TagFilter
+          tags={tags}
+          tagged={tagged}
+          onTag={setTag}
+          {...(onSortTags && view === "recent" && all.length > 0 ? { onSort: onSortTags } : {})}
+        />
       )}
       <div ref={body} className="conversations-body" aria-busy={recent.loading || matches.pending}>
         {live.length > 0 && (
@@ -699,6 +695,7 @@ export function ConversationList({
         }}
       />
       <ConversationMenu
+        api={api}
         entry={action?.entry ?? null}
         anchor={actionAnchor}
         row={peek ? undefined : actionRow}

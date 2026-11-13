@@ -79,10 +79,14 @@ function daemon(list: ConversationEntry[]) {
         if (state.rename) return new Response(null, { status: state.rename });
         state.list = state.list.map((each) => {
           if (!path.startsWith(`/api/conversations/${each.sessionId}/`)) return each;
-          const { tag, pinned, archived, ...rest } = { ...each, ...body };
+          const { tags, pinned, archived, ...rest } = {
+            ...each,
+            ...body,
+            ...(body.tags ? { tags: body.tags.map((id: "red") => ({ id, color: id })) } : {}),
+          };
           return {
             ...rest,
-            ...(tag ? { tag } : {}),
+            ...(tags?.length ? { tags } : {}),
             ...(pinned ? { pinned } : {}),
             ...(archived ? { archived } : {}),
           };
@@ -419,13 +423,13 @@ it("tags, pins and archives from a row's menu, opened from the keyboard or a rig
   const row = await screen.findByRole("button", { name: /^Plan the trip/ });
   row.focus();
   fireEvent.keyDown(row, { key: "F10", shiftKey: true });
-  fireEvent.click(within(menu()).getByRole("menuitemradio", { name: "Blue" }));
+  fireEvent.click(within(menu()).getByRole("menuitemcheckbox", { name: "Blue" }));
   expect(row.getAttribute("aria-label")).toBe("Plan the trip, blue tag, done, 1 h");
   expect(row.querySelector(".ui-tag-mark")?.getAttribute("data-tag")).toBe("blue");
 
   fireEvent.contextMenu(row);
   expect(
-    within(menu()).getByRole("menuitemradio", { name: "Blue" }).getAttribute("aria-checked"),
+    within(menu()).getByRole("menuitemcheckbox", { name: "Blue" }).getAttribute("aria-checked"),
   ).toBe("true");
   fireEvent.click(within(menu()).getByRole("menuitem", { name: "Pin to top" }));
   await waitFor(() =>
@@ -452,7 +456,7 @@ it("tags, pins and archives from a row's menu, opened from the keyboard or a rig
   );
   expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
   expect(state.posts).toEqual([
-    { path: `/api/conversations/${trip.sessionId}/tag`, body: { tag: "blue" } },
+    { path: `/api/conversations/${trip.sessionId}/tags`, body: { tags: ["blue"] } },
     { path: `/api/conversations/${trip.sessionId}/pin`, body: { pinned: true } },
     { path: `/api/conversations/${dog.sessionId}/archive`, body: { archived: true } },
     { path: `/api/conversations/${dog.sessionId}/archive`, body: { archived: false } },
@@ -509,14 +513,14 @@ it("follows the tags, pins and archives other viewers make", async () => {
         data: JSON.stringify({
           type: "conversation.organized",
           sessionId,
-          tag: null,
+          tags: [],
           pinned: false,
           archived: false,
           ...over,
         }),
       }),
     );
-  await organized(trip.sessionId, { tag: "red", pinned: true });
+  await organized(trip.sessionId, { tags: [{ id: "red", color: "red" }], pinned: true });
   expect(
     within(group("Pinned"))
       .getByRole("button", { name: /^Plan the trip/ })

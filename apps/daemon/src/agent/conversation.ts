@@ -11,6 +11,7 @@ import {
 import {
   AgentRoleChoice,
   type AskFieldRecord,
+  type ChangeTag,
   CONVERSATION_LIST,
   CONVERSATION_TASKS,
   CONVERSATION_WITHDRAWN,
@@ -19,6 +20,8 @@ import {
   type ConversationOrganizedEvent,
   type ConversationSnapshot,
   ConversationTag,
+  type CreateTag,
+  DEFAULT_SMART_TAGS,
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
   EARLIER_TURN_CHARS,
@@ -27,8 +30,15 @@ import {
   type LocalDotEvent,
   LookWearables,
   messageName,
+  NamedTag,
   type PersonaId,
+  SmartTagOptions,
+  TAG_LIBRARY,
+  TAGS_PER_CONVERSATION,
+  TagId,
+  type TagOnConversation,
   ULID_PATTERN,
+  ulid,
   ulidTime,
 } from "@localdot/protocol";
 import { z } from "zod";
@@ -57,7 +67,9 @@ const Withdrawn = z.strictObject({
 const ORGANIZED_FILE = "conversations-organized.json";
 const ORGANIZED_BYTES = 4 * 1024 * 1024;
 const Organized = z.strictObject({
+  // Its one colour, from before tags had names.
   tag: ConversationTag.optional(),
+  tags: z.array(TagId).max(TAGS_PER_CONVERSATION).optional(),
   pinned: z.literal(true).optional(),
   // Its latest task when it was archived: a task that goes on with it brings it back.
   archived: z.string().regex(ULID_PATTERN).optional(),
@@ -70,11 +82,25 @@ const OrganizedFile = z.strictObject({
 });
 export type ConversationOrganization = Omit<ConversationOrganizedEvent, "type">;
 export interface OrganizeConversation {
-  tag?: ConversationTag | null;
+  tags?: readonly TagId[];
   pinned?: boolean;
   archived?: boolean;
   look?: LookWearables | null;
 }
+// The tags the user named, and how dot sorts conversations into them.
+const TAGS_FILE = "conversation-tags.json";
+const TAGS_BYTES = 256 * 1024;
+const TagsFile = z.strictObject({
+  v: z.literal(1),
+  tags: z.array(NamedTag).max(TAG_LIBRARY),
+  smart: SmartTagOptions.optional(),
+});
+type TagsFile = z.infer<typeof TagsFile>;
+const tagIdsOf = (record: Organized | undefined): TagId[] =>
+  record?.tags ?? (record?.tag ? [record.tag] : []);
+const sameName = (a: string, b: string) =>
+  a.localeCompare(b, undefined, { sensitivity: "accent" }) === 0;
+export class TagError extends Error {}
 // A session.start and the task's first message sit in the first lines of a task's log.
 const HEAD_BYTES = 16 * 1024;
 const HEAD_EVENTS = 8;
@@ -556,10 +582,11 @@ ${checkpoint}`),
     keep?: (sessions: readonly string[]) => boolean,
   ): Required<ConversationList> {
     const records = this.#organized();
+    const library = this.tags();
     const found = (keep ? this.#found().filter((each) => keep(each.sessions)) : this.#found()).map(
       (conversation) => ({
         ...conversation,
-        ...this.#organization(conversation.sessions[0] ?? "", records),
+        ...this.#organization(conversation.sessions[0] ?? "", records, library),
       }),
     );
     const shown = found.filter((conversation) => conversation.archived === archived);
@@ -572,6 +599,7 @@ ${checkpoint}`),
     return {
       conversations: shown.filter((each) => kept.has(each)).map((each) => this.#entry(each)),
       archivedCount: found.filter((each) => each.archived).length,
+      tags: this.tags(),
     };
   }
 
@@ -593,27 +621,130 @@ ${checkpoint}`),
   // Tags, pins or archives the conversation this task is part of; what the change leaves out stays.
   organize(sessionId: string, change: OrganizeConversation): ConversationOrganization {
     const latest = this.latest(sessionId);
-    const root = this.#root(latest);
     const records = this.#organized();
+    const library = this.tags();
+    this.#refile(records, latest, change, library);
+    this.#saveOrganized(records);
+    return this.#organization(latest, records, library);
+  }
+
+  // Gives each conversation all the tags it carries now, in one write.
+  retag(changes: readonly { sessionId: string; tags: readonly TagId[] }[]): void {
+    const records = this.#organized();
+    const library = this.tags();
+    for (const { sessionId, tags } of changes)
+      this.#refile(records, this.latest(sessionId), { tags }, library);
+    this.#saveOrganized(records);
+  }
+
+  // The tags a conversation carries, by id.
+  tagsOf(sessionId: string): TagId[] {
+    return tagIdsOf(this.#organized().get(this.#root(this.latest(sessionId))));
+  }
+
+  // The tags the user named.
+  tags(): NamedTag[] {
+    return this.#tagsFile().tags;
+  }
+
+  // A tag named as one the user has is that one.
+  createTag({ name, color }: CreateTag): NamedTag {
+    const file = this.#tagsFile();
+    const same = file.tags.find((tag) => sameName(tag.name, name));
+    if (same) return same;
+    if (file.tags.length >= TAG_LIBRARY) throw new TagError("You have as many tags as dot keeps.");
+    const tag: NamedTag = { id: ulid(), name, color };
+    this.#saveTags({ ...file, tags: [...file.tags, tag] });
+    return tag;
+  }
+
+  changeTag(id: string, change: ChangeTag): NamedTag | undefined {
+    const file = this.#tagsFile();
+    const was = file.tags.find((tag) => tag.id === id);
+    if (!was) return undefined;
+    if (
+      change.name !== undefined &&
+      file.tags.some((tag) => tag.id !== id && sameName(tag.name, change.name ?? ""))
+    )
+      throw new TagError("Another tag has that name.");
+    const tag: NamedTag = { ...was, ...change };
+    this.#saveTags({ ...file, tags: file.tags.map((each) => (each.id === id ? tag : each)) });
+    return tag;
+  }
+
+  // The tag goes, and every conversation lets it go.
+  deleteTag(id: string): boolean {
+    const file = this.#tagsFile();
+    if (!file.tags.some((tag) => tag.id === id)) return false;
+    this.#saveTags({ ...file, tags: file.tags.filter((tag) => tag.id !== id) });
+    const records = this.#organized();
+    let changed = false;
+    for (const [root, record] of records) {
+      const ids = tagIdsOf(record);
+      if (!ids.includes(id)) continue;
+      changed = true;
+      const { tag: _colour, tags: _tags, ...rest } = record;
+      const kept = ids.filter((each) => each !== id);
+      const next: Organized = { ...rest, ...(kept.length ? { tags: kept } : {}) };
+      if (Object.keys(next).length) records.set(root, next);
+      else records.delete(root);
+    }
+    if (changed) this.#saveOrganized(records);
+    return true;
+  }
+
+  smartTagOptions(): SmartTagOptions {
+    return this.#tagsFile().smart ?? DEFAULT_SMART_TAGS;
+  }
+
+  setSmartTagOptions(smart: SmartTagOptions): void {
+    this.#saveTags({ ...this.#tagsFile(), smart });
+  }
+
+  #refile(
+    records: Map<string, Organized>,
+    latest: string,
+    change: OrganizeConversation,
+    library: readonly NamedTag[],
+  ): void {
+    const root = this.#root(latest);
     const was = records.get(root);
-    const tag = change.tag === undefined ? was?.tag : (change.tag ?? undefined);
+    const known = (id: TagId) =>
+      ConversationTag.safeParse(id).success || library.some((tag) => tag.id === id);
+    const tags = (change.tags ?? tagIdsOf(was)).filter(known);
     const pinned = change.pinned ?? !!was?.pinned;
     const archived = change.archived ?? was?.archived === latest;
     const look = change.look === undefined ? was?.look : (change.look ?? undefined);
     const next: Organized = {
-      ...(tag ? { tag } : {}),
+      ...(tags.length ? { tags: [...new Set(tags)].slice(0, TAGS_PER_CONVERSATION) } : {}),
       ...(pinned ? { pinned: true } : {}),
       ...(archived ? { archived: latest } : {}),
       ...(look ? { look } : {}),
     };
     if (Object.keys(next).length) records.set(root, next);
     else records.delete(root);
+  }
+
+  #saveOrganized(records: Map<string, Organized>): void {
     for (const id of records.keys()) if (!this.log.hasSession(id)) records.delete(id);
     this.#files.write(
       ORGANIZED_FILE,
       `${JSON.stringify({ v: 1, conversations: Object.fromEntries(records) })}\n`,
     );
-    return { sessionId: latest, tag: tag ?? null, pinned, archived, look: look ?? null };
+  }
+
+  #tagsFile(): TagsFile {
+    try {
+      const text = this.#files.text(TAGS_FILE, TAGS_BYTES);
+      if (text !== undefined) return TagsFile.parse(JSON.parse(text));
+    } catch {
+      console.error("the conversation tags could not be read");
+    }
+    return { v: 1, tags: [] };
+  }
+
+  #saveTags(file: TagsFile): void {
+    this.#files.write(TAGS_FILE, `${JSON.stringify(file)}\n`);
   }
 
   // The conversations among the newest sessions, newest first: each task joins the conversation of
@@ -641,7 +772,7 @@ ${checkpoint}`),
   #entry(
     conversation: { sessions: string[]; startedAt: string } & ConversationOrganization,
   ): ConversationEntry {
-    const { sessionId, sessions, tag, pinned, archived, look } = conversation;
+    const { sessionId, sessions, tags, pinned, archived, look } = conversation;
     let title: string | null = null;
     let said: string | null = null;
     for (const id of sessions) {
@@ -666,7 +797,7 @@ ${checkpoint}`),
       ...(line ? { line } : {}),
       startedAt: new Date(Number.isFinite(started) ? started : ulidTime(sessionId)).toISOString(),
       ended: end?.reason ?? null,
-      ...(tag ? { tag } : {}),
+      ...(tags.length ? { tags } : {}),
       ...(pinned ? { pinned } : {}),
       ...(archived ? { archived } : {}),
       firstTask,
@@ -701,11 +832,20 @@ ${checkpoint}`),
     return dot;
   }
 
-  #organization(latest: string, records: Map<string, Organized>): ConversationOrganization {
+  #organization(
+    latest: string,
+    records: Map<string, Organized>,
+    library: readonly NamedTag[],
+  ): ConversationOrganization {
     const record = records.size ? records.get(this.#root(latest)) : undefined;
     return {
       sessionId: latest,
-      tag: record?.tag ?? null,
+      tags: tagIdsOf(record).flatMap((id): TagOnConversation[] => {
+        const colour = ConversationTag.safeParse(id);
+        if (colour.success) return [{ id, color: colour.data }];
+        const named = library.find((tag) => tag.id === id);
+        return named ? [{ id, color: named.color, name: named.name }] : [];
+      }),
       pinned: !!record?.pinned,
       archived: record?.archived === latest,
       look: record?.look ?? null,

@@ -31,13 +31,13 @@ async function underWay(page: Page) {
       json: {
         archivedCount,
         conversations: conversations.map(
-          (entry: { sessionId: string; title: string | null; tag?: string }) => {
+          (entry: { sessionId: string; title: string | null; tags?: unknown[] }) => {
             const title = entry.title ?? "";
             const state = live.find(([name]) => name.test(title))?.[1];
             const tag = tags.find(([name]) => name.test(title))?.[1];
             return {
               ...entry,
-              ...(tag && !entry.tag ? { tag } : {}),
+              ...(tag && !entry.tags?.length ? { tags: [{ id: tag, color: tag }] } : {}),
               ...(state ? { ended: null, live: { ...state, since: SINCE } } : {}),
             };
           },
@@ -79,7 +79,7 @@ for (const appearance of ["graphite", "daylight"])
         /^Summarise the Q3 board deck.*\. Waiting for the computer\./,
       );
       await expect(rows.nth(0).locator(".conversation-avatar-point")).toBeVisible();
-      await expect(page.getByRole("group", { name: "Show only a colour tag" })).toContainText(
+      await expect(page.getByRole("group", { name: "Show only a tag" })).toContainText(
         "OrangeBluePurple",
       );
       // The needs-you row takes two lines, the others one.

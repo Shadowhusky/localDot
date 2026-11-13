@@ -612,7 +612,7 @@ export function walkTheApp(look: Look) {
                 const tag = tags.find(([name]) => name.test(title))?.[1];
                 return {
                   ...entry,
-                  ...(tag ? { tag } : {}),
+                  ...(tag ? { tags: [{ id: tag, color: tag }] } : {}),
                   ...(state ? { ended: null, live: { ...state, since: FIXTURE_START } } : {}),
                 };
               }),
