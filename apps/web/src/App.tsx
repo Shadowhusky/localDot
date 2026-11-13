@@ -333,13 +333,35 @@ const ReplayView = lazyScreen(() =>
 const Onboarding = lazyScreen(() =>
   import("./onboarding/Onboarding.tsx").then((module) => module.Onboarding),
 );
-const LOAD_AHEAD_MS = 1500;
+// One at a time, each when the page is idle, so loading never takes a frame from a gesture.
+const LOAD_AHEAD_MS = 3000;
 function loadAhead(): () => void {
-  const timer = setTimeout(() => {
-    for (const screen of [SettingsSheet, Overview, ReplayView])
-      void screen.preload().catch(() => {});
-  }, LOAD_AHEAD_MS);
-  return () => clearTimeout(timer);
+  const waiting = [SettingsSheet, Overview, ReplayView];
+  let stopped = false;
+  let idle: number | undefined;
+  const later = (run: () => void) =>
+    typeof requestIdleCallback === "function"
+      ? requestIdleCallback(run, { timeout: 10_000 })
+      : window.setTimeout(run, 500);
+  const next = () => {
+    const screen = waiting.shift();
+    if (stopped || !screen) return;
+    idle = later(
+      () =>
+        void screen
+          .preload()
+          .catch(() => {})
+          .finally(next),
+    );
+  };
+  const timer = window.setTimeout(next, LOAD_AHEAD_MS);
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+    if (idle === undefined) return;
+    if (typeof cancelIdleCallback === "function") cancelIdleCallback(idle);
+    else clearTimeout(idle);
+  };
 }
 const FROM_WATCH = { fromWatch: true };
 const FROM_LIBRARY = { fromLibrary: true };
