@@ -20,7 +20,7 @@ import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
-import { TAG_NAMES, TagDot, TagSwatches } from "../ui/ConversationTag.tsx";
+import { ColourChoice, TagDot, TagSwatches } from "../ui/ConversationTag.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Popover } from "../ui/Popover.tsx";
@@ -218,24 +218,12 @@ function TagEditor({
           {problem}
         </p>
       )}
-      {/* biome-ignore lint/a11y/useSemanticElements: a row of colour choices, not a form's fieldset. */}
-      <div role="radiogroup" aria-label={t`Colour`} className="ui-tag-swatches">
-        {CONVERSATION_TAGS.map((colour) => (
-          // biome-ignore lint/a11y/useSemanticElements: a swatch is a coloured button, not a radio input's circle.
-          <button
-            key={colour}
-            type="button"
-            role="radio"
-            aria-checked={tag.color === colour}
-            aria-label={TAG_NAMES[colour]}
-            data-tag={colour}
-            className="ui-tag-swatch"
-            onClick={() => {
-              if (colour !== tag.color) changeTag(api, tag.id, { color: colour }).catch(failed);
-            }}
-          />
-        ))}
-      </div>
+      <ColourChoice
+        value={tag.color}
+        onSelect={(colour) => {
+          if (colour !== tag.color) changeTag(api, tag.id, { color: colour }).catch(failed);
+        }}
+      />
       <div className="tag-editor-actions">
         {deleting ? (
           <>

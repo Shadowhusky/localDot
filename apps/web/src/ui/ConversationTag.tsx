@@ -48,6 +48,34 @@ export function TagNames({ tags }: { tags: readonly TagOnConversation[] | undefi
   );
 }
 
+// The one colour a tag of the user's takes.
+export function ColourChoice({
+  value,
+  onSelect,
+}: {
+  value: ConversationTag;
+  onSelect(colour: ConversationTag): void;
+}) {
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a row of colour choices, not a form's fieldset.
+    <div role="radiogroup" aria-label={t`Colour`} className="ui-tag-swatches">
+      {CONVERSATION_TAGS.map((colour) => (
+        // biome-ignore lint/a11y/useSemanticElements: a swatch is a coloured button, not a radio input's circle.
+        <button
+          key={colour}
+          type="button"
+          role="radio"
+          aria-checked={value === colour}
+          aria-label={TAG_NAMES[colour]}
+          data-tag={colour}
+          className="ui-tag-swatch"
+          onClick={() => onSelect(colour)}
+        />
+      ))}
+    </div>
+  );
+}
+
 // A conversation's colour tag, drawn by its status glyph inside the glyph's own box, so it moves
 // and scales with the glyph. The row's name says the tag; this only shows it.
 export function TagMark({ tag }: { tag?: ConversationTag | undefined }) {

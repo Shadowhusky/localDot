@@ -695,7 +695,7 @@
 
     /* Its room is kept at the row's end, at the gutter, so it sits beside the date, never over it. */
     .phone-row > .ui-button-content {
-      padding-inline-end: calc(28px + var(--spacing) * 2);
+      padding-inline-end: calc(var(--spacing) * 9);
     }
   }
 
