@@ -82,10 +82,10 @@
     stroke: var(--color-track-strong);
   }
 
-  /* Only the arc turns, slowly, around dot at the centre. */
-  .ui-glyph-turn {
-    transform-box: view-box;
-    transform-origin: center;
+  /* The arc turns, slowly, around dot at the centre. The whole icon turns with it, its ring and dot
+     being round: the compositor runs that, where an arc turning inside its SVG is laid out and
+     painted again on every frame for as long as dot works. */
+  .ui-icon:has(> .ui-glyph-turn) {
     animation: ui-spin calc(var(--loop-turn) * 2) linear infinite;
   }
 
@@ -1295,7 +1295,7 @@
     }
 
     /* The arc stands at twelve o'clock, still reading as work under way against the faint ring. */
-    .ui-glyph-turn {
+    .ui-icon:has(> .ui-glyph-turn) {
       animation: none;
     }
 
