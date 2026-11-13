@@ -1992,8 +1992,27 @@
 
   /* A tablet: the list beside the conversation. */
   .phone-stack[data-split] {
-    --_split: clamp(300px, 38%, 368px);
+    --_split: var(--chat-list-w);
     --_reading: 960px;
+  }
+
+  /* Its edge with the conversation takes a drag, as Studio's rails do. */
+  .phone-stack > .rail-resize.chat-list-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--_split);
+    display: block;
+    margin: 0;
+    translate: -50% 0;
+  }
+
+  .phone-stack[data-list-hidden] > .rail-resize.chat-list-resize {
+    display: none;
+  }
+
+  .phone-stack:has(> .chat-list-resize[data-dragging]) > :is(.phone-list, .phone-chat) {
+    transition: none;
   }
 
   /* A wide screen gives the thread its room, up to a measure that still reads, its foot under it. */

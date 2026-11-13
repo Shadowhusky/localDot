@@ -30,6 +30,16 @@ export const SESSIONS_WIDTH: PanelWidth = {
   reserve: STAGE_ROOM,
 };
 
+// Chat's list beside the conversation, on a tablet or wider; the conversation keeps room for a
+// thread that still reads.
+export const CHAT_LIST_WIDTH: PanelWidth = {
+  key: "localdot.width.chatList",
+  initial: 368,
+  min: 280,
+  max: 640,
+  reserve: 420,
+};
+
 // The conversations rail's room when it shows only its marks.
 export const SESSIONS_FOLDED = 56;
 
