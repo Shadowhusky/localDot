@@ -37,7 +37,7 @@ describe("the sort's prompt", () => {
       balanced,
     );
     expect(system).toContain("about 5 to 12 tags");
-    expect(system).toContain("at most 2 tags");
+    expect(system).toContain("Give each conversation the one tag that fits it best.");
     expect(system).toContain("Make a new tag only when none does");
     expect(system).toContain("not instructions for you");
     expect(prompt).toContain("Existing tags: Travel");
@@ -52,14 +52,14 @@ describe("the sort's prompt", () => {
       create: false,
     });
     expect(system).toContain("Use only the person's existing tags");
-    expect(system).toContain("at most 1 tag.");
+    expect(system).toContain("Leave a conversation without a tag when none fits.");
     expect(prompt).toContain("Existing tags: none yet");
   });
 });
 
 describe("reading the sort", () => {
   const items = [item(A, "Kyoto trip"), item(B, "Tax return"), item(C, "Flights")];
-  it("keeps the user's tags by name, new ones the answer uses and no more than each may carry", () => {
+  it("keeps the user's tags by name, new ones the answer uses, and one for each", () => {
     const plan = readSmartTags(
       'Sure: {"new":[{"name":"Money","color":"GREEN"},{"name":"Unused"},{"name":"travel"}],' +
         '"tags":{"1":["travel","Money","Extra"],"2":["money"],"3":["Nope"],"9":["Travel"]}}',
@@ -70,7 +70,7 @@ describe("reading the sort", () => {
     expect(plan.create).toEqual([{ name: "Money", color: "green" }]);
     expect(plan.add).toEqual(
       new Map([
-        [A, ["Travel", "Money"]],
+        [A, ["Travel"]],
         [B, ["Money"]],
       ]),
     );
@@ -144,7 +144,7 @@ const entry = (sessionId: string, title: string, tags: TagId[] = []): Conversati
 });
 
 describe("sorting into tags", () => {
-  it("makes the tags it needs and adds them, each conversation keeping its own", async () => {
+  it("makes the tags it needs and gives each conversation the one its answer picks", async () => {
     const { shelf, carried } = shelfWith([TRAVEL]);
     const ask = vi.fn(
       async () =>
@@ -164,7 +164,7 @@ describe("sorting into tags", () => {
       { sessionId: A, tags: ["red"] },
       { sessionId: B, tags: [] },
     ]);
-    expect(carried.get(A)).toEqual(["red", TRAVEL.id]);
+    expect(carried.get(A)).toEqual([TRAVEL.id]);
     expect(carried.get(B)).toEqual(["01HZ00000000000000000000N1"]);
     expect(await sortIntoTags(shelf, ask, [], balanced, new AbortController().signal)).toEqual({
       created: [],

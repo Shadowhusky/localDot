@@ -28,25 +28,8 @@ export const tagName = (tag: Pick<TagOnConversation, "color" | "name">) =>
 export const tagWords = (tag: Pick<TagOnConversation, "color" | "name">) =>
   tag.name ? t`${tag.name} tag` : t`${TAG_NAMES[tag.color].toLowerCase()} tag`;
 
-// The colour a conversation's mark shows: its first colour's, else its first tag's.
-export const markOf = (entry: ConversationEntry) =>
-  (entry.tags?.find((tag) => !tag.name) ?? entry.tags?.[0])?.color;
-
-// The user's own tags a row names, a colour before each; the colours alone are its mark.
-export function TagNames({ tags }: { tags: readonly TagOnConversation[] | undefined }) {
-  const named = tags?.filter((tag) => tag.name) ?? [];
-  if (!named.length) return null;
-  return (
-    <span className="ui-tag-names">
-      {named.map((tag) => (
-        <span key={tag.id} className="ui-tag-name">
-          <TagDot tag={tag.color} />
-          {tag.name}
-        </span>
-      ))}
-    </span>
-  );
-}
+// The colour a conversation's mark shows: its tag's.
+export const markOf = (entry: ConversationEntry) => entry.tags?.[0]?.color;
 
 // The one colour a tag of the user's takes.
 export function ColourChoice({
@@ -89,10 +72,10 @@ export function TagDot({ tag }: { tag: ConversationTag }) {
 
 const ITEMS = "[role=menuitem], [role=menuitemradio], [role=menuitemcheckbox]";
 
-// The colours as one row of swatches in a menu, as Finder's: none first, those given ringed. A colour
-// is given or taken off; none takes every tag off. Left and right move along the row; up and down
-// leave it for the items above and below. In a menu, or on its own (`standalone`), as in a
-// conversation's details: a set of checkboxes there.
+// The colours as one row of swatches in a menu, as Finder's: none first, the one given ringed. A
+// colour is given, or taken off when it is the one there; none takes the tag off. Left and right move
+// along the row; up and down leave it for the items above and below. In a menu, or on its own
+// (`standalone`), as in a conversation's details: a set of radios there.
 export function TagSwatches({
   chosen,
   onSelect,
@@ -127,14 +110,14 @@ export function TagSwatches({
   const tags = [null, ...CONVERSATION_TAGS];
   if (standalone)
     return (
-      // biome-ignore lint/a11y/useSemanticElements: a row of toggles, not a form's fieldset.
-      <div role="group" aria-label={t`Tag`} className="ui-tag-swatches">
+      // biome-ignore lint/a11y/useSemanticElements: a row of colours, not a form's fieldset.
+      <div role="radiogroup" aria-label={t`Tag`} className="ui-tag-swatches">
         {tags.map((tag) => (
-          // biome-ignore lint/a11y/useSemanticElements: a swatch is a coloured button, not a checkbox's box.
+          // biome-ignore lint/a11y/useSemanticElements: a swatch is a coloured button, not a radio input's circle.
           <button
             key={tag ?? "none"}
             type="button"
-            role="checkbox"
+            role="radio"
             aria-checked={given(tag)}
             aria-label={tag ? TAG_NAMES[tag] : t`No tag`}
             data-tag={tag ?? "none"}
@@ -174,7 +157,7 @@ function Swatch({
   return (
     <button
       {...item}
-      role="menuitemcheckbox"
+      role="menuitemradio"
       aria-checked={checked}
       aria-label={name}
       data-label={name}

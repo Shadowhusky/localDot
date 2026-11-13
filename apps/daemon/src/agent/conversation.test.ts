@@ -310,24 +310,20 @@ describe("organizing conversations", () => {
     expect(back.conversations[0]).not.toHaveProperty("archived");
   });
 
-  it("gives a conversation the tags the user named, which carry their names and colours", async () => {
+  it("gives a conversation one tag, a colour or one the user named with its name and colour", async () => {
     const f = setup();
     const trip = await f.task("Plan the trip");
     const store = f.open();
     const work = store.createTag({ name: "Travel", color: "orange" });
     expect(store.createTag({ name: "travel", color: "red" })).toEqual(work);
-    store.organize(trip, { tags: ["blue", work.id, "01ARZ3NDEKTSV4RRFFQ69G5FAV"] });
+    store.organize(trip, { tags: [work.id] });
     expect(f.open().list()).toMatchObject({
       tags: [work],
-      conversations: [
-        {
-          tags: [
-            { id: "blue", color: "blue" },
-            { id: work.id, color: "orange", name: "Travel" },
-          ],
-        },
-      ],
+      conversations: [{ tags: [{ id: work.id, color: "orange", name: "Travel" }] }],
     });
+    store.organize(trip, { tags: ["01ARZ3NDEKTSV4RRFFQ69G5FAV"] });
+    expect(f.open().list().conversations[0]).not.toHaveProperty("tags");
+    store.organize(trip, { tags: [work.id] });
     expect(f.open().changeTag(work.id, { name: "Trips", color: "green" })).toEqual({
       ...work,
       name: "Trips",
@@ -336,10 +332,31 @@ describe("organizing conversations", () => {
     const other = f.open().createTag({ name: "Work", color: "blue" });
     expect(() => f.open().changeTag(other.id, { name: "TRIPS" })).toThrow(TagError);
     expect(f.open().deleteTag(work.id)).toBe(true);
-    expect(f.open().list().conversations[0]?.tags).toEqual([{ id: "blue", color: "blue" }]);
+    expect(f.open().list().conversations[0]).not.toHaveProperty("tags");
     expect(f.open().tags()).toEqual([other]);
     expect(f.open().deleteTag(work.id)).toBe(false);
     expect(ConversationList.parse(f.open().list())).toBeTruthy();
+  });
+
+  // Before a conversation carried one tag it could carry several: the last given stays, and the
+  // file still reads, pins and all.
+  it("keeps the last of the tags a conversation carried before it carried one", async () => {
+    const f = setup();
+    const trip = await f.task("Plan the trip");
+    const named = "01HZ0000000000000000000T01";
+    writeFileSync(
+      join(f.home, "conversation-tags.json"),
+      JSON.stringify({ v: 1, tags: [{ id: named, name: "Travel", color: "orange" }] }),
+    );
+    writeFileSync(
+      join(f.home, "conversations-organized.json"),
+      JSON.stringify({ v: 1, conversations: { [trip]: { tags: ["blue", named], pinned: true } } }),
+    );
+    expect(f.open().list().conversations[0]).toMatchObject({
+      pinned: true,
+      tags: [{ id: named, name: "Travel" }],
+    });
+    expect(f.open().tagsOf(trip)).toEqual([named]);
   });
 
   it("reads a colour kept before tags had names as that colour's tag", async () => {

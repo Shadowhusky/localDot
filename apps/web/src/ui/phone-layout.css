@@ -616,11 +616,6 @@
     min-width: 0;
   }
 
-  .phone-row-foot > .ui-tag-names {
-    align-self: center;
-    max-width: 50%;
-  }
-
   .phone-row-line {
     flex: 1;
     display: -webkit-box;

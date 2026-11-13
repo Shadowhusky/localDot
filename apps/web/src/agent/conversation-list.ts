@@ -308,10 +308,9 @@ const filingOf = (change: Organize, library: readonly NamedTag[]): Filing =>
     ? { tags: change.tags.flatMap((id) => tagOf(id, library) ?? []) }
     : (change as Filing);
 
-// The tags with one given or taken off; none takes them all off.
+// A conversation's one tag: the one chosen, or none when it is chosen again or none is.
 export function toggledTag(ids: readonly TagId[], tag: TagId | null): TagId[] {
-  if (tag === null) return [];
-  return ids.includes(tag) ? ids.filter((id) => id !== tag) : [...ids, tag];
+  return tag === null || ids.includes(tag) ? [] : [tag];
 }
 
 export const tagIds = (entry: ConversationEntry | null | undefined): TagId[] =>

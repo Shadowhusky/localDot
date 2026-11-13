@@ -19,8 +19,8 @@ import {
 import { t } from "../i18n/index.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
-import { Checkbox } from "../ui/Checkbox.tsx";
 import { ColourChoice, TagDot, TagSwatches } from "../ui/ConversationTag.tsx";
+import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Popover } from "../ui/Popover.tsx";
@@ -37,9 +37,9 @@ function nextColour(library: readonly NamedTag[]): ConversationTag {
   return [...CONVERSATION_TAGS].sort((a, b) => uses(a) - uses(b))[0] ?? "blue";
 }
 
-// The tags one conversation carries: the colours, and the user's own tags, found or made by typing
-// a name. Each choice is saved at once, as a colour is from the menu; a tag can be renamed,
-// recoloured or deleted here too.
+// A conversation's one tag: a colour, or one of the user's own, found or made by typing a name.
+// Each choice is saved at once, as a colour is from the menu; a tag can be renamed, recoloured or
+// deleted here too.
 export function TagChooser({
   api,
   entry,
@@ -91,7 +91,7 @@ function TagPanel({ api, entry }: { api: ApiClient; entry: ConversationEntry }) 
     if (!name.success || exact) return;
     createTag(api, { name: name.data, color: nextColour(library) }).then((tag) => {
       setQuery("");
-      save([...chosen.filter((id) => id !== tag.id), tag.id]);
+      save([tag.id]);
     }, failed);
   };
   return (
@@ -110,7 +110,7 @@ function TagPanel({ api, entry }: { api: ApiClient; entry: ConversationEntry }) 
           event.preventDefault();
           const only = shown.length === 1 ? shown[0] : undefined;
           if (!exact && name.success) make();
-          else if (only && !chosen.includes(only.id)) save([...chosen, only.id]);
+          else if (only && !chosen.includes(only.id)) save([only.id]);
         }}
       />
       <div className="tag-chooser-list">
@@ -125,18 +125,16 @@ function TagPanel({ api, entry }: { api: ApiClient; entry: ConversationEntry }) 
             />
           ) : (
             <div key={tag.id} className="tag-chooser-row">
-              <Checkbox
-                label={
-                  <span className="tag-chooser-name">
-                    <TagDot tag={tag.color} />
-                    {tag.name}
-                  </span>
-                }
-                checked={chosen.includes(tag.id)}
-                onCheckedChange={(checked) =>
-                  save(checked ? [...chosen, tag.id] : chosen.filter((id) => id !== tag.id))
-                }
-              />
+              <Button
+                variant="quiet"
+                className="tag-chooser-pick"
+                aria-pressed={chosen.includes(tag.id)}
+                onClick={() => save(toggledTag(chosen, tag.id))}
+              >
+                <TagDot tag={tag.color} />
+                <span className="tag-chooser-name">{tag.name}</span>
+                {chosen.includes(tag.id) && <Icon name="check" size={16} />}
+              </Button>
               <IconButton
                 icon="settings"
                 size={28}

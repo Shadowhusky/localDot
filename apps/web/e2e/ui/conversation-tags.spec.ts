@@ -17,6 +17,7 @@ async function menuOf(page: Page, title: string) {
 }
 
 // A tag the user names, made where it is given, then a way to show only the conversations with it.
+// A conversation carries one tag: a colour given after it takes its place.
 test("a row's menu makes a tag and gives it, and the list shows only those with it", async ({
   page,
   ui,
@@ -29,32 +30,37 @@ test("a row's menu makes a tag and gives it, and the list shows only those with 
   await expect(chooser).toBeVisible();
   await chooser.getByRole("textbox", { name: "Find or make a tag" }).fill("Home");
   await chooser.getByRole("button", { name: "Make the tag “Home”" }).click();
-  await expect(chooser.getByRole("checkbox", { name: "Home" })).toBeChecked();
-  await chooser.getByRole("checkbox", { name: "Blue" }).click();
-  await expect(chooser.getByRole("checkbox", { name: "Blue" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  const home = chooser.getByRole("button", { name: "Home", exact: true });
+  await expect(home).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Escape");
   await expect(chooser).toBeHidden();
 
   const row = rowOf(page, /^Clean up my Downloads/);
-  await expect(row.locator(".ui-tag-name")).toHaveText("Home");
-  await expect(row.locator(".ui-tag-mark")).toHaveAttribute("data-tag", "blue");
+  // The row draws its tag as a colour at its edge, and says its name.
+  await expect(row.locator(".ui-tag-name")).toHaveCount(0);
+  await expect(row.locator(".ui-tag-mark")).toBeVisible();
+  await expect(
+    row.getByRole("button", { name: /^Clean up my Downloads folder, Home tag\./ }),
+  ).toBeVisible();
   await filters(page).getByRole("button", { name: "Home" }).click();
   await expect(page.locator(".phone-row-wrap")).toHaveCount(1);
   await filters(page).getByRole("button", { name: "Home" }).click();
   await expect(page.locator(".phone-row-wrap")).not.toHaveCount(1);
 
-  // Renamed and deleted where it was made; deleting takes it off every conversation.
+  // A colour given takes the named tag's place.
+  await (await menuOf(page, title)).getByRole("menuitemradio", { name: "Blue" }).click();
+  await expect(row.locator(".ui-tag-mark")).toHaveAttribute("data-tag", "blue");
+  await expect(filters(page).getByRole("button", { name: "Home" })).toHaveCount(0);
+
+  // Renamed and deleted where it was made.
   await (await menuOf(page, title)).getByRole("menuitem", { name: "Tags…" }).click();
+  await expect(home).toHaveAttribute("aria-pressed", "false");
   await chooser.getByRole("button", { name: "Edit Home" }).click();
   await chooser.getByRole("button", { name: "Delete tag" }).click();
   await chooser.getByRole("button", { name: "Delete tag" }).click();
-  await expect(chooser.getByRole("checkbox", { name: "Home" })).toHaveCount(0);
+  await expect(home).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await expect(row.locator(".ui-tag-name")).toHaveCount(0);
-  await expect(filters(page).getByRole("button", { name: "Home" })).toHaveCount(0);
+  await expect(row.locator(".ui-tag-mark")).toHaveAttribute("data-tag", "blue");
 });
 
 // The user's model sorts the conversations at once, as finely as asked; Undo takes the sort back.
@@ -75,10 +81,12 @@ test("Sort into tags tags every conversation with the user's model, and Undo tak
   await expect(toast).toContainText("New tags: Reports, Errands");
   await expect(filters(page).getByRole("button", { name: "Reports" })).toBeVisible();
   await expect(filters(page).getByRole("button", { name: "Errands" })).toBeVisible();
-  await expect(rowOf(page, /^Summarise the Q3/).locator(".ui-tag-name")).toHaveText("Reports");
+  await expect(
+    rowOf(page, /^Summarise the Q3/).getByRole("button", { name: /, Reports tag\./ }),
+  ).toBeVisible();
   await toast.getByRole("button", { name: "Undo" }).click();
   await expect(filters(page).getByRole("button", { name: "Errands" })).toHaveCount(0);
-  await expect(page.locator(".phone-row-wrap .ui-tag-name")).toHaveCount(0);
+  await expect(page.locator(".phone-row-wrap .ui-tag-mark")).toHaveCount(0);
 
   // Auto tagging is kept as soon as it is switched.
   await filters(page).getByRole("button", { name: "Sort into tags" }).click();
@@ -113,22 +121,22 @@ test("many tags keep to a row, the rest found under All tags", async ({ page, ui
     if (!reply) return route.abort().catch(() => {});
     const listed = await reply.json();
     const colours = ["red", "orange", "yellow", "green", "blue", "purple"];
-    let n = 0;
-    const named = (count: number) =>
-      Array.from({ length: count }, () => {
-        n += 1;
-        return {
-          id: `01HZ0000000000000000000T${String(n).padStart(2, "0")}`,
-          color: colours[n % colours.length],
-          name: `Topic ${n}`,
-        };
-      });
-    await route.fulfill({
-      json: {
-        ...listed,
-        conversations: listed.conversations.map((entry: object) => ({ ...entry, tags: named(2) })),
-      },
-    });
+    const first = listed.conversations[0];
+    // A dozen conversations, each with a tag of its own.
+    const conversations = Array.from({ length: 12 }, (_, at) => ({
+      ...first,
+      sessionId: `01HZ00000000000000000000${String(at + 10).padStart(2, "0")}`,
+      sessions: [`01HZ00000000000000000000${String(at + 10).padStart(2, "0")}`],
+      title: `Topic task ${at + 1}`,
+      tags: [
+        {
+          id: `01HZ0000000000000000000T${String(at + 1).padStart(2, "0")}`,
+          color: colours[at % colours.length],
+          name: `Topic ${at + 1}`,
+        },
+      ],
+    }));
+    await route.fulfill({ json: { ...listed, conversations } });
   });
   await ui.open("conversations");
   const row = filters(page);

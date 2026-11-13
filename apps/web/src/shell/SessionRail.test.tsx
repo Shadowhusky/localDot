@@ -423,13 +423,13 @@ it("tags, pins and archives from a row's menu, opened from the keyboard or a rig
   const row = await screen.findByRole("button", { name: /^Plan the trip/ });
   row.focus();
   fireEvent.keyDown(row, { key: "F10", shiftKey: true });
-  fireEvent.click(within(menu()).getByRole("menuitemcheckbox", { name: "Blue" }));
+  fireEvent.click(within(menu()).getByRole("menuitemradio", { name: "Blue" }));
   expect(row.getAttribute("aria-label")).toBe("Plan the trip, blue tag, done, 1 h");
   expect(row.querySelector(".ui-tag-mark")?.getAttribute("data-tag")).toBe("blue");
 
   fireEvent.contextMenu(row);
   expect(
-    within(menu()).getByRole("menuitemcheckbox", { name: "Blue" }).getAttribute("aria-checked"),
+    within(menu()).getByRole("menuitemradio", { name: "Blue" }).getAttribute("aria-checked"),
   ).toBe("true");
   fireEvent.click(within(menu()).getByRole("menuitem", { name: "Pin to top" }));
   await waitFor(() =>

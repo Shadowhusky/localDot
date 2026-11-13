@@ -138,8 +138,7 @@ export function SmartTagsDialog({
       {...(anchor ? { anchor } : {})}
       title={t`Sort into tags`}
       description={
-        unavailable ??
-        t`${model} reads each conversation and tags it. Tags are only added, never taken off.`
+        unavailable ?? t`${model} reads each conversation and gives it the one tag that fits.`
       }
       body={
         <div className="smart-tags">
@@ -174,6 +173,7 @@ export function SmartTagsDialog({
           />
           <Checkbox
             label={t`Only conversations without a tag`}
+            description={t`Off, a conversation's tag may change to one that fits better.`}
             checked={untagged}
             onCheckedChange={setUntagged}
           />

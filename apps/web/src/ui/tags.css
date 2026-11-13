@@ -47,27 +47,6 @@
     background-color: var(--_tag);
   }
 
-  .ui-tag-names {
-    display: inline-flex;
-    flex: none;
-    gap: calc(var(--spacing) * 2);
-    max-width: 60%;
-    overflow: hidden;
-  }
-
-  .ui-tag-name {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing);
-    min-width: 0;
-    overflow: hidden;
-    color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-    letter-spacing: var(--text-footnote--letter-spacing);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .ui-tag-swatches {
     display: flex;
     gap: var(--spacing);

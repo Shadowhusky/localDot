@@ -369,6 +369,7 @@ describe("replay APIs", () => {
       ["tags", { tags: ["pink"] }],
       ["tags", {}],
       ["tags", { tags: ["red", "red"] }],
+      ["tags", { tags: ["red", "blue"] }],
       ["tags", { tags: ["red"], pinned: true }],
       ["pin", { pinned: "yes" }],
       ["archive", { archived: null }],

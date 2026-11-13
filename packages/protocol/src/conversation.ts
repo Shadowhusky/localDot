@@ -51,9 +51,10 @@ export const ConversationTag = z.enum(CONVERSATION_TAGS);
 export type ConversationTag = z.infer<typeof ConversationTag>;
 
 export const TAG_NAME_CHARS = 32;
-// The most tags the user names, and the most one conversation carries.
+// The most tags the user names, and how many one conversation carries: one, so each sits in one
+// place.
 export const TAG_LIBRARY = 64;
-export const TAGS_PER_CONVERSATION = 8;
+export const TAGS_PER_CONVERSATION = 1;
 export const TagName = z
   .string()
   .trim()
@@ -80,7 +81,7 @@ const TagIds = z
   .array(TagId)
   .max(TAGS_PER_CONVERSATION)
   .refine((ids) => new Set(ids).size === ids.length, "Name each tag once");
-// All the tags a conversation carries now; none takes them all off.
+// The tag a conversation carries now; none takes it off.
 export const TagConversation = z.strictObject({ tags: TagIds });
 export type TagConversation = z.infer<typeof TagConversation>;
 export const CreateTag = z.strictObject({ name: TagName, color: ConversationTag });

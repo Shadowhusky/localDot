@@ -55,7 +55,7 @@ test("tags, pins and archives a conversation from its menu, and another viewer f
     await page.keyboard.press("Shift+F10");
     const menu = page.getByRole("menu", { name: "Conversation actions" });
     await expect(menu).toBeVisible();
-    await menu.getByRole("menuitemcheckbox", { name: "Green" }).click();
+    await menu.getByRole("menuitemradio", { name: "Green" }).click();
     await expect(menu).toBeHidden();
     await expect(downloads).toHaveAccessibleName(/^Clean up my Downloads folder, green tag, done/);
     await expect(row(device, "Clean up my Downloads")).toHaveAccessibleName(/, green tag, /);
