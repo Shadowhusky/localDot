@@ -313,10 +313,20 @@
   }
 
   /* The title stays centred while it fits between the two sides, and gives way to them when not. */
+  /* The buttons at the end keep their room; the computer's name gives way first, in a narrow list. */
   .phone-list-bar-row {
     display: grid;
-    grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, max-content) minmax(max-content, 1fr);
     justify-items: start;
+  }
+
+  .phone-list-bar-row > .phone-pill.ui-button {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .phone-list-bar-row > .phone-pill > .ui-button-content {
+    min-width: 0;
   }
 
   .phone-pill.ui-button {
@@ -333,6 +343,7 @@
 
   .phone-pill-name {
     display: block;
+    min-width: 0;
     max-width: 110px;
     overflow: hidden;
     white-space: nowrap;
@@ -777,8 +788,9 @@
       calc(var(--spacing) * 3 + var(--_safe-left));
   }
 
+  /* A run's bubbles stand apart, a little, as a messenger's do. */
   .phone-thread .thread-row {
-    margin-top: calc(var(--spacing) / 2);
+    margin-top: calc(var(--spacing) * 1.5);
   }
 
   .phone-thread .thread-row[data-group-start] {
@@ -922,7 +934,7 @@
   }
 
   .phone-thread .result-card {
-    gap: calc(var(--spacing) * 0.75);
+    gap: calc(var(--spacing) * 1.5);
   }
 
   .phone-thread .result-summary {
@@ -1002,8 +1014,15 @@
     gap: calc(var(--spacing) * 1.5);
   }
 
+  /* A choice that is a sentence wraps inside the thread rather than running off it. */
   :is(.ask-quick, .phone-thread .thread-suggestions) .ui-chip {
     position: relative;
+    height: auto;
+    max-width: 100%;
+    padding-block: calc(var(--spacing) * 2);
+    white-space: normal;
+    text-align: start;
+    overflow-wrap: anywhere;
     min-height: calc(var(--spacing) * 9.5);
     padding-inline: calc(var(--spacing) * 3.5);
     border-radius: var(--radius-full);

@@ -76,6 +76,55 @@ test.describe("a desktop", () => {
     });
   }
 
+  // Nov 13, a window 786 px wide: the list's New conversation button ran off its edge, a choice
+  // longer than the thread ran off the window and pushed dot's bubbles with it, and bubbles of a
+  // run sat with no gap between them, a replay's row against the files above it.
+  test("a narrow window keeps the list's buttons, dot's choices and its bubbles in reach, apart", async ({
+    page,
+    ui,
+  }) => {
+    await page.setViewportSize({ width: 786, height: 935 });
+    const fixture = await ui.open("done");
+    await page.request.post(`${fixture.origin}/__qa/say?text=Thanks.%20Asking%20for%20your%20key.`);
+    await page.request.post(`${fixture.origin}/__qa/ask?long=1`);
+    const chip = page.locator(".ask-quick .ui-chip").filter({ hasText: "ElevenLabs" });
+    await expect(chip).toBeVisible();
+    await ui.settle();
+    const chat = await page.locator(".phone-chat").boundingBox();
+    const list = await page.locator(".phone-list").boundingBox();
+    if (!chat || !list) throw new Error("Nothing to measure");
+    const inside = (box: { x: number; width: number } | null, room: { x: number; width: number }) =>
+      !!box && box.x >= room.x - 1 && box.x + box.width <= room.x + room.width + 1;
+    for (const name of ["Select", "Overview", "New conversation"]) {
+      const button = page.locator(".phone-list-bar-end").getByRole("button", { name, exact: true });
+      expect(inside(await button.boundingBox(), list), name).toBe(true);
+    }
+    for (const element of await page
+      .locator(".phone-thread :is(.ask-quick .ui-chip, .thread-message[data-role='dot'])")
+      .all())
+      expect(inside(await element.boundingBox(), chat), (await element.textContent()) ?? "").toBe(
+        true,
+      );
+    // Apart: a run's bubbles, and a replay's row from what is above and below it.
+    const gaps = await page.locator(".phone-thread .thread-content").evaluate((content) => {
+      const parts = [
+        ...content.querySelectorAll<HTMLElement>(
+          ".thread-message[data-role='dot'], .result-card > *, .thread-question-text",
+        ),
+      ].map((element) => element.getBoundingClientRect());
+      const out: number[] = [];
+      for (let n = 1; n < parts.length; n++) {
+        const above = parts[n - 1],
+          below = parts[n];
+        if (above && below && below.top >= above.bottom - 1) out.push(below.top - above.bottom);
+      }
+      return out;
+    });
+    expect(gaps.length).toBeGreaterThan(2);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(6);
+    await page.screenshot({ path: test.info().outputPath("narrow.png") });
+  });
+
   // With the list put away, the computer pill and its Settings go with it: the conversation's ⋯
   // has them too.
   test("the conversation's ⋯ opens Settings, with the list put away", async ({ page, ui }) => {

@@ -1231,10 +1231,9 @@
   letter-spacing: var(--text-footnote--letter-spacing);
 }
 
-/* The proof: one row under the files, set in as far as their rows are. */
+/* The proof: one row under the files, set in as far as their rows are, clear of their card. */
 .proof {
   min-width: 0;
-  margin-top: calc(var(--spacing) * -1);
   padding-inline: var(--spacing);
 }
 
