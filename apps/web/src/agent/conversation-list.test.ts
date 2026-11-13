@@ -189,7 +189,7 @@ describe("the conversations under way", () => {
 });
 
 describe("tags in use", () => {
-  it("lists each tag given once, in the swatches' order", () => {
+  it("lists each tag given once, the most carried first, then in the swatches' order", () => {
     const rows = conversationRows(
       [
         entry({ tags: [{ id: "purple", color: "purple" }] }),
@@ -200,7 +200,11 @@ describe("tags in use", () => {
       ],
       QUIET,
     );
-    expect(tagsInUse(rows).map((tag) => tag.id)).toEqual(["red", "green", "purple"]);
+    expect(tagsInUse(rows).map((tag) => [tag.id, tag.count])).toEqual([
+      ["purple", 2],
+      ["red", 1],
+      ["green", 1],
+    ]);
     expect(tagsInUse([])).toEqual([]);
   });
 

@@ -42,8 +42,10 @@ import {
   type RecentTask,
   ResearchChange,
   ResumeSafetyRequest,
+  type SmartTagLine,
   SmartTagOptions,
   SmartTagRequest,
+  type SmartTagResult,
   sameCredential,
   scanKeyLike,
   type TakeComputerReply,
@@ -882,22 +884,68 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           return c.body(null, 204);
         }),
       );
-      // Answers once the sort is done; the user may have left by then, and it is done all the same.
+      // One line as each batch is tagged, then what the sort did, or why it stopped. A sort that
+      // can't start says so in its status; one the user leaves is done all the same.
+      const sortProblem = (error: unknown) => {
+        if (error instanceof SortBusyError) return new RouteError(409, "busy");
+        if (error instanceof SideQuestionError) return new RouteError(error.status, error.problem);
+        if (error instanceof DOMException && error.name === "TimeoutError")
+          return new RouteError(502, "no-answer");
+        return error;
+      };
       app.post(
         "/api/conversations/smart-tags",
         route(async (c) => {
           owner(c);
           const request = await json(c.req.raw, SmartTagRequest);
+          const held: SmartTagLine[] = [];
+          let send: ((line: SmartTagLine) => void) | undefined;
+          const tell = (line: SmartTagLine) => (send ? send(line) : held.push(line));
+          const started = Promise.withResolvers<void>();
+          let sorting: Promise<SmartTagResult>;
           try {
-            return c.json(await tags.sorter.sort(request));
+            sorting = tags.sorter.sort(request, (progress) => {
+              tell({ progress });
+              started.resolve();
+            });
           } catch (error) {
-            if (error instanceof SortBusyError) throw new RouteError(409, "busy");
-            if (error instanceof SideQuestionError)
-              throw new RouteError(error.status, error.problem);
-            if (error instanceof DOMException && error.name === "TimeoutError")
-              throw new RouteError(502, "no-answer");
-            throw error;
+            throw sortProblem(error);
           }
+          sorting.then(
+            () => started.resolve(),
+            (error: unknown) => started.reject(error),
+          );
+          try {
+            await started.promise;
+          } catch (error) {
+            throw sortProblem(error);
+          }
+          const encoder = new TextEncoder();
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const write = (line: SmartTagLine) =>
+                controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+              for (const line of held.splice(0)) write(line);
+              send = write;
+              void sorting
+                .then(
+                  (result) => write({ result }),
+                  (error: unknown) => {
+                    const problem = sortProblem(error);
+                    write({ problem: problem instanceof RouteError ? problem.message : "failed" });
+                  },
+                )
+                .finally(() => {
+                  send = undefined;
+                  try {
+                    controller.close();
+                  } catch {}
+                });
+            },
+          });
+          return new Response(body, {
+            headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" },
+          });
         }),
       );
       app.post(

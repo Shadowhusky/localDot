@@ -8,6 +8,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 import {
   readSmartTags,
+  SORT_BATCH,
   type SorterShelf,
   type SortItem,
   smartTagPrompt,
@@ -173,6 +174,67 @@ describe("sorting into tags", () => {
   });
 });
 
+describe("sorting many", () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, at) =>
+      item(`01HZ00000000000000000${String(at).padStart(5, "0")}`, `Task ${at}`),
+    );
+
+  it("asks in batches, telling how far it has come, and new tags made early are offered later", async () => {
+    const { shelf, carried } = shelfWith();
+    const prompts: string[] = [];
+    const ask = vi.fn(async (_system: string, prompt: string) => {
+      prompts.push(prompt);
+      return '{"new":[{"name":"Work","color":"blue"}],"tags":{"1":["Work"]}}';
+    });
+    const progress: { done: number; total: number }[] = [];
+    const items = many(SORT_BATCH + 4);
+    const sorted = await sortIntoTags(
+      shelf,
+      ask,
+      items,
+      balanced,
+      new AbortController().signal,
+      (p) => progress.push(p),
+    );
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect(progress).toEqual([
+      { done: SORT_BATCH, total: SORT_BATCH + 4 },
+      { done: SORT_BATCH + 4, total: SORT_BATCH + 4 },
+    ]);
+    expect(prompts[1]).toContain("Existing tags: Work");
+    expect(sorted.created).toHaveLength(1);
+    expect(sorted.before).toHaveLength(2);
+    expect(carried.get(items[SORT_BATCH]?.sessionId ?? "")).toEqual([sorted.created[0]?.id]);
+  });
+
+  it("keeps what earlier batches did when a later one fails, and throws when the first does", async () => {
+    const { shelf } = shelfWith();
+    let calls = 0;
+    const ask = async () => {
+      if (++calls > 1) throw new Error("model away");
+      return '{"new":[{"name":"Work"}],"tags":{"1":["Work"]}}';
+    };
+    const sorted = await sortIntoTags(
+      shelf,
+      ask,
+      many(SORT_BATCH + 1),
+      balanced,
+      new AbortController().signal,
+    );
+    expect(sorted).toMatchObject({ incomplete: true, before: [{ tags: [] }] });
+    await expect(
+      sortIntoTags(
+        shelf,
+        async () => Promise.reject(new Error("away")),
+        many(2),
+        balanced,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("away");
+  });
+});
+
 describe("the sorter", () => {
   it("sorts those without a tag, saves the choices, and takes the latest sort back", async () => {
     const { shelf, carried, tags } = shelfWith(
@@ -188,7 +250,7 @@ describe("the sorter", () => {
     const result = await sorter.sort({ scope: "untagged", granularity: "detailed", create: true });
     expect(result).toMatchObject({ tagged: 1, created: [{ name: "Money" }] });
     expect(shelf.smartTagOptions()).toEqual({ granularity: "detailed", create: true, auto: false });
-    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalled();
     expect(sorter.undo("01HZ0000000000000000000099")).toBe(false);
     expect(sorter.undo(result.run)).toBe(true);
     expect(carried.get(B)).toEqual([]);

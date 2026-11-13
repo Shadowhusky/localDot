@@ -783,4 +783,13 @@ export const shell = {
   "Take “{0}” off every conversation?": "要从所有对话中移除“{0}”吗？",
   "Delete tag": "删除标签",
   "Show only a tag": "只显示一个标签",
+  "Sorting {0} of {1} conversations…": "正在整理第 {0} 个，共 {1} 个对话…",
+  "Your model is reading your conversations…": "你的模型正在阅读你的对话…",
+  "Your model stopped answering before the rest.": "你的模型在整理完其余对话前停止了回答。",
+  Sorting: "正在整理",
+  "All tags · {0}": "全部标签 · {0}",
+  "Find a tag": "查找标签",
+  "Every conversation": "所有对话",
+  "No tag is called that.": "没有这个名称的标签。",
+  "All tags": "全部标签",
 } satisfies Catalog;

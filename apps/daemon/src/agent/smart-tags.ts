@@ -20,9 +20,12 @@ import type { Ask } from "./first-look.ts";
 // last said, and gives each the tags that fit, using the user's own tags first. A tag already
 // given stays; a sort only adds.
 
+// How long one call to the model may take.
 export const SORT_MS = 120_000;
-// The most conversations one sort reads.
+// The most conversations one sort reads, and how many go to the model in one call: a sort tells how
+// far it has come as each call is answered, and its tags are on the conversations as it goes.
 export const SORT_LIST = 80;
+export const SORT_BATCH = 16;
 const TEXT_CHARS = 160;
 
 type Grain = SmartTagOptions["granularity"];
@@ -112,11 +115,13 @@ const fold = (name: string) => name.toLocaleLowerCase().normalize("NFKC");
 
 // What the model said, kept to what the user's choices allow: no new tags unless they may be
 // made, no more than the grain holds, and only names a tag can have.
+// `room`: how many more tags the sort may make, across all its calls.
 export function readSmartTags(
   text: string,
   items: readonly SortItem[],
   library: readonly NamedTag[],
   { granularity, create }: Choices,
+  room = Number.POSITIVE_INFINITY,
 ): SmartTagPlan {
   const grain = GRAINS[granularity];
   const plan: SmartTagPlan = { create: [], add: new Map() };
@@ -137,7 +142,7 @@ export function readSmartTags(
     for (const each of reply.new ?? []) {
       const name = TagName.safeParse(each.name);
       if (!name.success || known.has(fold(name.data)) || offered.has(fold(name.data))) continue;
-      if (offered.size >= grain.tags) break;
+      if (offered.size >= Math.min(grain.tags, room)) break;
       const color =
         ConversationTag.safeParse(each.color?.trim().toLowerCase()).data ??
         CONVERSATION_TAGS[(library.length + offered.size) % CONVERSATION_TAGS.length] ??
@@ -173,43 +178,74 @@ export interface Sorted {
   created: NamedTag[];
   // What each conversation it changed carried before.
   before: { sessionId: string; tags: TagId[] }[];
+  // A call failed after others were answered: what they did stays.
+  incomplete?: boolean;
 }
 
-// Asks once, makes the tags the answer needs and adds them, each conversation keeping its own.
+export interface SortProgress {
+  done: number;
+  total: number;
+}
+
+// Asks in batches, each with the tags the batches before it made; makes the tags each answer needs
+// and adds them, each conversation keeping its own. A failure before any answer is thrown.
 export async function sortIntoTags(
   shelf: TagShelf,
   ask: Ask,
   items: readonly SortItem[],
   choices: Choices,
   signal: AbortSignal,
+  onProgress?: (progress: SortProgress) => void,
 ): Promise<Sorted> {
-  if (!items.length) return { created: [], before: [] };
+  const sorted: Sorted = { created: [], before: [] };
+  const room = GRAINS[choices.granularity].tags;
+  for (let at = 0; at < items.length; at += SORT_BATCH) {
+    const batch = items.slice(at, at + SORT_BATCH);
+    try {
+      await sortBatch(shelf, ask, batch, choices, signal, room - sorted.created.length, sorted);
+    } catch (error) {
+      if (at === 0 || signal.aborted) throw error;
+      sorted.incomplete = true;
+      break;
+    }
+    onProgress?.({ done: at + batch.length, total: items.length });
+  }
+  return sorted;
+}
+
+async function sortBatch(
+  shelf: TagShelf,
+  ask: Ask,
+  items: readonly SortItem[],
+  choices: Choices,
+  signal: AbortSignal,
+  room: number,
+  sorted: Sorted,
+): Promise<void> {
   const library = shelf.tags();
   const { system, prompt } = smartTagPrompt(items, library, choices);
-  const plan = readSmartTags(await ask(system, prompt, signal), items, library, choices);
+  const answer = await ask(system, prompt, AbortSignal.any([signal, AbortSignal.timeout(SORT_MS)]));
   signal.throwIfAborted();
-  const created: NamedTag[] = [];
+  const plan = readSmartTags(answer, items, library, choices, room);
   const ids = new Map(library.map((tag) => [tag.name, tag.id]));
   for (const tag of plan.create) {
     try {
       const made = shelf.createTag(tag);
       ids.set(tag.name, made.id);
-      if (!library.some((each) => each.id === made.id)) created.push(made);
+      if (!library.some((each) => each.id === made.id)) sorted.created.push(made);
     } catch {
       break;
     }
   }
-  const before: Sorted["before"] = [];
   const changes: { sessionId: string; tags: TagId[] }[] = [];
   for (const item of items) {
     const added = (plan.add.get(item.sessionId) ?? []).flatMap((name) => ids.get(name) ?? []);
     const next = [...new Set([...item.tags, ...added])].slice(0, TAGS_PER_CONVERSATION);
     if (next.length === item.tags.length) continue;
-    before.push({ sessionId: item.sessionId, tags: [...item.tags] });
+    sorted.before.push({ sessionId: item.sessionId, tags: [...item.tags] });
     changes.push({ sessionId: item.sessionId, tags: next });
   }
   if (changes.length) shelf.retag(changes);
-  return { created, before };
 }
 
 export interface SorterShelf extends TagShelf {
@@ -244,7 +280,10 @@ export class TagSorter {
     },
   ) {}
 
-  async sort(request: SmartTagRequest): Promise<SmartTagResult> {
+  async sort(
+    request: SmartTagRequest,
+    onProgress?: (progress: SortProgress) => void,
+  ): Promise<SmartTagResult> {
     if (this.#sorting) throw new SortBusyError("dot is already sorting your conversations.");
     const { shelf } = this.deps;
     shelf.setSmartTagOptions({
@@ -263,12 +302,21 @@ export class TagSorter {
         this.deps.ask,
         items,
         request,
-        AbortSignal.timeout(SORT_MS),
+        new AbortController().signal,
+        (progress) => {
+          this.deps.changed();
+          onProgress?.(progress);
+        },
       );
       const run = ulid();
       this.#last = { run, ...sorted };
       if (sorted.before.length || sorted.created.length) this.deps.changed();
-      return { run, tagged: sorted.before.length, created: sorted.created };
+      return {
+        run,
+        tagged: sorted.before.length,
+        created: sorted.created,
+        ...(sorted.incomplete ? { incomplete: true } : {}),
+      };
     } finally {
       this.#sorting = false;
     }
@@ -297,7 +345,7 @@ export class TagSorter {
       .conversations.find((each) => each.sessions.includes(sessionId));
     if (!entry) return;
     this.#sorting = true;
-    void sortIntoTags(shelf, this.deps.ask, [itemOf(entry)], options, AbortSignal.timeout(SORT_MS))
+    void sortIntoTags(shelf, this.deps.ask, [itemOf(entry)], options, new AbortController().signal)
       .then(
         (sorted) => {
           if (sorted.before.length) this.deps.changed();

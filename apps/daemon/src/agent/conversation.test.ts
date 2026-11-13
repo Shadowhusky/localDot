@@ -12,7 +12,7 @@ import {
   EarlierTurns,
   earlierRecord,
   NamedTag,
-  SmartTagResult,
+  SmartTagLine,
   TaskStopReply,
   ulid,
 } from "@localdot/protocol";
@@ -869,7 +869,15 @@ describe("conversation routes", () => {
       create: true,
     });
     expect(sorted.status).toBe(200);
-    const result = SmartTagResult.parse(await sorted.json());
+    expect(sorted.headers.get("content-type")).toBe("application/x-ndjson");
+    const lines = (await sorted.text())
+      .trim()
+      .split("\n")
+      .map((line) => SmartTagLine.parse(JSON.parse(line)));
+    expect(lines[0]).toEqual({ progress: { done: 1, total: 1 } });
+    const last = lines.at(-1);
+    if (!last || !("result" in last)) throw new Error("No result");
+    const result = last.result;
     expect(result).toMatchObject({ tagged: 1, created: [{ name: "Pets", color: "green" }] });
     expect(f.conversations.list().conversations[0]?.tags).toEqual([
       { id: result.created[0]?.id, color: "green", name: "Pets" },

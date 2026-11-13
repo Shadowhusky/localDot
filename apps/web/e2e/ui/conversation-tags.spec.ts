@@ -88,3 +88,61 @@ test("Sort into tags tags every conversation with the user's model, and Undo tak
   await filters(page).getByRole("button", { name: "Sort into tags" }).click();
   await expect(auto).toBeChecked();
 });
+
+// A sort says how far it has come, and hidden it goes on in a toast that becomes its result.
+test("a sort shows its progress, and goes on in a toast once hidden", async ({ page, ui }) => {
+  await ui.open("conversations");
+  await filters(page).getByRole("button", { name: "Sort into tags" }).click();
+  const dialog = page.getByRole("alertdialog", { name: "Sort into tags" });
+  await dialog.getByRole("button", { name: "Sort", exact: true }).click();
+  await expect(dialog.getByRole("progressbar", { name: "Sorting" })).toBeVisible();
+  await expect(dialog).toContainText("Your model is reading your conversations…");
+  await dialog.getByRole("button", { name: "Hide" }).click();
+  await expect(dialog).toBeHidden();
+  const toast = page.locator(".ui-toast").last();
+  await expect(toast).toContainText(/Your model is reading|Tagged \d+ conversations/);
+  await expect(
+    page.locator(".ui-toast").filter({ hasText: /^Tagged \d+ conversations/ }),
+  ).toBeVisible();
+});
+
+// Past a row's worth of tags, the rest are a search away, the row never scrolling sideways.
+test("many tags keep to a row, the rest found under All tags", async ({ page, ui }) => {
+  await page.route("**/api/conversations", async (route) => {
+    const reply = await route.fetch().catch(() => undefined);
+    if (!reply) return route.abort().catch(() => {});
+    const listed = await reply.json();
+    const colours = ["red", "orange", "yellow", "green", "blue", "purple"];
+    let n = 0;
+    const named = (count: number) =>
+      Array.from({ length: count }, () => {
+        n += 1;
+        return {
+          id: `01HZ0000000000000000000T${String(n).padStart(2, "0")}`,
+          color: colours[n % colours.length],
+          name: `Topic ${n}`,
+        };
+      });
+    await route.fulfill({
+      json: {
+        ...listed,
+        conversations: listed.conversations.map((entry: object) => ({ ...entry, tags: named(2) })),
+      },
+    });
+  });
+  await ui.open("conversations");
+  const row = filters(page);
+  await expect(row.getByRole("button", { name: /^All tags · \d+$/ })).toBeVisible();
+  expect(await row.locator(".conversations-tag .ui-tag-dot").count()).toBeLessThanOrEqual(8);
+  expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await row.getByRole("button", { name: /^All tags/ }).click();
+  const all = page.getByRole("dialog", { name: "All tags" });
+  await all.getByRole("textbox", { name: "Find a tag" }).fill("Topic 12");
+  await all.getByRole("button", { name: /^Topic 12/ }).click();
+  await expect(all).toBeHidden();
+  await expect(row.getByRole("button", { name: "Topic 12" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.locator(".phone-row-wrap")).toHaveCount(1);
+});

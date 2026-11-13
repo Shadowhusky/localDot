@@ -12,9 +12,10 @@ import {
   type LookWearables,
   NamedTag,
   type PersonaId,
+  SmartTagLine,
   type SmartTagOptions,
   type SmartTagRequest,
-  SmartTagResult,
+  type SmartTagResult,
   type TagId,
   type TagOnConversation,
   taskOutfit,
@@ -23,7 +24,7 @@ import {
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { z } from "zod";
 import { t, tr } from "../i18n/index.ts";
-import type { ApiClient } from "../lib/api.ts";
+import { type ApiClient, ApiError } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
 import type { SessionStatus } from "../ui/SessionGlyph.tsx";
 
@@ -150,14 +151,22 @@ export function tagOf(id: TagId, library: readonly NamedTag[]): TagOnConversatio
   return named && { id, color: named.color, name: named.name };
 }
 
-// The tags given to any of `rows`: the colours in the order the swatches show them, then the
-// user's own by name.
-export function tagsInUse(rows: readonly ConversationRow[]): TagOnConversation[] {
-  const used = new Map<string, TagOnConversation>();
-  for (const row of rows) for (const tag of row.entry.tags ?? []) used.set(tag.id, tag);
-  const named = [...used.values()].filter((tag) => tag.name);
-  named.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-  return [...CONVERSATION_TAGS.flatMap((colour) => used.get(colour) ?? []), ...named];
+export type TagInUse = TagOnConversation & { count: number };
+
+// The tags given to any of `rows`, each with how many carry it: the most carried first, then the
+// colours in the order the swatches show them, then the user's own by name.
+export function tagsInUse(rows: readonly ConversationRow[]): TagInUse[] {
+  const used = new Map<string, TagInUse>();
+  for (const row of rows)
+    for (const tag of row.entry.tags ?? [])
+      used.set(tag.id, { ...tag, count: (used.get(tag.id)?.count ?? 0) + 1 });
+  const rank = (tag: TagInUse) => {
+    const colour = (CONVERSATION_TAGS as readonly string[]).indexOf(tag.id);
+    return colour < 0 ? CONVERSATION_TAGS.length : colour;
+  };
+  return [...used.values()].sort(
+    (a, b) => b.count - a.count || rank(a) - rank(b) || (a.name ?? "").localeCompare(b.name ?? ""),
+  );
 }
 
 // Whether it carries the tag.
@@ -391,13 +400,46 @@ export function saveSmartTagOptions(api: ApiClient, options: SmartTagOptions): P
   return api.post("/api/tags/smart", options);
 }
 
-// Sorts with the user's model; done once it answers, however long that is.
+// Sorts with the user's model, told how far it has come as each batch is tagged; done once the
+// last is answered, however long that takes. A sort that can't start, or stops, throws why.
 export async function sortConversations(
   api: ApiClient,
   request: SmartTagRequest,
+  onProgress?: (progress: { done: number; total: number }) => void,
 ): Promise<SmartTagResult> {
-  const result = SmartTagResult.parse(await api.post("/api/conversations/smart-tags", request));
-  readConversationsAgain(api);
+  const response = await api.fetch(
+    `${api.socketUrl("").replace(/^ws/, "http")}/api/conversations/smart-tags`,
+    {
+      method: "POST",
+      headers: { authorization: api.authorization(), "content-type": "application/json" },
+      body: JSON.stringify(request),
+    },
+  );
+  if (response.status === 401) api.rejectUnauthorized?.();
+  if (!response.ok || !response.body)
+    throw new ApiError(response.status, (await response.text().catch(() => "")) || "failed");
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let text = "";
+  let result: SmartTagResult | undefined;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      text += part.value;
+      const lines = text.split("\n");
+      text = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const said = SmartTagLine.parse(JSON.parse(line));
+        if ("progress" in said) onProgress?.(said.progress);
+        else if ("result" in said) result = said.result;
+        else throw new ApiError(502, said.problem);
+      }
+    }
+  } finally {
+    readConversationsAgain(api);
+  }
+  if (!result) throw new ApiError(502, "no-answer");
   return result;
 }
 

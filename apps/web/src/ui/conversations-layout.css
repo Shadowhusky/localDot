@@ -141,6 +141,12 @@
     gap: calc(var(--spacing) * 3);
   }
 
+  .smart-tags-progress {
+    margin: 0;
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
   .smart-tags-problem {
     margin: 0;
     color: var(--color-danger-fg);

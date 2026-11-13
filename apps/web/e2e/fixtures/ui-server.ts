@@ -398,7 +398,9 @@ const conversations = new Conversations(HOME, log);
 // under another, so a test knows what each gets.
 const sorter = new TagSorter({
   shelf: conversations,
+  // It takes a moment, as a model does, so a test sees the sort under way.
   ask: async (_system, prompt) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
     const tags: Record<string, string[]> = {};
     for (const [, n, body] of prompt.matchAll(
       /<conversation n="(\d+)">([\s\S]*?)<\/conversation>/g,
