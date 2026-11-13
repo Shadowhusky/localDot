@@ -260,8 +260,15 @@
     gap: calc(var(--spacing) * 1.5);
   }
 
-  /* A row in a side panel or on a phone gives its room to the name: Open waits in the row's menu. */
+  /* A compact row in a result on a narrow column gives its room to the name, and a full row in a
+     very narrow one: Open waits in the row's menu. A full row in the Workspace keeps it. */
   @container file-row (width < 400px) {
+    .ui-file-row[data-compact] .ui-file-open {
+      display: none;
+    }
+  }
+
+  @container file-row (width < 280px) {
     .ui-file-open {
       display: none;
     }
