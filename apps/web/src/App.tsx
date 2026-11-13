@@ -199,7 +199,7 @@ import { ChatToggle } from "./shell/ChatToggle.tsx";
 import { CoachMark } from "./shell/CoachMark.tsx";
 import { ComputerScreen } from "./shell/ComputerScreen.tsx";
 import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
-import { ConversationDetails } from "./shell/ConversationDetails.tsx";
+import { ConversationDetails, detailActions } from "./shell/ConversationDetails.tsx";
 import { ConversationList, ConversationsButton } from "./shell/ConversationList.tsx";
 import { ConversationsBubble } from "./shell/ConversationsBubble.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
@@ -3732,6 +3732,31 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                       () => showToast({ title: t`The new name couldn't be saved`, tone: "danger" }),
                     );
                   }
+                : undefined
+            }
+            actions={
+              shown.entry && !guest
+                ? detailActions(shown.entry, {
+                    working: taskWorking,
+                    organize: (change) => {
+                      const id = shown.entry?.sessionId;
+                      if (id)
+                        void organizeConversation(api, id, change).then(
+                          () => readConversationsAgain(api),
+                          () =>
+                            showToast({ title: t`That change couldn't be saved`, tone: "danger" }),
+                        );
+                    },
+                    dress: () => setDressing(shown.entry ?? null),
+                    remove: () => {
+                      if (!shown.entry) return;
+                      deleteFrom.current = document.activeElement as HTMLElement | null;
+                      setDeletingCurrent({
+                        sessionId: shown.entry.sessionId,
+                        sessions: shown.entry.sessions,
+                      });
+                    },
+                  })
                 : undefined
             }
             rows={[

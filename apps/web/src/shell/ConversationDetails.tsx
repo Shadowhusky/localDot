@@ -1,8 +1,15 @@
-import { CONVERSATION_NAME_CHARS, type Wearable } from "@localdot/protocol";
+import {
+  CONVERSATION_NAME_CHARS,
+  type ConversationEntry,
+  type ConversationTag,
+  type Wearable,
+} from "@localdot/protocol";
 import { useState } from "react";
+import type { Organize } from "../agent/conversation-list.ts";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
 import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
+import { TagSwatches } from "../ui/ConversationTag.tsx";
 import type { IconName } from "../ui/icons.ts";
 import { Sheet } from "../ui/Sheet.tsx";
 import { TextField } from "../ui/TextField.tsx";
@@ -15,6 +22,52 @@ export interface DetailRow {
   run(): void;
 }
 
+// What the row's menu does to the conversation, here as well.
+export interface DetailActions {
+  rows: readonly DetailRow[];
+  tag: { value: ConversationTag | null; onSelect(tag: ConversationTag | null): void };
+  // Last, apart: it goes for good.
+  remove: DetailRow;
+}
+
+// The row menu's actions for the conversation on show (ConversationMenu), but Select, which picks
+// among the list's rows.
+export function detailActions(
+  entry: ConversationEntry,
+  {
+    working,
+    organize,
+    dress,
+    remove,
+  }: { working: boolean; organize(change: Organize): void; dress(): void; remove(): void },
+): DetailActions {
+  const archived = !!entry.archived;
+  return {
+    rows: [
+      { label: t`Change look`, icon: "smile", run: dress },
+      {
+        label: entry.pinned ? t`Unpin` : t`Pin to top`,
+        icon: entry.pinned ? "pin-off" : "pin",
+        run: () => organize({ pinned: !entry.pinned }),
+      },
+      {
+        label: archived ? t`Unarchive` : t`Archive`,
+        icon: archived ? "archive-restore" : "archive",
+        disabledReason:
+          working && !archived ? t`Stop this task before archiving its conversation.` : undefined,
+        run: () => organize({ archived: !archived }),
+      },
+    ],
+    tag: { value: entry.tag ?? null, onSelect: (tag) => organize({ tag }) },
+    remove: {
+      label: t`Delete conversation`,
+      icon: "trash",
+      disabledReason: working ? t`Stop this task before deleting its conversation.` : undefined,
+      run: remove,
+    },
+  };
+}
+
 // A conversation's name opened out: its dot, how it stands, and where to go from here.
 export function ConversationDetails({
   open,
@@ -24,6 +77,7 @@ export function ConversationDetails({
   look,
   seed,
   rows,
+  actions,
   onRename,
 }: {
   open: boolean;
@@ -33,6 +87,8 @@ export function ConversationDetails({
   look: readonly Wearable[];
   seed: string;
   rows: readonly DetailRow[];
+  // None for a conversation not yet started, or for a shared link's guest.
+  actions?: DetailActions;
   // No conversation to name yet, without this.
   onRename?(name: string): void;
 }) {
@@ -88,23 +144,36 @@ export function ConversationDetails({
             {t`Rename`}
           </Button>
         )}
-        {rows.map((row) => (
-          <Button
-            key={row.label}
-            variant="quiet"
-            icon={row.icon}
-            className="phone-details-row"
-            disabledReason={row.disabledReason}
-            onClick={() => {
-              onClose();
-              row.run();
-            }}
-          >
-            {row.label}
-            {row.note && <small>{row.note}</small>}
-          </Button>
+        {[...(actions?.rows ?? []), ...rows].map((row) => (
+          <DetailButton key={row.label} row={row} onClose={onClose} />
         ))}
+        {actions && (
+          <>
+            <div className="phone-details-tags">
+              <TagSwatches standalone value={actions.tag.value} onSelect={actions.tag.onSelect} />
+            </div>
+            <DetailButton row={actions.remove} onClose={onClose} />
+          </>
+        )}
       </div>
     </Sheet>
+  );
+}
+
+function DetailButton({ row, onClose }: { row: DetailRow; onClose(): void }) {
+  return (
+    <Button
+      variant="quiet"
+      icon={row.icon}
+      className="phone-details-row"
+      disabledReason={row.disabledReason}
+      onClick={() => {
+        onClose();
+        row.run();
+      }}
+    >
+      {row.label}
+      {row.note && <small>{row.note}</small>}
+    </Button>
   );
 }

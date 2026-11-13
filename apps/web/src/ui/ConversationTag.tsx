@@ -29,12 +29,15 @@ const ITEMS = "[role=menuitem], [role=menuitemradio]";
 
 // The tags as one row of swatches in a menu, as Finder's: none first, the chosen one ringed. Left and
 // right move along the row; up and down leave it for the items above and below.
+// In a menu, or on its own (`standalone`), as in a conversation's details: a set of radios there.
 export function TagSwatches({
   value,
   onSelect,
+  standalone = false,
 }: {
   value: ConversationTag | null;
   onSelect(tag: ConversationTag | null): void;
+  standalone?: boolean;
 }) {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const row = event.currentTarget;
@@ -57,6 +60,25 @@ export function TagSwatches({
     event.stopPropagation();
     if (to) focusWithoutScroll(to);
   };
+  const tags = [null, ...CONVERSATION_TAGS];
+  if (standalone)
+    return (
+      <div role="radiogroup" aria-label={t`Tag`} className="ui-tag-swatches">
+        {tags.map((tag) => (
+          // biome-ignore lint/a11y/useSemanticElements: a swatch is a coloured button, not a radio input's circle.
+          <button
+            key={tag ?? "none"}
+            type="button"
+            role="radio"
+            aria-checked={value === tag}
+            aria-label={tag ? TAG_NAMES[tag] : t`No tag`}
+            data-tag={tag ?? "none"}
+            className="ui-tag-swatch"
+            onClick={() => onSelect(tag)}
+          />
+        ))}
+      </div>
+    );
   return (
     // biome-ignore lint/a11y/useSemanticElements: a menu groups its items with role group, not a fieldset.
     <div
@@ -66,7 +88,7 @@ export function TagSwatches({
       data-inline-choices=""
       onKeyDown={onKeyDown}
     >
-      {[null, ...CONVERSATION_TAGS].map((tag) => (
+      {tags.map((tag) => (
         <Swatch key={tag ?? "none"} tag={tag} checked={value === tag} onSelect={onSelect} />
       ))}
     </div>

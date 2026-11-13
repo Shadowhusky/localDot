@@ -392,6 +392,25 @@ test.describe("keeping working", () => {
     await expect(page).toHaveURL(/replay=/);
   });
 
+  // The details hold what the row's menu does, beside the conversation's own places.
+  test("the name's details hold what the row's menu does", async ({ page, ui }) => {
+    await ui.open("done");
+    await page.getByRole("button", { name: /Conversation details$/ }).click();
+    const sheet = page.getByRole("dialog", { name: "Details" });
+    for (const name of ["Rename", "Change look", "Pin to top", "Archive", "Delete conversation"])
+      await expect(sheet.getByRole("button", { name, exact: true })).toBeVisible();
+    await expect(
+      sheet.getByRole("group", { name: "Tag" }).or(sheet.getByRole("radiogroup", { name: "Tag" })),
+    ).toBeVisible();
+    await sheet.getByRole("button", { name: "Pin to top", exact: true }).click();
+    await page.getByRole("button", { name: /Conversation details$/ }).click();
+    await expect(sheet.getByRole("button", { name: "Unpin", exact: true })).toBeVisible();
+    await sheet.getByRole("button", { name: "Delete conversation", exact: true }).click();
+    await expect(
+      page.getByRole("alertdialog", { name: "Delete this conversation?" }),
+    ).toBeVisible();
+  });
+
   test("the name opens the details, which rename it", async ({ page, ui }) => {
     await ui.open("done");
     await page.getByRole("button", { name: /Conversation details$/ }).click();
