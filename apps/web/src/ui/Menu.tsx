@@ -33,7 +33,11 @@ export const isMenuKey = (event: { key: string; shiftKey: boolean }) =>
   event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
 
 function items(menu: HTMLElement): HTMLElement[] {
-  return [...menu.querySelectorAll<HTMLElement>("[role=menuitem], [role=menuitemradio]")];
+  return [
+    ...menu.querySelectorAll<HTMLElement>(
+      "[role=menuitem], [role=menuitemradio], [role=menuitemcheckbox]",
+    ),
+  ];
 }
 
 export interface MenuProps {

@@ -2,10 +2,11 @@ import {
   CONVERSATION_NAME_CHARS,
   type ConversationEntry,
   type ConversationTag,
+  type TagId,
   type Wearable,
 } from "@localdot/protocol";
 import { useState } from "react";
-import type { Organize } from "../agent/conversation-list.ts";
+import { type Organize, tagIds, toggledTag } from "../agent/conversation-list.ts";
 import { DotAvatar } from "../dot/DotAvatar.tsx";
 import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
@@ -25,7 +26,12 @@ export interface DetailRow {
 // What the row's menu does to the conversation, here as well.
 export interface DetailActions {
   rows: readonly DetailRow[];
-  tag: { value: ConversationTag | null; onSelect(tag: ConversationTag | null): void };
+  tag: {
+    chosen: readonly TagId[];
+    onSelect(tag: ConversationTag | null): void;
+    // Its tags among the user's own.
+    more: DetailRow;
+  };
   // Last, apart: it goes for good.
   remove: DetailRow;
 }
@@ -38,8 +44,15 @@ export function detailActions(
     working,
     organize,
     dress,
+    tag,
     remove,
-  }: { working: boolean; organize(change: Organize): void; dress(): void; remove(): void },
+  }: {
+    working: boolean;
+    organize(change: Organize): void;
+    dress(): void;
+    tag(): void;
+    remove(): void;
+  },
 ): DetailActions {
   const archived = !!entry.archived;
   return {
@@ -58,7 +71,11 @@ export function detailActions(
         run: () => organize({ archived: !archived }),
       },
     ],
-    tag: { value: entry.tag ?? null, onSelect: (tag) => organize({ tag }) },
+    tag: {
+      chosen: tagIds(entry),
+      onSelect: (colour) => organize({ tags: toggledTag(tagIds(entry), colour) }),
+      more: { label: t`Tags…`, icon: "tag", run: tag },
+    },
     remove: {
       label: t`Delete conversation`,
       icon: "trash",
@@ -150,8 +167,9 @@ export function ConversationDetails({
         {actions && (
           <>
             <div className="phone-details-tags">
-              <TagSwatches standalone value={actions.tag.value} onSelect={actions.tag.onSelect} />
+              <TagSwatches standalone chosen={actions.tag.chosen} onSelect={actions.tag.onSelect} />
             </div>
+            <DetailButton row={actions.tag.more} onClose={onClose} />
             <DetailButton row={actions.remove} onClose={onClose} />
           </>
         )}

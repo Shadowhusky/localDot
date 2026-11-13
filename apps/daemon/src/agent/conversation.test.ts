@@ -6,19 +6,25 @@ import {
   ConversationList,
   type ConversationLive,
   ConversationSnapshot,
+  DEFAULT_SMART_TAGS,
   EARLIER_CHARS,
   EARLIER_LEFT_OUT,
   EarlierTurns,
   earlierRecord,
+  NamedTag,
+  SmartTagResult,
   TaskStopReply,
   ulid,
 } from "@localdot/protocol";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EventLog } from "../event-log.ts";
-import { Conversations } from "./conversation.ts";
+import { Conversations, TagError } from "./conversation.ts";
+import type { Ask } from "./first-look.ts";
 import { type AgentRoutesDeps, agentRoutes } from "./routes.ts";
 import { AgentSession } from "./session.ts";
+import { SideQuestionError } from "./side-question.ts";
+import { TagSorter } from "./smart-tags.ts";
 
 const owned: { home: string; log: EventLog }[] = [];
 afterEach(() => {
@@ -233,25 +239,25 @@ describe("organizing conversations", () => {
     const first = await f.task("Plan the trip");
     const second = await f.task("Book the hotel", first);
     const other = await f.task("Draw a dog");
-    expect(f.open().organize(first, { tag: "blue" })).toEqual({
+    expect(f.open().organize(first, { tags: ["blue"] })).toEqual({
       look: null,
       sessionId: second,
-      tag: "blue",
+      tags: [{ id: "blue", color: "blue" }],
       pinned: false,
       archived: false,
     });
     expect(f.open().organize(second, { pinned: true })).toMatchObject({
-      tag: "blue",
+      tags: [{ id: "blue", color: "blue" }],
       pinned: true,
     });
     const third = await f.task("Find a restaurant", second);
     const listed = f.open().list().conversations;
     expect(listed.map((entry) => entry.sessionId)).toEqual([third, other]);
-    expect(listed[0]).toMatchObject({ tag: "blue", pinned: true });
-    expect(listed[1]).not.toHaveProperty("tag");
+    expect(listed[0]).toMatchObject({ tags: [{ id: "blue" }], pinned: true });
+    expect(listed[1]).not.toHaveProperty("tags");
     expect(listed[1]).not.toHaveProperty("pinned");
-    f.open().organize(third, { tag: null, pinned: false });
-    expect(f.open().list().conversations[0]).not.toHaveProperty("tag");
+    f.open().organize(third, { tags: [], pinned: false });
+    expect(f.open().list().conversations[0]).not.toHaveProperty("tags");
     expect(ConversationList.parse(f.open().list())).toBeTruthy();
   });
 
@@ -272,16 +278,20 @@ describe("organizing conversations", () => {
     const f = setup();
     const trip = await f.task("Plan the trip");
     const dog = await f.task("Draw a dog");
-    expect(f.open().organize(trip, { archived: true, tag: "green" })).toMatchObject({
+    expect(f.open().organize(trip, { archived: true, tags: ["green"] })).toMatchObject({
       archived: true,
-      tag: "green",
+      tags: [{ id: "green", color: "green" }],
     });
     const shown = f.open().list();
     expect(shown.conversations.map((entry) => entry.sessionId)).toEqual([dog]);
     expect(shown.archivedCount).toBe(1);
     const archived = f.open().list(undefined, true);
     expect(archived.conversations).toEqual([
-      expect.objectContaining({ sessionId: trip, archived: true, tag: "green" }),
+      expect.objectContaining({
+        sessionId: trip,
+        archived: true,
+        tags: [{ id: "green", color: "green" }],
+      }),
     ]);
     f.open().organize(trip, { archived: false });
     expect(f.open().list()).toMatchObject({ archivedCount: 0 });
@@ -296,15 +306,71 @@ describe("organizing conversations", () => {
     const more = await f.task("And a cat", trip);
     const back = f.open().list();
     expect(back.archivedCount).toBe(0);
-    expect(back.conversations[0]).toMatchObject({ sessionId: more, tag: "green" });
+    expect(back.conversations[0]).toMatchObject({ sessionId: more, tags: [{ id: "green" }] });
     expect(back.conversations[0]).not.toHaveProperty("archived");
+  });
+
+  it("gives a conversation the tags the user named, which carry their names and colours", async () => {
+    const f = setup();
+    const trip = await f.task("Plan the trip");
+    const store = f.open();
+    const work = store.createTag({ name: "Travel", color: "orange" });
+    expect(store.createTag({ name: "travel", color: "red" })).toEqual(work);
+    store.organize(trip, { tags: ["blue", work.id, "01ARZ3NDEKTSV4RRFFQ69G5FAV"] });
+    expect(f.open().list()).toMatchObject({
+      tags: [work],
+      conversations: [
+        {
+          tags: [
+            { id: "blue", color: "blue" },
+            { id: work.id, color: "orange", name: "Travel" },
+          ],
+        },
+      ],
+    });
+    expect(f.open().changeTag(work.id, { name: "Trips", color: "green" })).toEqual({
+      ...work,
+      name: "Trips",
+      color: "green",
+    });
+    const other = f.open().createTag({ name: "Work", color: "blue" });
+    expect(() => f.open().changeTag(other.id, { name: "TRIPS" })).toThrow(TagError);
+    expect(f.open().deleteTag(work.id)).toBe(true);
+    expect(f.open().list().conversations[0]?.tags).toEqual([{ id: "blue", color: "blue" }]);
+    expect(f.open().tags()).toEqual([other]);
+    expect(f.open().deleteTag(work.id)).toBe(false);
+    expect(ConversationList.parse(f.open().list())).toBeTruthy();
+  });
+
+  it("reads a colour kept before tags had names as that colour's tag", async () => {
+    const f = setup();
+    const trip = await f.task("Plan the trip");
+    writeFileSync(
+      join(f.home, "conversations-organized.json"),
+      JSON.stringify({ v: 1, conversations: { [trip]: { tag: "purple" } } }),
+    );
+    expect(f.open().list().conversations[0]?.tags).toEqual([{ id: "purple", color: "purple" }]);
+    expect(f.open().tagsOf(trip)).toEqual(["purple"]);
+    f.open().organize(trip, { pinned: true });
+    expect(
+      JSON.parse(readFileSync(join(f.home, "conversations-organized.json"), "utf8")).conversations[
+        trip
+      ],
+    ).toEqual({ tags: ["purple"], pinned: true });
+  });
+
+  it("keeps how dot sorts into tags", async () => {
+    const f = setup();
+    expect(f.open().smartTagOptions()).toEqual(DEFAULT_SMART_TAGS);
+    f.open().setSmartTagOptions({ granularity: "broad", create: false, auto: true });
+    expect(f.open().smartTagOptions()).toEqual({ granularity: "broad", create: false, auto: true });
   });
 
   it("forgets deleted conversations and reads a broken file as nothing organized", async () => {
     const f = setup();
     const gone = await f.task("Plan the trip");
     const kept = await f.task("Draw a dog");
-    f.open().organize(gone, { tag: "red" });
+    f.open().organize(gone, { tags: ["red"] });
     f.log.forget(gone);
     f.open().organize(kept, { pinned: true });
     const file = join(f.home, "conversations-organized.json");
@@ -730,9 +796,11 @@ describe("a message Stop left unsent", () => {
 });
 
 describe("conversation routes", () => {
-  function routes() {
+  function routes(answer: Ask = async () => "{}") {
     const f = setup();
     const conversations = f.open();
+    const tagsChanged = vi.fn();
+    const sorter = new TagSorter({ shelf: conversations, ask: answer, changed: tagsChanged });
     const app = new Hono();
     const releases = vi.fn(async () => {});
     // The tasks the runner still holds, and their live status.
@@ -756,6 +824,7 @@ describe("conversation routes", () => {
         },
       },
       conversations,
+      tags: { sorter, changed: tagsChanged },
     } as unknown as AgentRoutesDeps);
     const send = (method: string, path: string, body?: unknown) =>
       app.request(`http://fixture${path}`, {
@@ -763,8 +832,71 @@ describe("conversation routes", () => {
         headers: { "content-type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-    return { ...f, conversations, releases, live, statuses, send };
+    return { ...f, conversations, releases, live, statuses, send, tagsChanged };
   }
+
+  it("makes, renames and deletes the user's tags, and tells every viewer", async () => {
+    const f = routes();
+    const made = await f.send("POST", "/api/tags", { name: " Travel ", color: "orange" });
+    expect(made.status).toBe(200);
+    const travel = NamedTag.parse(await made.json());
+    expect(travel.name).toBe("Travel");
+    expect((await f.send("POST", "/api/tags", { name: "x<y", color: "orange" })).status).toBe(400);
+    const renamed = await f.send("POST", `/api/tags/${travel.id}`, { name: "Trips" });
+    expect(await renamed.json()).toEqual({ ...travel, name: "Trips" });
+    await f.send("POST", "/api/tags", { name: "Work", color: "blue" });
+    expect((await f.send("POST", `/api/tags/${travel.id}`, { name: "work" })).status).toBe(409);
+    expect((await f.send("POST", `/api/tags/${travel.id}`, {})).status).toBe(400);
+    expect(
+      (await f.send("POST", "/api/tags/smart", { granularity: "broad", create: false, auto: true }))
+        .status,
+    ).toBe(204);
+    expect(await (await f.send("GET", "/api/tags")).json()).toEqual({
+      tags: [{ ...travel, name: "Trips" }, expect.objectContaining({ name: "Work" })],
+      smart: { granularity: "broad", create: false, auto: true },
+    });
+    expect((await f.send("DELETE", `/api/tags/${travel.id}`)).status).toBe(204);
+    expect((await f.send("DELETE", `/api/tags/${travel.id}`)).status).toBe(404);
+    expect(f.tagsChanged).toHaveBeenCalledTimes(4);
+  });
+
+  it("sorts the conversations into tags with the user's model, and takes the sort back", async () => {
+    const f = routes(async () => '{"new":[{"name":"Pets","color":"green"}],"tags":{"1":["Pets"]}}');
+    const dog = await f.task("Draw a dog");
+    const sorted = await f.send("POST", "/api/conversations/smart-tags", {
+      scope: "untagged",
+      granularity: "balanced",
+      create: true,
+    });
+    expect(sorted.status).toBe(200);
+    const result = SmartTagResult.parse(await sorted.json());
+    expect(result).toMatchObject({ tagged: 1, created: [{ name: "Pets", color: "green" }] });
+    expect(f.conversations.list().conversations[0]?.tags).toEqual([
+      { id: result.created[0]?.id, color: "green", name: "Pets" },
+    ]);
+    expect(
+      (await f.send("POST", "/api/conversations/smart-tags/undo", { run: result.run })).status,
+    ).toBe(204);
+    expect(f.conversations.tagsOf(dog)).toEqual([]);
+    expect(f.conversations.tags()).toEqual([]);
+    expect(
+      (await f.send("POST", "/api/conversations/smart-tags/undo", { run: result.run })).status,
+    ).toBe(404);
+  });
+
+  it("says why a sort couldn't be done", async () => {
+    const f = routes(async () => {
+      throw new SideQuestionError(409, "no-model");
+    });
+    await f.task("Draw a dog");
+    const refused = await f.send("POST", "/api/conversations/smart-tags", {
+      scope: "all",
+      granularity: "broad",
+      create: true,
+    });
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toBe("no-model");
+  });
 
   it("keeps what a task hears bounded however many runs a routine has had", async () => {
     const f = setup();

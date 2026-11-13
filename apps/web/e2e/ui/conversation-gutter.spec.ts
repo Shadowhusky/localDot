@@ -29,7 +29,9 @@ async function filed(page: Page) {
           ...(at === 3
             ? { ended: null, live: { state: "working", onScreen: false, since: SINCE } }
             : {}),
-          tag: TAGS.find(([name]) => name.test(entry.title ?? ""))?.[1],
+          ...((colour) => (colour ? { tags: [{ id: colour, color: colour }] } : {}))(
+            TAGS.find(([name]) => name.test(entry.title ?? ""))?.[1],
+          ),
         })),
       },
     });

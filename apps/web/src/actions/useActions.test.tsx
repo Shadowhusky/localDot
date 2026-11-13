@@ -63,6 +63,7 @@ function setup(
       pick: vi.fn(),
       renamed: vi.fn(),
       remove: vi.fn(),
+      sortTags: vi.fn(),
     },
     replay: doable(),
     viewStyle: { label: "Switch to Chat view", run: vi.fn() },
@@ -126,6 +127,7 @@ describe("the actions", () => {
       "resume",
       "rename",
       "tag",
+      "sort",
       "pin",
       "archive",
       "replay",
@@ -225,6 +227,7 @@ describe("the actions", () => {
         pick: vi.fn(),
         renamed: vi.fn(),
         remove: vi.fn(),
+        sortTags: vi.fn(),
       },
     });
     expect(f.find("tag").choices).toEqual([
@@ -247,8 +250,8 @@ describe("the actions", () => {
     expect(f.find("archive").unavailable).toBeUndefined();
     await f.run("archive");
     expect(f.calls.filter((call) => call.method === "POST")).toEqual([
-      { method: "POST", path: `/api/conversations/${SESSION}/tag`, body: { tag: "blue" } },
-      { method: "POST", path: `/api/conversations/${SESSION}/tag`, body: { tag: null } },
+      { method: "POST", path: `/api/conversations/${SESSION}/tags`, body: { tags: ["blue"] } },
+      { method: "POST", path: `/api/conversations/${SESSION}/tags`, body: { tags: [] } },
       { method: "POST", path: `/api/conversations/${SESSION}/pin`, body: { pinned: true } },
       { method: "POST", path: `/api/conversations/${SESSION}/archive`, body: { archived: true } },
     ]);

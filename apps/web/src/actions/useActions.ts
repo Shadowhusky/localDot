@@ -1,10 +1,4 @@
-import {
-  CONVERSATION_TAGS,
-  ConversationList,
-  type ConversationTag,
-  PERSONAS,
-  type PersonaId,
-} from "@localdot/protocol";
+import { CONVERSATION_TAGS, ConversationList, PERSONAS, type PersonaId } from "@localdot/protocol";
 import { useMemo, useRef } from "react";
 import {
   conversationStatus,
@@ -13,6 +7,9 @@ import {
   type Organize,
   organizeConversation,
   STATUS_LABEL,
+  tagIds,
+  tagOf,
+  toggledTag,
   useRecentConversations,
   whenLabel,
 } from "../agent/conversation-list.ts";
@@ -28,7 +25,7 @@ import { SECTIONS, type SettingsSection } from "../settings/sections.ts";
 import { PANEL_NAME } from "../shell/panel-name.ts";
 import { VIEW_NAMES } from "../shell/view-style.ts";
 import { announce } from "../ui/Announcer.tsx";
-import { TAG_NAMES } from "../ui/ConversationTag.tsx";
+import { TAG_NAMES, tagName } from "../ui/ConversationTag.tsx";
 import { showToast } from "../ui/Toast.tsx";
 import { type Action, type ActionChoice, fillComposer } from "./actions.ts";
 import type { AsideControl } from "./useAside.ts";
@@ -60,6 +57,8 @@ export interface ActionsInput {
     renamed(): void;
     // Asks before deleting the current conversation.
     remove(trigger: HTMLElement | null): void;
+    // Sorts the conversations into tags with the user's model.
+    sortTags(): void;
   };
   readonly replay: Doable;
   readonly watch: Doable;
@@ -150,12 +149,14 @@ export function useActions(input: ActionsInput): {
   const currentConversation = conversations.current;
   const facts = conversations.facts;
   // How the current conversation is kept, as the lists last read it.
-  const recent = useRecentConversations(api, false).entries;
+  const recentList = useRecentConversations(api, false);
+  const recent = recentList.entries;
+  const library = recentList.tags;
   const archived = useRecentConversations(api, false, "archived").entries;
   const filed = [...recent, ...archived].find((entry) =>
     entry.sessions.includes(currentConversation ?? ""),
   );
-  const filedTag = filed?.tag;
+  const filedTags = tagIds(filed);
   const filedPinned = !!filed?.pinned;
   const filedArchived = !!filed?.archived;
   const underWay =
@@ -327,28 +328,49 @@ export function useActions(input: ActionsInput): {
         id: "tag",
         command: "tag",
         title: t`Tag this conversation`,
-        description: t`Give it a colour to tell it apart in the list`,
-        hint: t`[colour]`,
+        description: t`Give it a tag or take one off, to find it by in the list`,
+        hint: t`[tag]`,
         group: "Conversation",
         icon: "tag",
-        keywords: "colour color label mark",
-        placeholder: t`Search colours`,
+        keywords: "colour color label mark category",
+        placeholder: t`Search tags`,
         unavailable: noConversation,
         choices: [
-          { value: "none", label: t`No tag`, current: !filedTag },
+          { value: "none", label: t`No tag`, current: !filedTags.length },
           ...CONVERSATION_TAGS.map((tag) => ({
             value: tag,
             label: TAG_NAMES[tag],
-            current: tag === filedTag,
+            current: filedTags.includes(tag),
+          })),
+          ...library.map((tag) => ({
+            value: tag.id,
+            label: tag.name,
+            current: filedTags.includes(tag.id),
           })),
         ],
         run: ({ choice }) => {
           if (!choice) return undefined;
-          const tag = choice.value === "none" ? null : (choice.value as ConversationTag);
+          const id = choice.value === "none" ? null : choice.value;
+          const next = toggledTag(filedTags, id);
+          const tag = id ? tagOf(id, library) : undefined;
+          if (!tag) return organize({ tags: next }, t`Tags taken off.`);
           return organize(
-            { tag },
-            tag ? t`Tagged ${TAG_NAMES[tag].toLowerCase()}.` : t`Tag taken off.`,
+            { tags: next },
+            next.includes(tag.id) ? t`Tagged ${tagName(tag)}.` : t`${tagName(tag)} taken off.`,
           );
+        },
+      },
+      {
+        id: "sort-tags",
+        command: "sort",
+        title: t`Sort conversations into tags`,
+        description: t`Your model reads them and tags each`,
+        group: "Conversation",
+        icon: "bot",
+        keywords: "smart tags categorize categorise organize group auto",
+        run: () => {
+          now().conversations.sortTags();
+          return undefined;
         },
       },
       {
@@ -752,7 +774,8 @@ export function useActions(input: ActionsInput): {
     conversationReason,
     currentConversation,
     facts,
-    filedTag,
+    filedTags.join(),
+    library,
     filedPinned,
     filedArchived,
     underWay,

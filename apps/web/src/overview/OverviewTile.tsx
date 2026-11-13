@@ -7,7 +7,7 @@ import { t, tr } from "../i18n/index.ts";
 import { ConversationAvatar } from "../shell/ConversationAvatar.tsx";
 import { conversationLabel } from "../shell/SessionRail.tsx";
 import { Button } from "../ui/Button.tsx";
-import { TagMark } from "../ui/ConversationTag.tsx";
+import { markOf, TagMark } from "../ui/ConversationTag.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Progress } from "../ui/Progress.tsx";
 import { SessionGlyph } from "../ui/SessionGlyph.tsx";
@@ -164,7 +164,7 @@ export const OverviewTile = memo(function OverviewTile({
           )}
         </span>
         <span className="overview-head">
-          <TagMark tag={row.entry.tag} />
+          <TagMark tag={markOf(row.entry)} />
           <span className="overview-dot">
             <ConversationAvatar row={row} size={DOT_SIZE[density]} badged={false} tagged={false} />
           </span>

@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { type ConversationRow, STATUS_LABEL } from "../agent/conversation-list.ts";
 import { t, tr } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
-import { TagMark } from "../ui/ConversationTag.tsx";
+import { markOf, TagMark } from "../ui/ConversationTag.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { attachLongPress } from "../ui/long-press.ts";
@@ -163,7 +163,7 @@ function LiveCard({
             )}
           </Button>
         )}
-        <TagMark tag={row.entry.tag} />
+        <TagMark tag={markOf(row.entry)} />
         <IconButton
           icon="more-horizontal"
           size={24}

@@ -55,7 +55,7 @@ test("tags, pins and archives a conversation from its menu, and another viewer f
     await page.keyboard.press("Shift+F10");
     const menu = page.getByRole("menu", { name: "Conversation actions" });
     await expect(menu).toBeVisible();
-    await menu.getByRole("menuitemradio", { name: "Green" }).click();
+    await menu.getByRole("menuitemcheckbox", { name: "Green" }).click();
     await expect(menu).toBeHidden();
     await expect(downloads).toHaveAccessibleName(/^Clean up my Downloads folder, green tag, done/);
     await expect(row(device, "Clean up my Downloads")).toHaveAccessibleName(/, green tag, /);
@@ -139,7 +139,7 @@ test("looks right tagged, with its menu open and searching, in Graphite and Dayl
     ["Draft a reply", "red"],
     ["Summarise the Q3", "yellow"],
   ] as const)
-    await organize(page, fixture, title, "tag", { tag });
+    await organize(page, fixture, title, "tags", { tags: [tag] });
   await organize(page, fixture, "Find a plumber", "pin", { pinned: true });
   await organize(page, fixture, "Summarise the Q3", "archive", { archived: true });
   await expect(row(page, "Draft a reply")).toHaveAccessibleName(/, red tag, /);

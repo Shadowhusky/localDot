@@ -3,6 +3,7 @@ import {
   ClientMessage,
   type ConversationLiveEvent,
   type ConversationOrganizedEvent,
+  type ConversationTagsEvent,
   type RoutineAppEvent,
 } from "@localdot/protocol";
 import type { PresenceBoard } from "./notify/presence.ts";
@@ -13,7 +14,8 @@ export type AppEvent =
   | AttentionChangeEvent
   | RoutineAppEvent
   | ConversationLiveEvent
-  | ConversationOrganizedEvent;
+  | ConversationOrganizedEvent
+  | ConversationTagsEvent;
 const MAX_BUFFERED_BYTES = 1024 * 1024;
 const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost):\d+$/;
 

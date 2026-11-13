@@ -1,13 +1,16 @@
 import type { ConversationEntry, LookWearables } from "@localdot/protocol";
 import { type ReactNode, type RefObject, useRef, useState } from "react";
-import type { Organize } from "../agent/conversation-list.ts";
+import { type Organize, tagIds, toggledTag } from "../agent/conversation-list.ts";
 import { t } from "../i18n/index.ts";
+import type { ApiClient } from "../lib/api.ts";
 import { TagSwatches } from "../ui/ConversationTag.tsx";
 import { Menu, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
 import { type Align, levelWith, type Side } from "../ui/position.ts";
 import { LookChooser } from "./LookChooser.tsx";
+import { TagChooser } from "./TagChooser.tsx";
 
 export interface ConversationMenuProps {
+  api: ApiClient;
   // The conversation acted on; the menu is open while there is one.
   entry: ConversationEntry | null;
   anchor: RefObject<HTMLElement | null>;
@@ -33,8 +36,9 @@ export interface ConversationMenuProps {
 }
 
 // What can be done to one conversation from its row: choose it among others, name it, dress its dot,
-// keep it on top, put it away, tell it apart by colour, or delete it.
+// keep it on top, put it away, tag it, or delete it.
 export function ConversationMenu({
+  api,
   entry,
   anchor,
   row,
@@ -52,6 +56,7 @@ export function ConversationMenu({
   children,
 }: ConversationMenuProps) {
   const [dressing, setDressing] = useState<ConversationEntry | null>(null);
+  const [tagging, setTagging] = useState<ConversationEntry | null>(null);
   // While it closes it still says what it said, rather than what the choice just changed.
   const last = useRef(entry);
   if (entry) last.current = entry;
@@ -98,7 +103,13 @@ export function ConversationMenu({
           {archived ? t`Unarchive` : t`Archive`}
         </MenuItem>
         <MenuSeparator />
-        <TagSwatches value={shown?.tag ?? null} onSelect={(tag) => onOrganize({ tag })} />
+        <TagSwatches
+          chosen={tagIds(shown)}
+          onSelect={(tag) => onOrganize({ tags: toggledTag(tagIds(shown), tag) })}
+        />
+        <MenuItem icon="tag" onSelect={() => setTagging(shown)}>
+          {t`Tags…`}
+        </MenuItem>
         <MenuSeparator />
         <MenuItem
           icon="trash"
@@ -114,6 +125,7 @@ export function ConversationMenu({
         onChange={onLook}
         onClose={() => setDressing(null)}
       />
+      <TagChooser api={api} entry={tagging} anchor={anchor} onClose={() => setTagging(null)} />
     </>
   );
 }

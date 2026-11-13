@@ -11,18 +11,29 @@ afterEach(cleanup);
 function Harness() {
   const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const [tag, setTag] = useState<ConversationTag | null>("green");
+  const [tags, setTags] = useState<ConversationTag[]>(["green"]);
   return (
     <>
       <button ref={trigger} type="button" onClick={() => setOpen(true)}>
         Actions
       </button>
-      <p>Tag {tag ?? "none"}</p>
-      <TagMark tag={tag ?? undefined} />
+      <p>Tags {tags.join(" ") || "none"}</p>
+      <TagMark tag={tags[0]} />
       <Menu open={open} onClose={() => setOpen(false)} anchor={trigger} label="Actions">
         <MenuItem onSelect={() => {}}>Rename</MenuItem>
         <MenuSeparator />
-        <TagSwatches value={tag} onSelect={setTag} />
+        <TagSwatches
+          chosen={tags}
+          onSelect={(tag) =>
+            setTags(
+              tag === null
+                ? []
+                : tags.includes(tag)
+                  ? tags.filter((each) => each !== tag)
+                  : [...tags, tag],
+            )
+          }
+        />
         <MenuSeparator />
         <MenuItem onSelect={() => {}}>Delete</MenuItem>
       </Menu>
@@ -33,11 +44,11 @@ function Harness() {
 const name = () => document.activeElement?.getAttribute("data-label");
 const key = (key: string) => fireEvent.keyDown(document.activeElement as Element, { key });
 
-it("lists no tag and the six colours as one row, the chosen one checked", () => {
+it("lists no tag and the six colours as one row, those given checked", () => {
   render(<Harness />);
   fireEvent.click(screen.getByRole("button", { name: "Actions" }));
   const row = screen.getByRole("group", { name: "Tag" });
-  const swatches = [...row.querySelectorAll("[role=menuitemradio]")];
+  const swatches = [...row.querySelectorAll("[role=menuitemcheckbox]")];
   expect(swatches.map((each) => each.getAttribute("aria-label"))).toEqual([
     "No tag",
     "Red",
@@ -47,9 +58,12 @@ it("lists no tag and the six colours as one row, the chosen one checked", () => 
     "Blue",
     "Purple",
   ]);
-  expect(screen.getByRole("menuitemradio", { name: "Green" }).getAttribute("aria-checked")).toBe(
+  expect(screen.getByRole("menuitemcheckbox", { name: "Green" }).getAttribute("aria-checked")).toBe(
     "true",
   );
+  expect(
+    screen.getByRole("menuitemcheckbox", { name: "No tag" }).getAttribute("aria-checked"),
+  ).toBe("false");
   expect(document.querySelector(".ui-tag-mark")?.getAttribute("data-tag")).toBe("green");
 });
 
@@ -79,10 +93,10 @@ it("moves along the row with left and right, and leaves it with up and down", ()
   key("ArrowLeft");
   expect(name()).toBe("Purple");
   fireEvent.click(document.activeElement as Element);
-  expect(screen.getByText("Tag purple")).toBeTruthy();
+  expect(screen.getByText("Tags green purple")).toBeTruthy();
   expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger);
-  fireEvent.click(screen.getByRole("menuitemradio", { name: "No tag" }));
-  expect(screen.getByText("Tag none")).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "No tag" }));
+  expect(screen.getByText("Tags none")).toBeTruthy();
   expect(document.querySelector(".ui-tag-mark")).toBeNull();
 });

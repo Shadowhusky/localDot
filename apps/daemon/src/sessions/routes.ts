@@ -384,7 +384,7 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
         });
     return c.body(null, 204);
   });
-  // A conversation's colour tag, its pin and whether it is archived, kept beside its name and told
+  // A conversation's tags, its pin and whether it is archived, kept beside its name and told
   // to every viewer. The owner's alone, as its name is. One under way is never archived: it would
   // leave the list while dot works in it.
   const organize = <T>(
@@ -409,7 +409,7 @@ export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void {
       deps.publish?.({ type: "conversation.organized", ...conversations.organize(id, wanted) });
       return c.body(null, 204);
     });
-  organize("tag", TagConversation, ({ tag }) => ({ tag }));
+  organize("tags", TagConversation, ({ tags }) => ({ tags }));
   organize("pin", PinConversation, ({ pinned }) => ({ pinned }));
   organize("archive", ArchiveConversation, ({ archived }) => ({ archived }));
   organize("look", LookConversation, ({ look }) => ({ look }));

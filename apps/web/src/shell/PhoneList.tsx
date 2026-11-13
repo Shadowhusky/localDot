@@ -2,9 +2,9 @@ import {
   type AttentionItem,
   CONVERSATION_NAME_CHARS,
   type ConversationEntry,
-  type ConversationTag,
   notifyRouteOf,
   RenameConversation,
+  type TagId,
 } from "@localdot/protocol";
 import { clsx } from "clsx";
 import {
@@ -19,6 +19,7 @@ import {
 import {
   type ConversationRow,
   type ConversationView,
+  carries,
   conversationRows,
   type LiveFacts,
   mostUrgent,
@@ -40,7 +41,7 @@ import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { CheckMark } from "../ui/CheckMark.tsx";
-import { TAG_NAMES, TagDot, TagMark } from "../ui/ConversationTag.tsx";
+import { markOf, TagMark, TagNames, tagName } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -58,6 +59,7 @@ import { ConversationPeek, type Peek } from "./ConversationPeek.tsx";
 import { adds, SelectAll, SelectionActions } from "./ConversationSelection.tsx";
 import { fileConversations } from "./conversation-leave.ts";
 import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
+import { TagFilter } from "./TagFilter.tsx";
 import { useConversationSelection } from "./useConversationSelection.ts";
 import "../ui/conversations-layout.css";
 import "../ui/phone-layout.css";
@@ -86,6 +88,8 @@ export interface PhoneListProps {
   onReplay(): void;
   // Every conversation's screen and progress at once.
   onOverview?(): void;
+  // Sorts the conversations into tags with the user's model.
+  onSortTags?(): void;
   onDeleted?(sessions: readonly string[]): void;
   // This computer's name on the pill, and what the pill opens.
   computer: { name: string; onOpen?(): void; menu: ReactNode };
@@ -193,6 +197,7 @@ export function PhoneList({
   newReason,
   onReplay,
   onOverview,
+  onSortTags,
   onDeleted,
   computer,
   notice,
@@ -220,11 +225,11 @@ export function PhoneList({
   const all = useMemo(() => conversationRows(recent.entries, facts), [recent.entries, facts]);
   // A shared link's own conversations: opened and started, never organized, which is the owner's.
   const guest = useGuest();
-  const [tag, setTag] = useState<ConversationTag | null>(null);
+  const [tag, setTag] = useState<TagId | null>(null);
   const tags = useMemo(() => tagsInUse(all), [all]);
-  const tagged = tag && tags.includes(tag) ? tag : null;
+  const tagged = tag && tags.some((each) => each.id === tag) ? tag : null;
   const shown = useMemo(
-    () => (tagged ? all.filter((row) => row.entry.tag === tagged) : all),
+    () => (tagged ? all.filter((row) => carries(row.entry, tagged)) : all),
     [all, tagged],
   );
   const found = useMemo(
@@ -419,7 +424,7 @@ export function PhoneList({
         <EmptyState
           layout="start"
           icon="tag"
-          title={t`No conversations have the ${TAG_NAMES[tagged].toLowerCase()} tag`}
+          title={t`No conversations carry “${tagName(tags.find((each) => each.id === tagged) ?? { color: "blue" })}”`}
         />
       )
     );
@@ -470,6 +475,7 @@ export function PhoneList({
                   </time>
                 </span>
                 <span className="phone-row-foot">
+                  <TagNames tags={row.entry.tags} />
                   <span className="phone-row-line">
                     {match?.snippet ? <Highlight text={match.snippet} before={32} /> : line}
                   </span>
@@ -533,7 +539,7 @@ export function PhoneList({
                   {button}
                 </SwipeActions>
               )}
-              <TagMark tag={row.entry.tag} />
+              <TagMark tag={markOf(row.entry)} />
               {!choosing && !guest && (
                 <IconButton
                   className="phone-row-actions"
@@ -657,24 +663,12 @@ export function PhoneList({
             {renameError}
           </p>
         )}
-        {tags.length > 0 && (
-          // biome-ignore lint/a11y/useSemanticElements: a row of toggles, not a form's fieldset.
-          <div className="conversations-tags" role="group" aria-label={t`Show only a colour tag`}>
-            {tags.map((each) => (
-              <Button
-                key={each}
-                variant="quiet"
-                size="sm"
-                className="conversations-tag"
-                aria-pressed={tagged === each}
-                onClick={() => setTag(tagged === each ? null : each)}
-              >
-                <TagDot tag={each} />
-                {TAG_NAMES[each]}
-              </Button>
-            ))}
-          </div>
-        )}
+        <TagFilter
+          tags={tags}
+          tagged={tagged}
+          onTag={setTag}
+          {...(onSortTags && !guest && all.length > 0 ? { onSort: onSortTags } : {})}
+        />
         <div ref={body} className="phone-list-body" aria-busy={recent.loading || matches.pending}>
           {pinned.length > 0 && (
             <ul className="phone-rail" aria-label={t`Pinned`}>
@@ -754,6 +748,7 @@ export function PhoneList({
         }}
       />
       <ConversationMenu
+        api={api}
         entry={action?.entry ?? null}
         anchor={actionAnchor}
         row={peek ? undefined : actionRow}

@@ -136,6 +136,7 @@ import { apiSideModel } from "./side/api-model.ts";
 import { sideReaders } from "./side/readers.ts";
 import { sideSpendLedger } from "./side/spend.ts";
 import { leftoverSkills, listSkills, skillDesktopPath, skillFiles, skillsFor } from "./skills.ts";
+import { TagSorter } from "./smart-tags.ts";
 import { createToolApi } from "./tool-api.ts";
 import type { ToolDeps } from "./tools/deps.ts";
 import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
@@ -187,6 +188,8 @@ export interface AgentWiringDeps {
   previewOffers?: ToolDeps["previewOffers"];
   notesChanged?(file: string): void;
   liveChanged?: AgentRunnerDeps["liveChanged"];
+  // The user's tags changed, or many conversations' tags at once.
+  tagsChanged?(): void;
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
 // How long a native task's first look waits for the web browser, its turn on the computer included,
@@ -210,6 +213,11 @@ export function createAgent(d: AgentWiringDeps) {
     isLive: (id) => d.live.cellOf(id) !== undefined,
   });
   const conversations = new Conversations(d.home, d.eventLog);
+  const sorter = new TagSorter({
+    shelf: conversations,
+    ask: (system, prompt, signal) => runner.askQuick(system, prompt, signal),
+    changed: () => d.tagsChanged?.(),
+  });
   const experience = new ExperienceRecorder({
     memory,
     allowed: (id) => {
@@ -968,6 +976,7 @@ export function createAgent(d: AgentWiringDeps) {
     stopSession: (id) => d.killSwitch.contain(id),
     computer: turns,
     ...(d.liveChanged ? { liveChanged: d.liveChanged } : {}),
+    ended: (id, reason) => sorter.ended(id, reason),
     ...(claudeDriver && claudeSetup
       ? {
           claudeCode: {
@@ -1269,6 +1278,7 @@ export function createAgent(d: AgentWiringDeps) {
       : undefined,
     runner,
     conversations,
+    tags: { sorter, changed: () => d.tagsChanged?.() },
     settings,
     catalog,
     keyModels,

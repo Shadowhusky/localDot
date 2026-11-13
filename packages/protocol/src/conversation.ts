@@ -44,13 +44,83 @@ export const ConversationName = z
 export const RenameConversation = z.strictObject({ title: ConversationName.nullable() });
 export type RenameConversation = z.infer<typeof RenameConversation>;
 
-// A colour the user gives a conversation to tell it apart at a glance, as Finder's tags.
+// A colour the user gives a conversation to tell it apart at a glance, as Finder's tags. Each colour
+// is a tag of its own, named by its colour; the tags the user names each take one of them.
 export const CONVERSATION_TAGS = ["red", "orange", "yellow", "green", "blue", "purple"] as const;
 export const ConversationTag = z.enum(CONVERSATION_TAGS);
 export type ConversationTag = z.infer<typeof ConversationTag>;
-// null takes the tag off.
-export const TagConversation = z.strictObject({ tag: ConversationTag.nullable() });
+
+export const TAG_NAME_CHARS = 32;
+// The most tags the user names, and the most one conversation carries.
+export const TAG_LIBRARY = 64;
+export const TAGS_PER_CONVERSATION = 8;
+export const TagName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(TAG_NAME_CHARS)
+  .refine((name) => name.isWellFormed() && !/[\p{Cc}<>]/u.test(name), "Use one line of text");
+// A colour, which names itself, or a tag the user named.
+export const TagId = z.union([ConversationTag, z.string().regex(ULID_PATTERN)]);
+export type TagId = z.infer<typeof TagId>;
+export const NamedTag = z.strictObject({
+  id: z.string().regex(ULID_PATTERN),
+  name: TagName,
+  color: ConversationTag,
+});
+export type NamedTag = z.infer<typeof NamedTag>;
+// A tag as a conversation carries it, ready to show: a colour's has no name.
+export const TagOnConversation = z.strictObject({
+  id: TagId,
+  color: ConversationTag,
+  name: TagName.optional(),
+});
+export type TagOnConversation = z.infer<typeof TagOnConversation>;
+const TagIds = z
+  .array(TagId)
+  .max(TAGS_PER_CONVERSATION)
+  .refine((ids) => new Set(ids).size === ids.length, "Name each tag once");
+// All the tags a conversation carries now; none takes them all off.
+export const TagConversation = z.strictObject({ tags: TagIds });
 export type TagConversation = z.infer<typeof TagConversation>;
+export const CreateTag = z.strictObject({ name: TagName, color: ConversationTag });
+export type CreateTag = z.infer<typeof CreateTag>;
+export const ChangeTag = z
+  .strictObject({ name: TagName.optional(), color: ConversationTag.optional() })
+  .refine((change) => change.name !== undefined || change.color !== undefined, "Change something");
+export type ChangeTag = z.infer<typeof ChangeTag>;
+
+// How dot sorts conversations into tags with the user's model: into a few broad tags or many
+// narrow ones, making tags of its own or only using the user's, and whether each new conversation
+// is tagged as its task finishes.
+export const SMART_TAG_GRAINS = ["broad", "balanced", "detailed"] as const;
+export const SmartTagOptions = z.strictObject({
+  granularity: z.enum(SMART_TAG_GRAINS),
+  create: z.boolean(),
+  auto: z.boolean(),
+});
+export type SmartTagOptions = z.infer<typeof SmartTagOptions>;
+export const DEFAULT_SMART_TAGS: SmartTagOptions = {
+  granularity: "balanced",
+  create: true,
+  auto: false,
+};
+// Sorts the conversations without a tag, or all of them; a tag already given stays.
+export const SmartTagRequest = z.strictObject({
+  scope: z.enum(["untagged", "all"]),
+  granularity: SmartTagOptions.shape.granularity,
+  create: z.boolean(),
+});
+export type SmartTagRequest = z.infer<typeof SmartTagRequest>;
+// What a sort did, which its run takes back while it is the latest.
+export const SmartTagResult = z.strictObject({
+  run: z.string().regex(ULID_PATTERN),
+  tagged: z.number().int().min(0),
+  created: z.array(NamedTag).max(TAG_LIBRARY),
+});
+export type SmartTagResult = z.infer<typeof SmartTagResult>;
+export const UndoSmartTags = z.strictObject({ run: z.string().regex(ULID_PATTERN) });
+export type UndoSmartTags = z.infer<typeof UndoSmartTags>;
 // Pinned, it is listed above the rest whatever its age.
 export const PinConversation = z.strictObject({ pinned: z.boolean() });
 export type PinConversation = z.infer<typeof PinConversation>;
@@ -101,7 +171,7 @@ export const ConversationEntry = z.strictObject({
   // How its latest task ended; null while it runs, or when it was cut short.
   ended: z.enum(["done", "stopped", "error"]).nullable(),
   live: ConversationLive.optional(),
-  tag: ConversationTag.optional(),
+  tags: z.array(TagOnConversation).max(TAGS_PER_CONVERSATION).optional(),
   pinned: z.boolean().optional(),
   archived: z.boolean().optional(),
   // Its first task, which seeds its look however long it goes on, and the dot its latest task
@@ -113,10 +183,12 @@ export const ConversationEntry = z.strictObject({
 });
 export type ConversationEntry = z.infer<typeof ConversationEntry>;
 
-// The recent conversations, newest first, or the archived ones; and how many are archived.
+// The recent conversations, newest first, or the archived ones; how many are archived; and the
+// tags the user named.
 export const ConversationList = z.strictObject({
   conversations: z.array(ConversationEntry).max(CONVERSATION_LIST),
   archivedCount: z.number().int().min(0).optional(),
+  tags: z.array(NamedTag).max(TAG_LIBRARY).optional(),
 });
 export type ConversationList = z.infer<typeof ConversationList>;
 
@@ -125,12 +197,16 @@ export type ConversationList = z.infer<typeof ConversationList>;
 export const ConversationOrganizedEvent = z.strictObject({
   type: z.literal("conversation.organized"),
   sessionId: SessionId,
-  tag: ConversationTag.nullable(),
+  tags: z.array(TagOnConversation).max(TAGS_PER_CONVERSATION),
   pinned: z.boolean(),
   archived: z.boolean(),
   look: LookWearables.nullable().optional(),
 });
 export type ConversationOrganizedEvent = z.infer<typeof ConversationOrganizedEvent>;
+
+// The user's named tags changed, or a sort tagged many conversations at once: the lists read again.
+export const ConversationTagsEvent = z.strictObject({ type: z.literal("conversation.tags") });
+export type ConversationTagsEvent = z.infer<typeof ConversationTagsEvent>;
 
 // What was said before the task, one line per turn ("The user: …", "dot: …"), oldest first.
 export const EarlierTurns = z

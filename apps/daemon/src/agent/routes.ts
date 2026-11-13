@@ -14,10 +14,12 @@ import {
   ApprovalAnswer,
   BlockerModelChoice,
   BudgetRaiseRequest,
+  ChangeTag,
   CLAUDE_PLAN_REFUSAL,
   ClaudeCodeAccountRequest,
   type ClaudeCodeStatus,
   ContinueConversation,
+  CreateTag,
   EditMemoryEntryRequest,
   EditPersonRequest,
   HandbackRequest,
@@ -27,6 +29,7 @@ import {
   MemoryEntryChangeReply,
   MemoryEntryRevision,
   MemoryFileName,
+  type NamedTag,
   NOTES_FILE,
   PauseRequest,
   PeopleReply,
@@ -39,6 +42,8 @@ import {
   type RecentTask,
   ResearchChange,
   ResumeSafetyRequest,
+  SmartTagOptions,
+  SmartTagRequest,
   sameCredential,
   scanKeyLike,
   type TakeComputerReply,
@@ -46,6 +51,7 @@ import {
   TakeoverInputRequest,
   TaskModelRef,
   ULID_PATTERN,
+  UndoSmartTags,
 } from "@localdot/protocol";
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
 import type { Context, Hono } from "hono";
@@ -89,7 +95,7 @@ import type { ClaudeCodeSetup } from "./claude-code/setup.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
 import { type ChatgptSetupControl, SANDBOX_REASONS } from "./codex/setup.ts";
-import type { Conversations } from "./conversation.ts";
+import { type Conversations, TagError } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktopSource, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore, type StoredEntry } from "./memory.ts";
@@ -104,6 +110,7 @@ import { type AgentSession, ControlHeldError, SessionStoppedError } from "./sess
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import { SIDE_QUESTION_CHARS, SideQuestionError } from "./side-question.ts";
 import type { SkillInfo } from "./skills.ts";
+import { SortBusyError, type TagSorter } from "./smart-tags.ts";
 import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 import { userUploadRoutes } from "./user-upload-routes.ts";
 import type { UserUploads } from "./user-uploads.ts";
@@ -157,7 +164,15 @@ export interface AgentRoutesDeps {
     | "chain"
     | "leave"
     | "discard"
+    | "tags"
+    | "createTag"
+    | "changeTag"
+    | "deleteTag"
+    | "smartTagOptions"
+    | "setSmartTagOptions"
   >;
+  // Sorting conversations into tags, and telling every viewer the tags changed.
+  tags?: { sorter: Pick<TagSorter, "sort" | "undo">; changed(): void };
   settings: Pick<SettingsStore, "get" | "put">;
   purpose?: Pick<PurposeService, "status" | "test">;
   catalog: Pick<CatalogStore, "get" | "refresh" | "fresh" | "freshness">;
@@ -804,6 +819,98 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         });
       }),
     );
+    const tags = deps.tags;
+    if (tags) {
+      const owner = (c: Context) => {
+        if (c.get("remoteGrant"))
+          throw new RouteError(403, "Only the owner organizes conversations");
+      };
+      const told = (error: unknown) =>
+        error instanceof TagError ? new RouteError(409, error.message) : error;
+      app.get(
+        "/api/tags",
+        route((c) => {
+          owner(c);
+          return c.json({ tags: conversations.tags(), smart: conversations.smartTagOptions() });
+        }),
+      );
+      app.post(
+        "/api/tags",
+        route(async (c) => {
+          owner(c);
+          const wanted = await json(c.req.raw, CreateTag);
+          try {
+            const tag = conversations.createTag(wanted);
+            tags.changed();
+            return c.json(tag);
+          } catch (error) {
+            throw told(error);
+          }
+        }),
+      );
+      app.post(
+        "/api/tags/smart",
+        route(async (c) => {
+          owner(c);
+          conversations.setSmartTagOptions(await json(c.req.raw, SmartTagOptions));
+          return c.body(null, 204);
+        }),
+      );
+      app.post(
+        "/api/tags/:id",
+        route(async (c) => {
+          owner(c);
+          const change = await json(c.req.raw, ChangeTag);
+          let tag: NamedTag | undefined;
+          try {
+            tag = conversations.changeTag(c.req.param("id") ?? "", change);
+          } catch (error) {
+            throw told(error);
+          }
+          if (!tag) throw new RouteError(404, "no such tag");
+          tags.changed();
+          return c.json(tag);
+        }),
+      );
+      app.delete(
+        "/api/tags/:id",
+        route((c) => {
+          owner(c);
+          if (!conversations.deleteTag(c.req.param("id") ?? ""))
+            throw new RouteError(404, "no such tag");
+          tags.changed();
+          return c.body(null, 204);
+        }),
+      );
+      // Answers once the sort is done; the user may have left by then, and it is done all the same.
+      app.post(
+        "/api/conversations/smart-tags",
+        route(async (c) => {
+          owner(c);
+          const request = await json(c.req.raw, SmartTagRequest);
+          try {
+            return c.json(await tags.sorter.sort(request));
+          } catch (error) {
+            if (error instanceof SortBusyError) throw new RouteError(409, "busy");
+            if (error instanceof SideQuestionError)
+              throw new RouteError(error.status, error.problem);
+            if (error instanceof DOMException && error.name === "TimeoutError")
+              throw new RouteError(502, "no-answer");
+            throw error;
+          }
+        }),
+      );
+      app.post(
+        "/api/conversations/smart-tags/undo",
+        route(async (c) => {
+          owner(c);
+          const { run } = await json(c.req.raw, UndoSmartTags);
+          if (!tags.sorter.undo(run))
+            throw new RouteError(404, "That sort can't be taken back now.");
+          return c.body(null, 204);
+        }),
+      );
+    }
     app.post(
       "/api/conversation/new",
       route(async (c) => {

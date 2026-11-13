@@ -58,6 +58,95 @@
   }
 
   /* Changing a conversation's look (LookChooser): the dot as it will be, then what it can wear. */
+  /* A conversation's tags: the colours, a field that finds or makes one, and the user's own. */
+  .tag-chooser {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+    min-width: min(320px, 100%);
+  }
+
+  .tag-chooser > .ui-tag-swatches {
+    padding: 0;
+  }
+
+  .tag-chooser-list {
+    display: grid;
+    gap: var(--spacing);
+    max-height: min(320px, 50dvh);
+    overflow-y: auto;
+  }
+
+  .tag-chooser-row {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .tag-chooser-row > :first-child {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tag-chooser-name {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+  }
+
+  .tag-chooser-make.ui-button {
+    justify-content: flex-start;
+  }
+
+  .tag-chooser-note,
+  .tag-editor-ask,
+  .tag-editor-problem {
+    margin: 0;
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
+  }
+
+  .tag-editor-problem {
+    color: var(--color-danger-fg);
+  }
+
+  .tag-editor {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 2);
+    border-radius: var(--radius-row);
+    background-color: var(--color-control);
+  }
+
+  .tag-editor > .ui-tag-swatches {
+    padding: 0;
+  }
+
+  .tag-editor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .tag-editor-ask {
+    flex: 1 1 100%;
+  }
+
+  /* Sorting into tags: how finely, and which conversations. */
+  .smart-tags {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+  }
+
+  .smart-tags-problem {
+    margin: 0;
+    color: var(--color-danger-fg);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
   .look-chooser {
     display: grid;
     gap: calc(var(--spacing) * 3);

@@ -161,7 +161,7 @@ for (const appearance of ["graphite", "daylight"])
       expect((await deck.boundingBox())?.y).toBeGreaterThan(viewport * 0.4);
       // Those under way are cards only; the rows below are the rest, by day.
       await expect(sheet.getByRole("row")).toHaveCount(3);
-      await expect(sheet.getByRole("group", { name: "Show only a colour tag" })).toContainText(
+      await expect(sheet.getByRole("group", { name: "Show only a tag" })).toContainText(
         "OrangeBluePurple",
       );
       await shot(page, ui, `${appearance}-sheet`);
