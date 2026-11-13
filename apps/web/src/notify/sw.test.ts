@@ -7,7 +7,11 @@ const SESSION = "01J9ZQ4V5W6X7Y8Z9ABCDEFGHJ";
 type Listener = (event: Record<string, unknown>) => void;
 
 function load(
-  windows: { url: string; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = [],
+  windows: {
+    url: string;
+    focus: () => Promise<void>;
+    postMessage: (m: { type?: string }, transfer?: MessagePort[]) => void;
+  }[] = [],
 ) {
   const listeners = new Map<string, Listener>();
   const shown: {
@@ -121,6 +125,48 @@ describe("service worker", () => {
     expect(focus).toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith({ type: "open-session", sessionId: SESSION });
     expect(withWindow.opened).toEqual([]);
+  });
+
+  // An installed app's window, asked, says so; a browser tab, or a page too old or too busy to
+  // answer, doesn't. A tap goes to the app, as the app's own notifications do.
+  const window = (url: string, standalone?: boolean) => {
+    const client = {
+      url,
+      focus: vi.fn(async () => {}),
+      postMessage: vi.fn((message: { type?: string }, transfer?: MessagePort[]) => {
+        if (message.type === "display-mode" && standalone !== undefined)
+          transfer?.[0]?.postMessage({ standalone });
+      }),
+    };
+    return client;
+  };
+
+  it("takes a tap to the installed app's window over a browser tab", async () => {
+    const tab = window("https://mac.example.ts.net/", false);
+    const silent = window("https://mac.example.ts.net/?replay=x");
+    const app = window("https://mac.example.ts.net/", true);
+    const sw = load([tab, silent, app]);
+    await sw.dispatch("notificationclick", {
+      notification: { close: vi.fn(), data: { sessionId: SESSION } },
+    });
+    expect(app.focus).toHaveBeenCalledOnce();
+    expect(app.postMessage).toHaveBeenLastCalledWith({ type: "open-session", sessionId: SESSION });
+    expect(tab.focus).not.toHaveBeenCalled();
+    expect(silent.focus).not.toHaveBeenCalled();
+    expect(sw.opened).toEqual([]);
+  });
+
+  it("takes a tap to the latest window when no app's is open, however long the others take", async () => {
+    const tab = window("https://mac.example.ts.net/", false);
+    const silent = window("https://mac.example.ts.net/");
+    const sw = load([silent, tab]);
+    const started = Date.now();
+    await sw.dispatch("notificationclick", {
+      notification: { close: vi.fn(), data: { sessionId: SESSION } },
+    });
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(silent.focus).toHaveBeenCalledOnce();
+    expect(tab.focus).not.toHaveBeenCalled();
   });
 
   it("is a standalone Home Screen app on the void colour", () => {

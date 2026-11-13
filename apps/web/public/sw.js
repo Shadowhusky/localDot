@@ -94,13 +94,38 @@ self.addEventListener("push", (event) => {
   );
 });
 
+// How long a window has to say whether it is the installed app's. One that doesn't answer in time
+// (an older page, or one the browser froze) counts as a tab.
+const ASK_MS = 300;
+const installed = (client) =>
+  new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    const done = (answer) => {
+      clearTimeout(timer);
+      port1.close();
+      resolve(answer);
+    };
+    const timer = setTimeout(() => done(false), ASK_MS);
+    port1.onmessage = (event) => done(event.data?.standalone === true);
+    try {
+      client.postMessage({ type: "display-mode" }, [port2]);
+    } catch {
+      done(false);
+    }
+  });
+
+// A tap opens the task in the installed app's window when one is open, as the app's own would, and
+// otherwise in the window used last; with none open, in a new one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const sessionId = event.notification.data?.sessionId ?? null;
   event.waitUntil(
     (async () => {
-      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const open = windows.find((client) => new URL(client.url).origin === self.location.origin);
+      const windows = (
+        await self.clients.matchAll({ type: "window", includeUncontrolled: true })
+      ).filter((client) => new URL(client.url).origin === self.location.origin);
+      const apps = await Promise.all(windows.map(installed));
+      const open = windows[apps.indexOf(true)] ?? windows[0];
       if (open) {
         await open.focus();
         open.postMessage({ type: "open-session", sessionId });

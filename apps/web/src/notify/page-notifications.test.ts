@@ -60,4 +60,19 @@ describe("page notifications", () => {
     ).toBe("skipped");
     expect(showPageNotification(item, new Set(), host("granted", true).h)).toBe("failed");
   });
+
+  // Shown through the service worker, a tap goes where the worker takes a push's: to the installed
+  // app's window when one is open, not to whichever tab showed it. It shares the push's tag, so the
+  // two for one task are one notification.
+  it("goes through the service worker when the page has one", () => {
+    const { made, h } = host();
+    const show = vi.fn(async () => {});
+    expect(showPageNotification(item, new Set(), { ...h, show })).toBe("shown");
+    expect(made).toHaveLength(0);
+    expect(show).toHaveBeenCalledWith("dot needs you", {
+      body: "Pay the electricity bill",
+      tag: `needs_you:${SESSION}`,
+      data: { sessionId: SESSION },
+    });
+  });
 });

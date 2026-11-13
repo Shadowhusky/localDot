@@ -6,6 +6,8 @@ export interface PageNotificationHost {
     permission: NotificationPermission;
     new (title: string, options: NotificationOptions): Notification;
   };
+  // The service worker's, when the page has one: its tap goes where a push's does.
+  show?(title: string, options: NotificationOptions): Promise<void>;
   focus(): void;
   openSession(sessionId: string | null): void;
 }
@@ -22,11 +24,19 @@ export function showPageNotification(
   if (host.Notification?.permission !== "granted") return "skipped";
   shown.add(item.key);
   const copy = notifyCopy(route.kind);
-  try {
-    const notification = new host.Notification(copy.title, {
-      body: item.task ?? copy.body,
-      tag: item.key,
+  const body = item.task ?? copy.body;
+  if (host.show) {
+    // The push to this Mac for the same task carries the same tag: the two are one notification.
+    const options = { body, tag: `${route.kind}:${item.sessionId ?? "none"}` };
+    void host.show(copy.title, { ...options, data: { sessionId: item.sessionId } }).catch(() => {
+      try {
+        if (host.Notification) new host.Notification(copy.title, options);
+      } catch {}
     });
+    return "shown";
+  }
+  try {
+    const notification = new host.Notification(copy.title, { body, tag: item.key });
     notification.onclick = () => {
       notification.close();
       host.focus();

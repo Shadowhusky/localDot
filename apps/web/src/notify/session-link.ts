@@ -1,4 +1,5 @@
 import { ULID_PATTERN } from "@localdot/protocol";
+import { isStandalone } from "./this-device.ts";
 
 export interface SessionLinkHost {
   location: { hash: string; pathname: string; search: string };
@@ -27,7 +28,8 @@ function sessionOf(link: string): string | null {
 
 // Calls open for every notification tap: a new window's fragment, a fragment change, the service
 // worker telling an already open window which task to show, or a link from this Mac's banner that
-// the installed app takes in its open window.
+// the installed app takes in its open window. Tells the worker, when it asks, whether this window is
+// the installed app's, which a tap goes to first.
 export function listenForSessionLinks(
   open: (sessionId: string) => void,
   host: SessionLinkHost & Pick<Window, "addEventListener" | "removeEventListener"> = window,
@@ -35,6 +37,7 @@ export function listenForSessionLinks(
     | Pick<ServiceWorkerContainer, "addEventListener" | "removeEventListener">
     | undefined = navigator.serviceWorker,
   launches: LaunchQueue | undefined = (window as { launchQueue?: LaunchQueue }).launchQueue,
+  standalone: () => boolean = isStandalone,
 ): () => void {
   let listening = true;
   launches?.setConsumer(({ targetURL }) => {
@@ -46,7 +49,12 @@ export function listenForSessionLinks(
     if (id) open(id);
   };
   const fromWorker = (event: Event) => {
-    const data = (event as MessageEvent).data as { type?: unknown; sessionId?: unknown } | null;
+    const message = event as MessageEvent;
+    const data = message.data as { type?: unknown; sessionId?: unknown } | null;
+    if (data?.type === "display-mode") {
+      message.ports[0]?.postMessage({ standalone: standalone() });
+      return;
+    }
     if (
       data?.type === "open-session" &&
       typeof data.sessionId === "string" &&
