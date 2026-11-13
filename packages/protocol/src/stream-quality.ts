@@ -12,10 +12,12 @@ export const StreamQuality = z.object({
 });
 export type StreamQuality = z.infer<typeof StreamQuality>;
 
-// A hidden page asks for nothing; a visible one names the quality it can take.
+// A hidden page asks for nothing; a visible one names the quality it can take. One that shows the
+// screen as a thumbnail only says so with `glance`: it has no use for more frames than it asks for,
+// and no trouble with more either.
 export const StreamQualityReport = z.union([
   z.object({ visible: z.literal(false) }).strict(),
-  StreamQuality.extend({ visible: z.literal(true) }).strict(),
+  StreamQuality.extend({ visible: z.literal(true), glance: z.literal(true).optional() }).strict(),
 ]);
 export type StreamQualityReport = z.infer<typeof StreamQualityReport>;
 

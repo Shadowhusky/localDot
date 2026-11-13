@@ -3,6 +3,7 @@ import {
   CRFS,
   FRAMERATES,
   framerateCeiling,
+  glances,
   HANDHELD_FRAMERATE,
   PROBE_TICKS,
   QualityController,
@@ -233,6 +234,17 @@ describe("a stage's frame rate", () => {
     expect(stageFramerate({ share: 0.74, control: false }, 60)).toBe(60);
     expect(stageFramerate({ share: 0.2, control: true }, 60)).toBe(60);
     expect(stageFramerate({ share: 0.9, control: true }, HANDHELD_FRAMERATE)).toBe(30);
+  });
+
+  it("is the lowest for a thumbnail, which shows no more, but not for a stage yet to be measured", () => {
+    expect(stageFramerate({ share: 0.009, control: false }, 60)).toBe(12);
+    expect(stageFramerate({ share: 0.002, control: false }, HANDHELD_FRAMERATE)).toBe(12);
+    expect(glances({ share: 0.009, control: false })).toBe(true);
+    expect(stageFramerate({ share: 0, control: false }, 60)).toBe(30);
+    expect(glances({ share: 0, control: false })).toBe(false);
+    expect(stageFramerate({ share: 0.009, control: true }, 60)).toBe(60);
+    expect(glances({ share: 0.009, control: true })).toBe(false);
+    expect(glances({ share: 0.27, control: false })).toBe(false);
   });
 
   it("keeps a slow device's steps below a new ceiling, and climbs to a raised one", () => {

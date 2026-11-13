@@ -71,6 +71,17 @@ describe("sharedQuality", () => {
     expect(sharedQuality([sharp, auto]).crf).toBe(25);
   });
 
+  it("gives a thumbnail its few frames only while nobody watches the screen at a size", () => {
+    const thumbnail = {
+      paused: false,
+      report: { visible: true as const, framerate: 12, crf: 25, glance: true as const },
+    };
+    const watching = { paused: false, report: { visible: true as const, framerate: 30, crf: 28 } };
+    expect(sharedQuality([thumbnail])).toEqual({ framerate: 12, crf: 25 });
+    expect(sharedQuality([thumbnail, { ...thumbnail }]).framerate).toBe(12);
+    expect(sharedQuality([thumbnail, watching])).toEqual({ framerate: 30, crf: 28 });
+  });
+
   it("asks nothing of a hidden page, a paused client or one that never said", () => {
     expect(
       sharedQuality([
