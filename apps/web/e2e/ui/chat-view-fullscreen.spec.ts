@@ -88,11 +88,19 @@ test("a long line of dot's stays in two lines beside it, at the thread's foot", 
   await page.screenshot({ path: test.info().outputPath("long-line.png") });
 });
 
-test("a tap on dot opens its menu, which changes it", async ({ page, ui }) => {
+test("a tap on dot opens its menu, which changes it, its look, or hides it", async ({
+  page,
+  ui,
+}) => {
   await ui.open("done");
-  await page.getByRole("button", { name: "Your dot" }).tap();
-  await page.getByRole("menuitem", { name: "Change dot" }).tap();
+  const dot = page.getByRole("button", { name: "Your dot" });
+  await dot.tap();
+  await page.getByRole("menuitem", { name: "Change look" }).tap();
   await expect(page.getByRole("dialog", { name: "Change look" })).toBeVisible();
+  await page.getByRole("button", { name: "Done", exact: true }).last().tap();
+  await dot.tap();
+  await page.getByRole("menuitem", { name: "Change dot" }).tap();
+  await expect(page.getByRole("dialog", { name: "Your dot" })).toBeVisible();
 });
 
 test("the stack keeps clear of an iPhone's safe areas", async ({ page, ui, browserName }) => {

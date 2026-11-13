@@ -43,7 +43,8 @@ test("Settings' grouped rows and choices", async ({ page, ui }) => {
 test("the dot chooser's rows", async ({ page, ui }) => {
   const fixture = await ui.open("ready");
   await page.request.post(`${fixture.origin}/__qa/first-look`, { data: { title: "A poster" } });
-  await page.getByRole("button", { name: /^Change your dot/ }).click();
+  await page.getByRole("button", { name: "Your dot", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Change dot" }).click();
   const chooser = page.getByRole("dialog", { name: "Your dot" });
   await expect(chooser).toBeVisible();
   expect(await ringFaultsInEach(page, rowsIn(chooser), "dot-chooser")).toEqual([]);

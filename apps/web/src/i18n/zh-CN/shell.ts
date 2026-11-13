@@ -58,7 +58,6 @@ export const shell = {
   "This task needs the computer owner’s input or approval. It has not finished.":
     "此任务需要电脑所有者的输入或批准，尚未完成。",
   "Next message: {0}": "下一条消息：{0}",
-  "Change your dot, now {0}": "更换你的 dot，当前为 {0}",
   "Research a question": "研究一个问题",
   "Send after this task": "此任务完成后发送",
   Keys: "密钥",

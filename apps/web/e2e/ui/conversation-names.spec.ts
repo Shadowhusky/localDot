@@ -37,7 +37,8 @@ test("Auto picks the dot and dot names the conversation; the user changes both",
     data: { title: TITLE, persona: "research", reason: "Needs sources, dates and prices" },
   });
 
-  await page.getByRole("button", { name: /^Change your dot/ }).click();
+  await page.getByRole("button", { name: "Your dot", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Change dot" }).click();
   const chooser = page.getByRole("dialog", { name: "Your dot" });
   const auto = chooser.getByRole("switch", { name: "Auto" });
   await expect(auto).not.toBeChecked();

@@ -78,8 +78,8 @@ export interface SessionRailProps {
   // Why a new conversation can't be started now.
   newReason?: string;
   onDeleted?(sessions: readonly string[]): void;
-  // The overview of every conversation: whether it is on show, and how to show it.
-  overview?: { open: boolean; onOpen(): void };
+  // The overview of every conversation: whether it is on show, and what pressing it does.
+  overview?: { open: boolean; onPress(): void };
 }
 
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
@@ -451,7 +451,7 @@ export const SessionRail = memo(function SessionRail({
         <div className="sessions-new">
           <NewRow expanded={expanded} reason={newReason} onNew={onNew} />
           {overview && (
-            <OverviewRow expanded={expanded} open={overview.open} onOpen={overview.onOpen} />
+            <OverviewRow expanded={expanded} open={overview.open} onPress={overview.onPress} />
           )}
         </div>
       )}
@@ -684,11 +684,11 @@ function NewRow({
 function OverviewRow({
   expanded,
   open,
-  onOpen,
+  onPress,
 }: {
   expanded: boolean;
   open: boolean;
-  onOpen(): void;
+  onPress(): void;
 }) {
   const { triggerProps: tip, tooltip } = useTooltip({
     content: expanded ? undefined : t`Overview`,
@@ -702,7 +702,7 @@ function OverviewRow({
         aria-label={t`Overview`}
         aria-current={open ? "page" : undefined}
         data-current={open || undefined}
-        onClick={onOpen}
+        onClick={onPress}
       >
         <Icon name="layout-dashboard" />
         <span className="sessions-title">{t`Overview`}</span>

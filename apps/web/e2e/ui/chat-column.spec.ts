@@ -208,7 +208,8 @@ test("the dot's line wears the task's own look, and the chooser this localDot's 
   await appearance(page, "graphite");
 
   // Another dot, shown in the chooser, wears the cap in place of the hat it would wear.
-  await page.getByRole("button", { name: /^Change your dot/ }).click();
+  await page.getByRole("button", { name: "Your dot", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Change dot" }).click();
   const chooser = page.getByRole("dialog", { name: "Your dot" });
   const worn = (name: string) =>
     chooser
@@ -341,4 +342,22 @@ test("a preview beside the chat closes on a click outside it, and on Escape", as
   await expect(viewer).toHaveAttribute("aria-modal", "true");
   await page.mouse.click(40, 450);
   await expect(viewer).toBeHidden();
+});
+
+test("dot in Studio offers what a phone's does: another dot, another look, or out of sight", async ({
+  page,
+  ui,
+}) => {
+  test.skip(isPhone(page), "A phone's dot has its own test");
+  await ui.open("done");
+  const dot = page.getByRole("button", { name: "Your dot", exact: true });
+  await dot.click();
+  const menu = page.getByRole("menu", { name: "Your dot" });
+  await expect(menu.getByRole("menuitem")).toHaveText(["Change dot", "Change look", "Hide dot"]);
+  await menu.getByRole("menuitem", { name: "Change look" }).click();
+  await expect(page.getByRole("dialog", { name: "Change look" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await dot.click();
+  await page.getByRole("menuitem", { name: "Hide dot" }).click();
+  await expect(dot).toBeHidden();
 });
