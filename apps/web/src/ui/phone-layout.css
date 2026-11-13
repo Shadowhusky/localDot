@@ -676,7 +676,7 @@
     position: absolute;
     z-index: 2;
     top: 50%;
-    right: calc(var(--spacing) * 2);
+    right: var(--_gutter);
     translate: 0 -50%;
     opacity: 0;
     pointer-events: none;
@@ -693,9 +693,9 @@
       pointer-events: auto;
     }
 
-    /* Its room is kept at the row's end, so it sits beside the date, never over it. */
+    /* Its room is kept at the row's end, at the gutter, so it sits beside the date, never over it. */
     .phone-row > .ui-button-content {
-      padding-inline-end: calc(var(--spacing) * 6);
+      padding-inline-end: calc(28px + var(--spacing) * 2);
     }
   }
 

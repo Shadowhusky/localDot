@@ -84,13 +84,18 @@ test.describe("Chat", () => {
         rail: ".phone-rail-name",
         ball: ".phone-row-avatar",
         when: ".phone-row-time",
+        more: ".phone-row-actions",
       });
       const gutter = at.search?.left ?? 0;
       expect(gutter).toBeGreaterThan(0);
       expect(at.search?.right).toBeCloseTo(gutter, 0);
       for (const part of ["title", "tag", "rail", "ball"])
         expect(at[part]?.left, `${part}'s left edge`).toBeCloseTo(gutter, 0);
-      expect(at.when?.right, "a row's right edge").toBeCloseTo(gutter, 0);
+      // Under a pointer a row's More keeps its room at the gutter, the date beside it.
+      if (await page.evaluate(() => matchMedia("(hover: hover)").matches)) {
+        expect(at.more?.right, "a row's More").toBeCloseTo(gutter, 0);
+        expect(at.when?.right, "a row's date").toBeCloseTo(gutter + 28 + 8, 0);
+      } else expect(at.when?.right, "a row's right edge").toBeCloseTo(gutter, 0);
 
       // The tags scroll edge to edge, the first and the last coming to rest at the gutter.
       expect(at.tags?.left).toBe(0);
