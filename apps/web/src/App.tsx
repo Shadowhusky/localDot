@@ -3315,7 +3315,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             working={sentThinking || atWork(appStatus.row)}
             hidden={!showDot.value}
             band={level < 2 && phoneBand}
-            status={level < 2 && statusWord}
+            status={level < 2 && (footLine || appStatus.label)}
+            statusTime={taskTime}
             thumb={
               holding && showDot.value && level > 0 && !switching
                 ? {

@@ -331,6 +331,17 @@ test.describe("minimal mode", () => {
     await expect(page.locator(".presence-frame[data-shown]")).toBeVisible();
   });
 
+  // Hidden, dot still says what it is doing now, as its line did beside it: not just Working.
+  test("the typing bubble says dot's own line", async ({ page, ui }) => {
+    await ui.open("running");
+    const line = page.locator(".dot-strip .narration-line");
+    await expect(line).toHaveText(/\S/);
+    const said = ((await line.textContent()) ?? "").replace(/^dot: /, "").trim();
+    await page.getByRole("button", { name: "Your dot" }).click();
+    await page.getByRole("menuitem", { name: "Hide dot" }).click();
+    await expect(page.locator(".dot-typing-text")).toHaveText(said);
+  });
+
   // The typing bubble says dot is at work: over a finished task it read as work still going on.
   test("over a finished task, nothing types in dot's place", async ({ page, ui }) => {
     await ui.open("done");

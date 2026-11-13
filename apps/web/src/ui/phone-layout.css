@@ -1118,11 +1118,19 @@
       var(--font-ui);
   }
 
+  /* Two lines at most, as dot's line beside it. */
   .dot-typing-text {
+    display: -webkit-box;
     min-width: 0;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .dot-typing-time {
+    flex: none;
+    align-self: flex-end;
   }
 
   .dot-typing-dots {

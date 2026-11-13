@@ -12,8 +12,10 @@ export interface DotStripProps {
   hidden: boolean;
   // dot and its one sentence.
   band: ReactNode;
-  // What dot is doing, said in a typing bubble while dot itself is hidden.
+  // What dot is doing, said in a typing bubble while dot itself is hidden: its own line.
   status?: ReactNode;
+  // How long it has run, after what the bubble says.
+  statusTime?: ReactNode;
   // This task holds the computer: its picture, a tap from the computer screen.
   thumb?: {
     light: "dot" | "you" | "none";
@@ -27,7 +29,16 @@ export interface DotStripProps {
 
 // The foot of the thread: one dot, one sentence and, while this task has it, the computer. With dot
 // hidden, a task at work still shows it is going on, as a messenger shows the other side typing.
-export function DotStrip({ live, working, hidden, band, status, thumb, time }: DotStripProps) {
+export function DotStrip({
+  live,
+  working,
+  hidden,
+  band,
+  status,
+  statusTime,
+  thumb,
+  time,
+}: DotStripProps) {
   const typing = hidden && live && working && !!status;
   const away = hidden && !typing;
   return (
@@ -47,6 +58,7 @@ export function DotStrip({ live, working, hidden, band, status, thumb, time }: D
                 <i />
               </span>
               <span className="dot-typing-text">{status}</span>
+              {statusTime && <span className="dot-typing-time num">{statusTime}</span>}
             </div>
           ) : (
             band
