@@ -55,7 +55,9 @@ test.describe("a desktop", () => {
       if (!chat) throw new Error("No conversation");
       const field = await page.getByPlaceholder("Message dot").boundingBox();
       const content = await page.locator(".phone-thread .thread-content").boundingBox();
-      expect(content?.width).toBeLessThanOrEqual(760);
+      // A wide window gives the thread room, up to a measure that still reads.
+      expect(content?.width).toBeLessThanOrEqual(960);
+      expect(content?.width).toBeGreaterThanOrEqual(Math.min(960, chat.width - 48));
       expect((field?.x ?? 0) + (field?.width ?? 0)).toBeLessThanOrEqual(chat.x + chat.width);
       await ui.settle();
       await page.screenshot({ path: test.info().outputPath("thread.png") });
@@ -73,6 +75,27 @@ test.describe("a desktop", () => {
       await expect(stack).not.toHaveAttribute("data-level", "2");
     });
   }
+
+  // A long reply uses the room a wide window has, as a messenger's does, and a short one stays short.
+  test("a long reply takes the room a wide window gives it", async ({ page, ui }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const fixture = await ui.open("running");
+    const words = "The totals line up with the sheet once the returns are taken off each month, ";
+    await page.request.post(
+      `${fixture.origin}/__qa/say?text=${encodeURIComponent(words.repeat(6).trim())}`,
+    );
+    const thread = page.locator(".phone-thread");
+    const long = thread
+      .locator(".thread-message[data-role='dot']")
+      .filter({ hasText: words.trim() });
+    await expect(long).toBeVisible();
+    const column = await thread.locator(".thread-content").boundingBox();
+    const box = await long.boundingBox();
+    if (!column || !box) throw new Error("Nothing to measure");
+    expect(box.width).toBeGreaterThanOrEqual(700);
+    expect(box.width).toBeLessThanOrEqual(column.width * 0.86 + 1);
+    await page.screenshot({ path: test.info().outputPath("long-reply.png") });
+  });
 
   // Nov 12: with the user holding the web browser, the sign-in offer under the controls stood
   // narrower than the picture and ran off the bottom of the window, the message box with it.

@@ -1925,10 +1925,10 @@
   /* A tablet: the list beside the conversation. */
   .phone-stack[data-split] {
     --_split: clamp(300px, 38%, 368px);
-    --_reading: 760px;
+    --_reading: 960px;
   }
 
-  /* However wide the screen, a thread stays a comfortable measure, its foot under it. */
+  /* A wide screen gives the thread its room, up to a measure that still reads, its foot under it. */
   .phone-stack[data-split] :is(.thread-content, .thread-dock) {
     width: 100%;
     max-width: var(--_reading);
@@ -1975,8 +1975,15 @@
     display: none;
   }
 
-  .phone-stack[data-split] .phone-thread :is(.thread-message[data-role="dot"], .thread-bubble) {
-    max-width: min(76%, 560px);
+  /* dot's long replies, as a messenger's, take most of it; the user's bubbles a little less. */
+  .phone-stack[data-split]
+    .phone-thread
+    :is(.thread-message[data-role="dot"], .thread-row[data-kind="result"]) {
+    max-width: min(86%, 760px);
+  }
+
+  .phone-stack[data-split] .phone-thread .thread-bubble {
+    max-width: min(76%, 640px);
   }
 
   /* A phone held sideways: the picture fills the height, its controls in the margin beside it. */
