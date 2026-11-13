@@ -39,6 +39,8 @@ export interface ApprovalDecisionProps {
   loadField?(approvalId: string, field: number, signal: AbortSignal): Promise<string>;
   // In the island over the stage, or in a phone's sheet.
   layout?: "island" | "sheet";
+  // An app's connection, which the task does not wait on, rather than the task's own decision.
+  connection?: boolean;
 }
 
 // The approval the island grows into (design-v2 §10.16): the question in the action's own verb,
@@ -50,6 +52,7 @@ export function ApprovalDecision({
   enabled = true,
   loadField,
   layout = "island",
+  connection = false,
 }: ApprovalDecisionProps) {
   const value = CardSchema.safeParse(card);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -94,7 +97,7 @@ export function ApprovalDecision({
       </div>
     );
   const data = value.data;
-  const words = decisionWords(data);
+  const words = decisionWords(data, { connection });
   const expired = now >= data.expiresAt;
   const unread = [...partial.keys()].some((field) => !whole.has(field));
   const canDecide = enabled && !pending && !expired;

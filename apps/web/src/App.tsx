@@ -1931,6 +1931,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     <ApprovalDecision
       key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
       card={approval}
+      connection={!stepApproval}
       enabled={safety.canApprove}
       pending={safety.pending === "approval"}
       onDecision={safety.answerApproval}
@@ -2203,7 +2204,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const narration = noticed
     ? ""
     : sheets && approvalView && approval
-      ? decisionWords(approval).line
+      ? decisionWords(approval, { connection: !stepApproval }).line
       : yours && confirming
         ? CONFIRMING_LINE
         : yours && sheets

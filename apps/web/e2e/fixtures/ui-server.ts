@@ -3601,6 +3601,36 @@ function requestApproval(
       .catch((e) => effects.push(`approval-error:${String(e)}`));
     return;
   }
+  if (kind === "key-place") {
+    // A key going to a place no saved key goes to, from a task that has read outside words: the
+    // credentials tool's own card, through the real authorization.
+    session.taint.add("app", "api.sunoapi.org");
+    void authorizePrepared(ctx, {
+      tool: "credentials",
+      input: { key: "sunoapi", goes_to: ["api.sunoapi.org"] },
+      target: null,
+      facts: {
+        operation: "connector",
+        connector: {
+          app: "Keys",
+          tool: "Add a key",
+          exposed: "keys__add",
+          actionClass: "network",
+          asks: true,
+          once: true,
+          host: "api.sunoapi.org",
+          card: {
+            title: "Send a new key to a new place",
+            why: "This task has read things from outside, which can steer it. Check you expected a key to go here before you add one.",
+          },
+        },
+      },
+      revalidate: async () => true,
+    })
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
   if (kind === "purpose") {
     // A tainted task opening an unrelated site with data in its address, through the real purpose
     // check, its judge finding the site unrelated.

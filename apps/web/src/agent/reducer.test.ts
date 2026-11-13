@@ -509,6 +509,28 @@ describe("bounded agent projection", () => {
       actionClass: "network",
     });
   });
+  // The daemon keeps a network-class decision of the task's own (a key going to a new place) as the
+  // task's approval, and only an app's connection as a connection: the page files each the same way.
+  it("files a task's own network decision as its approval, where the daemon's status has it", () => {
+    const approvalId = id(31002);
+    const model = reduce([
+      ev(0, "approval.request", {
+        approvalId,
+        generation: 1,
+        revision: 1,
+        expiresAt: 9_000_000,
+        actionClass: "network",
+        risk: "high",
+        title: "Send a new key to a new place",
+        why: "This task has read things from outside, which can steer it.",
+        always: [],
+        kind: "other",
+        preview: { fields: [["App", "Keys"]] },
+      }),
+    ]);
+    expect(model.approval?.approvalId).toBe(approvalId);
+    expect(model.connection ?? null).toBeNull();
+  });
   it("keeps the last decision's note and the Always allow choice it saved, until removed", () => {
     const approval = id(30000),
       rule = id(30001);

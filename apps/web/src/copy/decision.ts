@@ -100,8 +100,11 @@ const WORK: Readonly<Record<ActionClass, string>> = {
 
 // The daemon's own words for this action and its reason win; its plain class name becomes a
 // question.
+// `connection`: the card is an app's connection, which the task does not wait on, not one of the
+// task's own decisions.
 export function decisionWords(
   card: Pick<ApprovalCard, "actionClass" | "title" | "why"> & Partial<Pick<ApprovalCard, "fields">>,
+  { connection }: { connection: boolean },
 ): DecisionWords {
   const { actionClass } = card;
   const [primary, secondary] = VERB[actionClass] ?? [t`Allow`, t`Don't allow`];
@@ -109,7 +112,7 @@ export function decisionWords(
   const title =
     card.title === ACTION_CLASS_LABELS[actionClass] ? QUESTION[actionClass] : card.title;
   // A connection is the app's, not dot's: dot keeps working, so its reason stands alone.
-  const network = actionClass === "network";
+  const network = connection;
   return {
     title,
     primary,
