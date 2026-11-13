@@ -8,6 +8,7 @@ import {
   planAt,
   startedCount,
   stepAt,
+  stepsRevision,
   turnAt,
 } from "./model.ts";
 
@@ -432,5 +433,40 @@ it("retains event sequence numbers for equal-time action and marker ordering", (
     intentSeq: intent.seq,
     dispatchSeq: dispatch.seq,
     cancelSeq: cancel.seq,
+  });
+});
+
+describe("stepsRevision", () => {
+  it("stands while dot only talks, plans and thinks, and moves with every step, action and key", () => {
+    const model = emptyModel();
+    foldEvents(model, [ev("step.start", 0, { kind: "shell" }, "s1")]);
+    const started = stepsRevision(model);
+    expect(started).toBeGreaterThan(0);
+    foldEvents(model, [
+      ev("message.delta", 10, { messageId: "m1", text: "Looking" }),
+      ev("message.assistant", 20, { messageId: "m1", text: "Looking now." }),
+      ev("thought.delta", 30, { text: "hm" }),
+      ev("heartbeat", 40, {}),
+      ev("agent.state", 50, { state: "acting" }),
+      ev("plan.set", 60, { items: [] }),
+    ]);
+    expect(stepsRevision(model)).toBe(started);
+    let last = started;
+    for (const event of [
+      ev("tool.start", 70, { tool: "shell", title: "ls" }, "s1"),
+      ev("step.end", 80, { status: "ok" }, "s1"),
+      ev("key.use", 90, {
+        secretId: "k",
+        host: "h",
+        method: "GET",
+        path: "/",
+        decision: "allow",
+      }),
+      ...click(100, "s2"),
+    ]) {
+      foldEvents(model, [event]);
+      expect(stepsRevision(model), event.type).toBeGreaterThan(last);
+      last = stepsRevision(model);
+    }
   });
 });

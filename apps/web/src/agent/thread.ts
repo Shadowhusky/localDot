@@ -388,7 +388,7 @@ const sameKeys = (was: readonly KeyUseRowView[], now: readonly KeyUseRowView[]) 
 // A task's steps, as the work lines of its turns show them.
 export function workSteps(
   rows: readonly TimelineRow<StepRowView>[],
-  model: AgentModel,
+  model: Pick<AgentModel, "steps" | "changes" | "ended">,
   cache?: WorkStepCache,
 ): WorkStep[] {
   const changes = new Map<string, AgentChange[]>();

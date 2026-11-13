@@ -154,9 +154,17 @@ export function ChatThread({
   const ended = agent?.interrupted ? "interrupted" : model?.ended?.reason;
   const sessionId = agent?.sessionId ?? null;
   const built = useRef<WorkStepCache>(new Map());
+  // Of the model, the steps read only these: every step of a long task is not built again for each
+  // thing dot says.
+  const stepped = model?.steps,
+    changes = model?.changes,
+    over = model?.ended ?? null;
   const steps = useMemo<WorkStep[]>(
-    () => (model ? workSteps(rows, model, built.current) : []),
-    [rows, model],
+    () =>
+      stepped && changes
+        ? workSteps(rows, { steps: stepped, changes, ended: over }, built.current)
+        : [],
+    [rows, stepped, changes, over],
   );
   const waiting = agent?.fixes?.length;
   const items = useMemo(

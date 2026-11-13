@@ -254,10 +254,31 @@ export function turnAt(model: SessionModel, t: number): number {
 
 // Mutates and returns `model`; events already folded (seq ≤ lastSeq) are skipped, so a stream
 // that replays its backlog is harmless.
+// What dot says, plans and thinks, and how it is: none of it touches a step, an action or a key use.
+const BESIDE_STEPS: ReadonlySet<string> = new Set([
+  "message.user",
+  "message.delta",
+  "message.assistant",
+  "thought.delta",
+  "heartbeat",
+  "plan.set",
+  "plan.update",
+  "agent.state",
+  "subagent.state",
+  "persona.choice",
+  "session.title",
+]);
+const revisions = new WeakMap<SessionModel, number>();
+
+// Moves whenever an event may have changed a task's steps, actions, frames or key uses: what was
+// listed from those is still right while it stands, however much dot has said since.
+export const stepsRevision = (model: SessionModel): number => revisions.get(model) ?? 0;
+
 export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>): SessionModel {
   for (const e of events) {
     if (e.seq <= model.lastSeq) continue;
     model.lastSeq = e.seq;
+    if (!BESIDE_STEPS.has(e.type)) revisions.set(model, stepsRevision(model) + 1);
     const t = sessionMsOf(e);
     switch (e.type) {
       case "observe":
