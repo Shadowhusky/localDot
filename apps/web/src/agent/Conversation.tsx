@@ -1007,7 +1007,9 @@ export function Conversation({
   if (known.current.owner !== ownerKey)
     known.current = { owner: ownerKey, keys: new Set(), drawn: false };
   const settled = known.current.drawn;
-  const lastKnown = rows.findLastIndex((row) => known.current.keys.has(row.item.key));
+  // Older pages come in above the first row the reader has seen; what arrives comes after it, often
+  // above the run dot is at, which stays the thread's last row.
+  const firstKnown = rows.findIndex((row) => known.current.keys.has(row.item.key));
   // Rows that came while the reader was away, and those a page brings in, are history by then.
   const arriving = page.following && !page.retained;
   useLayoutEffect(() => {
@@ -1534,7 +1536,7 @@ export function Conversation({
                 <Row
                   key={row.item.key}
                   row={row}
-                  fresh={settled && index > lastKnown && !known.current.keys.has(row.item.key)}
+                  fresh={settled && index > firstKnown && !known.current.keys.has(row.item.key)}
                   thread={thread}
                 />
               ))

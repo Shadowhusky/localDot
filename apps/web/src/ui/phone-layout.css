@@ -867,6 +867,21 @@
     width: 100%;
   }
 
+  /* A new message grows out of its speaker's side as it eases in, as a messenger's does. */
+  .phone-thread .thread-row[data-new] {
+    transform-origin: left bottom;
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      translate var(--dur-default) var(--ease-spring),
+      scale var(--dur-default) var(--ease-spring);
+  }
+
+  @starting-style {
+    .phone-thread .thread-row[data-new]:not([data-kind="message"][data-speaker="user"]) {
+      scale: 0.96;
+    }
+  }
+
   .phone-thread .thread-bubble {
     max-width: min(86%, 560px);
     padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.25) calc(var(--spacing) * 2.5);
@@ -2067,6 +2082,12 @@
     .phone-thread .thread-message[data-holding][data-role="dot"],
     .phone-thread .thread-message[data-holding] .thread-bubble {
       scale: 1;
+    }
+
+    @starting-style {
+      .phone-thread .thread-row[data-new]:not([data-kind="message"][data-speaker="user"]) {
+        scale: none;
+      }
     }
 
     .phone-coach,
