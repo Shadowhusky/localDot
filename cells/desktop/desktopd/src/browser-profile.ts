@@ -10,9 +10,13 @@ export async function prepareDesktopBrowser(
 ): Promise<{ taskId: string | null; generation: string }> {
   signal?.throwIfAborted();
   const child = spawn("/usr/bin/python3", [helper, "rotate"], {
-    stdio: ["pipe", "pipe", "ignore"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
   let output = "";
+  let said = "";
+  child.stderr.on("data", (bytes: Buffer) => {
+    if (said.length < 256) said += bytes.toString("utf8");
+  });
   let failed = false;
   const kill = () => {
     failed = true;
@@ -36,7 +40,11 @@ export async function prepareDesktopBrowser(
   child.stdin.end(JSON.stringify({ taskId, recover: taskId === null }));
   try {
     const code = await closed;
-    if (failed || code !== 0) throw new Error("Desktop browser preparation failed.");
+    if (failed || code !== 0) {
+      // Of what the helper says, only which of its checks refused is passed on.
+      const check = /^desktop browser could not be prepared, check (\d{1,4})\n?$/.exec(said)?.[1];
+      throw new Error(`Desktop browser preparation failed${check ? `, check ${check}` : "."}`);
+    }
     const result: unknown = JSON.parse(output);
     // Recovery is internal to desktopd startup, never an HTTP-supplied option.
     const receipt = DesktopBrowserReady.extend({

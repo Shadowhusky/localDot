@@ -194,8 +194,13 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
       );
       if (receipt.taskId !== parsed.data.taskId) throw new Error("task changed");
       return c.json(receipt);
-    } catch {
-      return c.text("desktop browser could not be prepared", 503);
+    } catch (error) {
+      const check =
+        error instanceof Error &&
+        /^Desktop browser preparation failed, check (\d{1,4})$/.exec(error.message)?.[1];
+      const refused = `desktop browser could not be prepared${check ? `, check ${check}` : ""}`;
+      console.error(refused);
+      return c.text(refused, 503);
     }
   });
 
