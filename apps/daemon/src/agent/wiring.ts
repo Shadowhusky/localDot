@@ -117,7 +117,14 @@ import { PrivateFiles } from "./private-files.ts";
 import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
-import { AgentError, AgentRunner, type AgentRunnerDeps, CARRY_ON, computerDown } from "./runner.ts";
+import {
+  AgentError,
+  AgentRunner,
+  type AgentRunnerDeps,
+  CARRY_ON,
+  computerDown,
+  DesktopSound,
+} from "./runner.ts";
 import { ConnectionApprovals } from "./safety/connections.ts";
 import { NativeTasks } from "./safety/native-tasks.ts";
 import { PurposeService } from "./safety/purpose-service.ts";
@@ -260,11 +267,22 @@ export function createAgent(d: AgentWiringDeps) {
     return created;
   };
   const failedPreparations = new Set<string>();
+  // What fails before the desktop's browser is asked to change leaves it as it was.
+  const untouched = async <T>(work: () => T | Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      throw new DesktopSound(error);
+    }
+  };
   const prepareDesktop = async (cellId: string, sessionId: string, signal: AbortSignal) => {
-    await transfers.wait(cellId, signal);
-    signal.throwIfAborted();
-    const tools = desktop(cellId);
-    if (!tools) throw new AgentError(409, "the computer is not ready");
+    const tools = await untouched(async () => {
+      await transfers.wait(cellId, signal);
+      signal.throwIfAborted();
+      const found = desktop(cellId);
+      if (!found) throw new AgentError(409, "the computer is not ready");
+      return found;
+    });
     const check = () => {
       signal.throwIfAborted();
       const cell = d.cells.get(cellId);
@@ -284,9 +302,12 @@ export function createAgent(d: AgentWiringDeps) {
       )
         throw new AgentError(409, "the computer changed");
     };
-    const lease = transfers.acquire(cellId, [signal], check);
+    // The change is seen through even when the task is stopped meanwhile: an answer lost to a stop
+    // would leave the browser's profile in doubt, and cost the user the computer.
+    const lease = await untouched(() => transfers.acquire(cellId, [], check));
     try {
       await tools.prepareBrowser(sessionId, lease.signal);
+      if (signal.aborted) throw new DesktopSound(signal.reason);
       lease.check();
     } finally {
       lease.release();
@@ -1400,10 +1421,12 @@ export function createAgent(d: AgentWiringDeps) {
       try {
         await prepareDesktop(cellId, sessionId, signal);
       } catch (error) {
+        // A scripted task has no runner to tell the two apart: its computer is held either way.
+        const cause = error instanceof DesktopSound ? error.cause : error;
         failedPreparations.add(cellId);
         d.fences?.capture(cellId, sessionId, "api");
         await d.killSwitch.contain(sessionId).catch(() => undefined);
-        throw error;
+        throw cause;
       }
     },
     reservedPorts(): Iterable<number> {

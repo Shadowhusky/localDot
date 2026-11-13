@@ -238,6 +238,14 @@ export class AgentError extends Error {
     this.name = "AgentError";
   }
 }
+// Why a task's desktop was not prepared for it, when nothing about its browser is in doubt: it was
+// never asked to change, or it changed and said so before the task was stopped.
+export class DesktopSound extends Error {
+  constructor(readonly cause: unknown) {
+    super("the desktop browser is not in doubt");
+    this.name = "DesktopSound";
+  }
+}
 export interface AgentRunnerDeps {
   home: string;
   fences?: ComputerFences;
@@ -427,6 +435,8 @@ interface Runtime {
   authResumeAfter?: number;
   authGeneration?: number;
   idleWait?: AbortController;
+  // Its run has begun, so a native agent may have been launched for it.
+  began?: boolean;
   containment?: Promise<void>;
   safety?: SafetyController;
   backoff?: AbortController;
@@ -490,6 +500,17 @@ const sleep = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal
 const budgetHold = (rt: Runtime) =>
   rt.pause === "budget" ? (rt.budgetScope ?? "task") : undefined;
 // A plan's own app does the model's work outside localDot's brain cell and key layer.
+// What went wrong, as far as the log may say: the error's kind, its status and what the computer
+// answered, which contain() passes on only when they are plain words and numbers.
+const why = (error: unknown): string | undefined => {
+  if (!(error instanceof Error)) return undefined;
+  const { status, detail } = error as { status?: unknown; detail?: unknown };
+  return [
+    error.name,
+    ...(typeof status === "number" ? [String(status)] : []),
+    ...(typeof detail === "string" ? [detail] : []),
+  ].join(" ");
+};
 const native = (selection: ModelSelection) =>
   selection.kind === "chatgpt" || selection.kind === "claude-code";
 
@@ -2402,10 +2423,12 @@ export class AgentRunner {
       console.error(
         `computer recovery required: ${session.cellId}, task ${session.id} (${/^[a-z_]{1,64}$/.test(reason) ? reason : "cleanup_uncertain"}${why && /^[\w .,;']{1,400}$/.test(why) ? `: ${why}` : ""})`,
       );
+    // A native task contained before its run began launched nothing: it has no exit to wait for,
+    // and waiting for one would refuse the computer's replacement for good.
     this.deps.fences?.capture(
       session.cellId,
       session.id,
-      rt && native(rt.selection) ? "native" : "api",
+      rt?.began && native(rt.selection) ? "native" : "api",
     );
     if (rt?.containment) return rt.containment;
     const work = Promise.resolve()
@@ -2561,6 +2584,9 @@ export class AgentRunner {
     const stop = () => session.stop();
     liveSignal.addEventListener("abort", stop, { once: true });
     if (liveSignal.aborted) stop();
+    // Only a preparation that began and did not end well leaves the browser's profile in doubt. A
+    // task stopped or turned away before it, or stopped once it was done, costs nobody the computer.
+    let inDoubt = false;
     try {
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
       session.abort.signal.throwIfAborted();
@@ -2569,13 +2595,20 @@ export class AgentRunner {
         .lease(session.cellId)
         .acquire(session.id, { signal: session.abort.signal });
       try {
+        inDoubt = true;
         await this.deps.prepareDesktop?.(session);
+        inDoubt = false;
+      } catch (error) {
+        if (!(error instanceof DesktopSound)) throw error;
+        inDoubt = false;
+        throw error.cause;
       } finally {
         turn.release();
       }
       session.abort.signal.throwIfAborted();
     } catch (error) {
-      await this.contain(session, "desktop_profile_uncertain").catch(() => {});
+      if (inDoubt)
+        await this.contain(session, "desktop_profile_uncertain", why(error)).catch(() => {});
       throw error;
     } finally {
       liveSignal.removeEventListener("abort", stop);
@@ -2587,6 +2620,7 @@ export class AgentRunner {
     liveSignal.addEventListener("abort", stop, { once: true });
     if (liveSignal.aborted) stop();
     let reason: "done" | "stopped" | "error" = "done";
+    rt.began = true;
     try {
       if (rt.selection.kind === "none") return await session.waitForControl();
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
