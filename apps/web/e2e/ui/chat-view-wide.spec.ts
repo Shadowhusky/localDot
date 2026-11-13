@@ -76,6 +76,18 @@ test.describe("a desktop", () => {
     });
   }
 
+  // With the list put away, the computer pill and its Settings go with it: the conversation's ⋯
+  // has them too.
+  test("the conversation's ⋯ opens Settings, with the list put away", async ({ page, ui }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await ui.open("done");
+    await page.locator(".phone-chat-bar").getByRole("button").first().click();
+    await expect(page.locator(".phone-stack")).toHaveAttribute("data-list-hidden");
+    await page.getByRole("button", { name: "More", exact: true }).first().click();
+    await page.getByRole("menuitem", { name: "Settings" }).click();
+    await expect(page.getByRole("dialog", { name: "Settings" })).toBeVisible();
+  });
+
   // A long reply uses the room a wide window has, as a messenger's does, and a short one stays short.
   test("a long reply takes the room a wide window gives it", async ({ page, ui }) => {
     await page.setViewportSize({ width: 1440, height: 900 });

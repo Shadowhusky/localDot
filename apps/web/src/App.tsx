@@ -2824,6 +2824,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const phoneMenu = (
     <ConversationMenuItems
       onChatSettings={guest?.grant.settings ? () => setGuestSettings(true) : undefined}
+      onSettings={() => goToSettings(null)}
       dotHidden={!showDot.value}
       look={shown.look}
       seed={shown.seed}
