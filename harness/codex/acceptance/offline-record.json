@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "36964e42f35dae22b8acd7392b274141319c8e7603f7c922f3ff56524450681d",
+  "inputSha256": "4700120021a9ed6877a1ee55207cf3f3355bac1ab41e17986f7ec735da56b896",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -165,8 +165,8 @@
     "apps/daemon/src/agent/runner-first-look.test.ts": "41bf0905b9dc023cb10dfe5bb7fa4151ed6a5f0d3e9aa7f1d6f519a008e68a4f",
     "apps/daemon/src/agent/runner-independent.test.ts": "9b8f17421043e7c699573ec4b2d165838aa619076711cad83dc19ec35254f7bc",
     "apps/daemon/src/agent/runner-review.test.ts": "a6e683692618d87e09c9cbb6d51f0af1818f34c054a2ce08619637bb01d2e6ea",
-    "apps/daemon/src/agent/runner.test.ts": "010318c6213e75026ba63b607de7d59f89c37a1cc6a5a1b2b49ddf9ee29fe58e",
-    "apps/daemon/src/agent/runner.ts": "ca030d877b16973e488ba2dbb7121fe0e450ccb965e9b1478d5deb4173de981b",
+    "apps/daemon/src/agent/runner.test.ts": "f321e9027e361791dd518b6283f87826e9876929cefd99eded566c436675e4f2",
+    "apps/daemon/src/agent/runner.ts": "f34e07de8b0c9f76d761b53db390d1410450737d489a5b4ea1d31a17ead7331d",
     "apps/daemon/src/agent/safety/acceptance.docker.test.ts": "a0079b4e64e3ba11daf5fa1bff8d66f7f2874b027562ede0d0de2660caa83082",
     "apps/daemon/src/agent/safety/always-allow.test.ts": "7b5e602592d54198db4799408c449601918b9c9f1da6f3a5fa07f0a34b433404",
     "apps/daemon/src/agent/safety/approval-values.test.ts": "681097b5a906a1d170d27688f4c840057a1406a0f7d5cec510f1b379253d2f1b",
@@ -376,9 +376,9 @@
     "apps/daemon/src/agent/web/search.test.ts": "1f0e8147259e75d2df2e3db1122203f798742461b11eb421cfa8c8a9caab3bce",
     "apps/daemon/src/agent/web/search.ts": "9cd579f59348665c5d6aa663fa030faef8a2f0f44ec7eec24dc2d41fe21e4031",
     "apps/daemon/src/agent/wiring-boundaries.test.ts": "d3922a7b604284a27314ff5b418abdfbb45bbb933ef49bb4676d6a139374106d",
-    "apps/daemon/src/agent/wiring-independent.test.ts": "45dd932c6ad733e447346598277bb0dae687713d52eb5ca328c35e95f6255d81",
+    "apps/daemon/src/agent/wiring-independent.test.ts": "012e774afd8d27c004557f54eb0d6bde4eac8f951558b1a607039604463bbaf0",
     "apps/daemon/src/agent/wiring.test.ts": "ee7d7abc23e04b7d98789310d8fa281f4ba81ce59df6b1f1bb1ee82f1af5cd81",
-    "apps/daemon/src/agent/wiring.ts": "69226cf500b26d3b263343891a7a9b587b447e4e0dccce8ab7ab81cd8fba97f8",
+    "apps/daemon/src/agent/wiring.ts": "53c093259eb34057e473fd1b8881fe38abc91006a2cd66029303da178c8d3e11",
     "apps/daemon/src/agent/work-progress.test.ts": "f44413584d1b48ebcefbd8d5467b095fd77bb984038e9490b5bce3ad40a42649",
     "apps/daemon/src/agent/work-progress.ts": "9d8442dc9502fafac45a86cbadca3316925f82af34e266e545ddd95acc2dd4e7",
     "apps/daemon/src/app-events.test.ts": "79cd9982416e3ff809d07fb65d0c9b90f46bcb7d6badc2de17f9a57d0f94af5a",
@@ -659,7 +659,7 @@
     "apps/daemon/src/desktopd/shell-handoff.test.ts": "df766a9cded56897fb7011bd6c407cdf99de714a649250a55ba2cc864f32fc0e",
     "apps/daemon/src/desktopd/testing/fake-desktopd.ts": "0dbd1ada56a41d09c985185e2819a96f77d087da1e3cedc056dd0c110226e02c",
     "apps/daemon/src/desktopd/tools-client.test.ts": "cc362d716fa369184f1fdba7b28f1cfb99f39e024e6ebdba9678bef058b27c48",
-    "apps/daemon/src/desktopd/tools-client.ts": "2875602d0e806f55cd30cea70ffd7b50541dde7af238461eae3fbfee11b11062",
+    "apps/daemon/src/desktopd/tools-client.ts": "c1e1ca197d93f6b96a8f3471faefbeb38681d67546451a827647de8b00a8ba4a",
     "apps/daemon/src/desktopd/upload-client.ts": "750b891490497e5f56d8bef236dd681d001d224fd21d20b687fb2994810fafdb",
     "apps/daemon/src/diagnostics/canary-verdict.test.ts": "ed8bd55ced6c52f33c24ff6081c2aa9a69d01478aae85e2d95ac44e1009ddd30",
     "apps/daemon/src/diagnostics/canary-verdict.ts": "8309d8339e3f2717af8ac85c97734f3577b00a7515d3ac79650e7eb4b4378326",
@@ -1303,7 +1303,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "78291aa3bbb0eb84262c68aa921ff6f1d103ec9ce1b23ebe250d95e7db06f428",
+  "reportSha256": "2582417fc0ebc9fbab89af888a2186b90b2d731020cf2e89a65d8fd1c2c89df0",
   "exit": {
     "code": 0,
     "signal": null

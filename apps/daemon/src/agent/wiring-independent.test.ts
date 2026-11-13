@@ -250,6 +250,33 @@ it("scripted preparation shares the upload drain and holds Stop through physical
   }
 });
 
+it("a task stopped while its desktop browser is made ready sees that through and keeps the computer", async () => {
+  const h = setup();
+  const fences = new ComputerFences(h.home);
+  h.deps.fences = fences;
+  const contain = vi.spyOn(h.deps.killSwitch, "contain");
+  h.deps.keyd.secrets = async () => [];
+  h.agent.routes.settings.put({ main: { provider: "lmstudio", model: "fixture-tools-model" } });
+  await h.agent.start();
+  const physical = Promise.withResolvers<void>();
+  mocks.prepare.mockImplementationOnce(async () => physical.promise);
+  const session = await h.agent.runner.start(h.cellId, "Task");
+  await until(() => mocks.prepare.mock.calls.length === 1);
+  session.stop();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  // The stop does not cut the change short: its answer is what says the profile is sound.
+  expect(mocks.prepare).toHaveBeenCalledWith(
+    session.id,
+    expect.objectContaining({ aborted: false }),
+  );
+  expect(h.live.get(h.cellId)).toBe(session.id);
+  physical.resolve();
+  await h.live.settled(session.id);
+  expect(contain).not.toHaveBeenCalled();
+  expect(fences.isFenced(h.cellId)).toBe(false);
+  expect(mocks.opens).toHaveLength(0);
+});
+
 it("lost scripted preparation replies fence the computer and cannot replay on another task", async () => {
   const h = setup();
   const fences = new ComputerFences(h.home);

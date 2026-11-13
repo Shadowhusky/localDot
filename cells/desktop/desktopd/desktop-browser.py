@@ -17,6 +17,7 @@ import signal
 import stat
 import sys
 import time
+import traceback
 import uuid
 
 ROOT = "/run/localdot-desktop-browser"
@@ -323,6 +324,13 @@ class Profiles:
         return os.waitstatus_to_exitcode(result)
 
 
+def refusal(error):
+    # Which check here turned the task away, by its line: all the computer says of it.
+    lines = [frame.lineno for frame in traceback.extract_tb(error.__traceback__)
+             if frame.filename == __file__ and frame.name != "require"]
+    return f"desktop browser could not be prepared, check {lines[-1] if lines else 0}"
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "launch":
         return Profiles().launch(sys.argv[2:])
@@ -339,6 +347,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (Refused, OSError, ValueError):
-        print("desktop browser could not be prepared", file=sys.stderr)
+    except (Refused, OSError, ValueError) as error:
+        print(refusal(error), file=sys.stderr)
         sys.exit(1)

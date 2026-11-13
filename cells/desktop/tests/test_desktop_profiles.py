@@ -184,6 +184,20 @@ class ProfilesTest(unittest.TestCase):
         with self.assertRaises(m.Refused):
             self.owner.launch(["about:blank"])
 
+    def test_a_refusal_names_the_check_that_made_it_and_nothing_else(self):
+        (self.root / "state.json").write_text("{}")
+        os.chmod(self.root / "state.json", 0o600)
+        # assertRaises drops the traceback, which is what names the check.
+        try:
+            m.Profiles(str(self.root)).rotate(A)
+            self.fail("an unreadable state was accepted")
+        except m.Refused as refused:
+            said = m.refusal(refused)
+        self.assertRegex(said, r"^desktop browser could not be prepared, check [1-9][0-9]{1,3}$")
+        line = int(said.rsplit(" ", 1)[1])
+        self.assertIn("require(", HELPER.read_text().splitlines()[line - 1])
+        self.assertEqual(m.refusal(ValueError(str(self.root))), "desktop browser could not be prepared, check 0")
+
     def test_root_symlink_is_refused(self):
         linked = self.home / "alias"
         linked.symlink_to(self.root, target_is_directory=True)

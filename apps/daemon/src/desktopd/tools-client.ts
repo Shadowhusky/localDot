@@ -295,9 +295,18 @@ export class DesktopdTools {
         const browserFailure =
           ["/browser/navigate", "/browser/read", "/browser/page"].includes(path) &&
           [409, 502].includes(res.status);
+        // Which check kept the desktop's browser from a task is the one thing that can explain a
+        // computer held for it; nothing else the computer answers is passed on.
+        const check =
+          path === "/browser/task" &&
+          /^desktop browser could not be prepared, check (\d{1,4})$/.exec(text)?.[1];
         throw new DesktopdError(
           res.status,
-          browserFailure ? browserFailureDetail(text) : "tool request refused",
+          browserFailure
+            ? browserFailureDetail(text)
+            : check
+              ? `browser not prepared, check ${check}`
+              : "tool request refused",
           path,
         );
       }

@@ -33,6 +33,7 @@ import {
   BRAIN_DONE,
   BRAIN_GAVE_UP,
   computerDown,
+  DesktopSound,
   SIGN_IN_BROWSER_WAIT_MS,
 } from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
@@ -1231,6 +1232,18 @@ describe("reset task retirement", () => {
       expect(f.retire).toHaveBeenCalledTimes(confirmed ? 1 : 0);
     },
   );
+  it("has no native exit to wait for when the task was contained before its work began", async () => {
+    const f = resetFixture();
+    f.deps.prepareDesktop = async () => {
+      throw new Error("retirement unconfirmed");
+    };
+    const session = await f.runner.start(f.cellId, "fixture native task");
+    await f.live.settled(session.id);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.containment).toHaveBeenCalledWith(session.id);
+    expect(f.fences.record(f.cellId)).toMatchObject({ sessionId: session.id, nativeRetired: true });
+    expect(f.runner.replacementOwner(f.cellId)).toMatchObject({ fenced: true, taskEnded: true });
+  });
   it("returns unconfirmed on a drain deadline without forgetting the still-live native owner", async () => {
     const f = resetFixture(),
       cleanup = deferred<void>();
@@ -2050,7 +2063,37 @@ describe("ChatGPT runner lifecycle", () => {
     expect(f.run).not.toHaveBeenCalled();
     expect(recording).not.toHaveBeenCalled();
     expect(f.runner.get(session.id)).toBeUndefined();
-    expect(f.containment).toHaveBeenCalledExactlyOnceWith(session.id);
+    // The browser was made ready all the same: nothing about the computer is in doubt.
+    expect(f.containment).not.toHaveBeenCalled();
+    const next = await f.runner.start(f.cellId, "Next task");
+    next.stop();
+    await f.live.settled(next.id);
+  });
+  it("a task that ends before the desktop browser is touched leaves the computer in use", async () => {
+    const f = setup();
+    const prepare = vi.fn(async () => {
+      throw new DesktopSound(new AgentError(409, "the computer changed"));
+    });
+    f.deps.prepareDesktop = prepare;
+    const turnedAway = await f.runner.start(f.cellId, "Fixture task");
+    await f.live.settled(turnedAway.id);
+    expect(prepare).toHaveBeenCalledOnce();
+    const uploads = deferred<void>();
+    const waiting = vi.fn(() => uploads.promise);
+    f.deps.waitForUploads = waiting;
+    const stopped = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => waiting.mock.calls.length === 1);
+    stopped.stop();
+    uploads.resolve();
+    await f.live.settled(stopped.id);
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.containment).not.toHaveBeenCalled();
+    f.deps.waitForUploads = async () => {};
+    f.deps.prepareDesktop = async () => {};
+    const next = await f.runner.start(f.cellId, "Next task");
+    next.stop();
+    await f.live.settled(next.id);
   });
   it("installs session screens before live admission and waits for their terminal drain", async () => {
     const f = setup(),

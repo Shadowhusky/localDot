@@ -123,3 +123,38 @@ it.each([
   const fixture = helper(source);
   await expect(prepareDesktopBrowser(ulid(), undefined, fixture.path)).rejects.toThrow();
 });
+it("says which of the helper's checks refused, and nothing else the helper wrote", async () => {
+  const refused = helper(
+    'import sys\nprint("desktop browser could not be prepared, check 87", file=sys.stderr)\nsys.exit(1)\n',
+  );
+  await expect(prepareDesktopBrowser(ulid(), undefined, refused.path)).rejects.toThrow(
+    /^Desktop browser preparation failed, check 87$/,
+  );
+  const noisy = helper('import sys\nprint("/config/private path", file=sys.stderr)\nsys.exit(1)\n');
+  await expect(prepareDesktopBrowser(ulid(), undefined, noisy.path)).rejects.toThrow(
+    /^Desktop browser preparation failed\.$/,
+  );
+  const taskId = ulid();
+  const response = await app(async () => {
+    throw new Error("Desktop browser preparation failed, check 87");
+  }).request("/browser/task", post({ taskId }));
+  expect(response.status).toBe(503);
+  expect(await response.text()).toBe("desktop browser could not be prepared, check 87");
+});
+it("host client passes on the check that refused, and no other words of the computer's", async () => {
+  for (const [body, detail] of [
+    ["desktop browser could not be prepared, check 87", "browser not prepared, check 87"],
+    ["desktop browser could not be prepared", "tool request refused"],
+    ["check 87 /config/private", "tool request refused"],
+  ]) {
+    const tools = new DesktopdTools(
+      { baseUrl: "http://127.0.0.1:7700", token },
+      async () => new Response(body, { status: 503 }),
+    );
+    try {
+      await expect(tools.prepareBrowser(ulid())).rejects.toMatchObject({ status: 503, detail });
+    } finally {
+      await tools.close();
+    }
+  }
+});
