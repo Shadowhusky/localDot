@@ -1086,6 +1086,10 @@ button.activity-usage-trigger:active {
   min-width: 0;
   flex-shrink: 0;
 }
+/* A step the window brings back as the reader scrolls is no arrival. */
+.thread-work-window-row[data-returned] .activity-row {
+  transition: none;
+}
 
 /* Child summaries mount only on request; the session list is windowed. */
 .subagent-row {

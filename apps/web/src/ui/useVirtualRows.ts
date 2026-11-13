@@ -1,9 +1,22 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type RefObject, useCallback, useLayoutEffect, useState } from "react";
+import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react";
+
+// Where the rows a list held begin in it now: the ones added before them are an earlier page.
+function heldFrom(held: readonly string[], now: readonly string[]): number {
+  const at = new Map(now.map((key, index) => [key, index]));
+  for (const key of held) {
+    const index = at.get(key);
+    if (index !== undefined) return index;
+  }
+  return 0;
+}
 
 // Lists can live in a sheet, rail or page. Observe their actual scroll parent instead of
 // introducing a nested scroller. Small lists retain their normal layout and keyboard behavior.
 // An anchored list's scroller keeps the reader's place itself (useFollowScroll).
+// A row the window draws again as the reader scrolls gets [data-returned], and so does a row of an
+// earlier page: both were there before the reader looked, so they and what they hold stand as they
+// are, where a row just added arrives.
 export function useVirtualRows(
   list: RefObject<HTMLElement | null>,
   keys: readonly string[],
@@ -14,6 +27,18 @@ export function useVirtualRows(
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
   const [margin, setMargin] = useState(0);
   const [located, setLocated] = useState(false);
+  const latest = useRef(keys);
+  latest.current = keys;
+  // The rows of the last commit, read as this one's attach: effects run after refs.
+  const held = useRef<{ keys: readonly string[]; has: ReadonlySet<string> }>({
+    keys: [],
+    has: new Set(),
+  });
+  const drawn = useRef(new WeakSet<Element>());
+  const earlier = useRef<{ keys: readonly string[]; before: number } | null>(null);
+  useLayoutEffect(() => {
+    held.current = { keys, has: new Set(keys) };
+  }, [keys]);
   useLayoutEffect(() => {
     const element = list.current;
     if (!enabled || !element) return;
@@ -65,6 +90,23 @@ export function useVirtualRows(
   virtual.shouldAdjustScrollPositionOnItemSizeChange = anchored ? () => false : undefined;
   const items = virtual.getVirtualItems();
   const active = enabled && !!scroll;
+  const measureElement = virtual.measureElement;
+  const measure = useCallback(
+    (element: Element | null) => {
+      if (element && !drawn.current.has(element)) {
+        drawn.current.add(element);
+        const now = latest.current,
+          index = Number(element.getAttribute("data-index")),
+          key = now[index];
+        if (earlier.current?.keys !== now)
+          earlier.current = { keys: now, before: heldFrom(held.current.keys, now) };
+        if (key !== undefined && (held.current.has.has(key) || index < earlier.current.before))
+          element.setAttribute("data-returned", "");
+      }
+      measureElement(element);
+    },
+    [measureElement],
+  );
   // "auto" scrolls only as far as brings the row into view; "start" puts it at the top.
   const scrollTo = useCallback(
     (index: number, align: "auto" | "start" = "auto") => {
@@ -82,7 +124,7 @@ export function useVirtualRows(
       active && items.length
         ? Math.max(0, virtual.getTotalSize() - ((items.at(-1)?.end ?? margin) - margin))
         : 0,
-    measure: active ? virtual.measureElement : undefined,
+    measure: active ? measure : undefined,
     scrollTo,
   };
 }

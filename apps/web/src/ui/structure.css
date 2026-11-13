@@ -110,6 +110,11 @@
     }
   }
 
+  /* A row its list's window draws again (useVirtualRows) was done already: its check stands drawn. */
+  [data-returned] .ui-status-check {
+    transition: none;
+  }
+
   .ui-card {
     border-radius: var(--radius-lg);
     background-color: var(--color-raised);
