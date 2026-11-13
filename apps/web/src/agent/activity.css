@@ -47,13 +47,15 @@
   min-height: var(--_closed, 0);
 }
 
+/* Edged as the panel's other cards are: a popover's long shadow fell over the tabs above the card
+   and the steps under it. */
 .plan-card[data-lifted] > .plan-strip {
   position: absolute;
   inset-inline: 0;
   top: 0;
   border-radius: var(--radius-group);
   background-color: var(--color-raised);
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-raised);
 }
 
 /* The trigger's 1 px border is taken from its padding, so its glyphs sit on the steps' column. */
