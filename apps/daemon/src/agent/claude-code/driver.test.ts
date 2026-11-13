@@ -634,7 +634,7 @@ describe("Claude Code driver", () => {
   });
 
   it("hands the user's messages to the running Claude Code", async () => {
-    const f = fixture();
+    const f = fixture({ settleMs: 20 });
     const result = f.run();
     const fake = await f.started();
     f.session.post("steer", "Make it brown");
@@ -657,8 +657,68 @@ describe("Claude Code driver", () => {
     expect(await result).toBe(CLAUDE_CODE_DONE);
   });
 
-  it("ends a wait for the user's message until a request of Claude Code's takes it in", async () => {
+  // Claude Code folds a message sent mid-turn into the running turn between tool rounds, and says
+  // so only in the turn's result. Ended at done, before that result, the run took the message for
+  // unread and was told to carry on with it, and dot gave its summary a second time.
+  it("waits for the turn's result to learn whether done's turn took in the user's message", async () => {
     const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    f.session.post("steer", "Make it 1080p");
+    await until(() => fake.prompts.length === 2);
+    await fake.call("done", { summary: "Your 1080p video is attached" });
+    expect(f.runs).toHaveLength(1);
+    fake.emit({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      user_message_uuid: fake.prompts[1]?.uuid,
+      user_message_uuids: [fake.prompts[0]?.uuid, fake.prompts[1]?.uuid],
+    });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+    expect(f.runs).toHaveLength(1);
+  });
+
+  it("carries on with a message the turn's result says it never took in", async () => {
+    const f = fixture();
+    const result = f.run();
+    const fake = await f.started();
+    f.session.post("steer", "And add a hat");
+    await until(() => fake.prompts.length === 2);
+    await fake.call("done", { summary: "ok" });
+    fake.emit({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      queued_turn_count: 1,
+      user_message_uuid: fake.prompts[0]?.uuid,
+      user_message_uuids: [fake.prompts[0]?.uuid],
+    });
+    await until(() => f.runs.length === 2);
+    const next = await f.started(1);
+    expect(firstText(next)).toContain("Continue with the user's follow-up.");
+    await next.call("done", { summary: "ok" });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+  });
+
+  it("refuses work after done while the turn's result is awaited, and stops waiting in time", async () => {
+    const f = fixture({ settleMs: 50 });
+    const result = f.run();
+    const fake = await f.started();
+    f.session.post("steer", "Make it brown");
+    await until(() => fake.prompts.length === 2);
+    await fake.call("done", { summary: "ok" });
+    const late = await fake.call("computer", { action: "screenshot" });
+    expect(late.isError).toBe(true);
+    // No result comes: the message is taken for unread, as before.
+    await until(() => f.runs.length === 2);
+    const next = await f.started(1);
+    await next.call("done", { summary: "ok" });
+    expect(await result).toBe(CLAUDE_CODE_DONE);
+  });
+
+  it("ends a wait for the user's message until a request of Claude Code's takes it in", async () => {
+    const f = fixture({ settleMs: 20 });
     // A tool that waits as localDot's do: until the user says something dot hasn't heard.
     f.dispatch.mockImplementation(async (session, _generation, name, _id, _input, signal) => {
       if (name === "done") return { ok: true, final: true, content: [] };

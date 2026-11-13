@@ -87,7 +87,11 @@ export interface ClaudeCodeDriverDeps {
   readonly onRetired?: (sessionId: string) => void;
   readonly startupMs?: number;
   readonly exitMs?: number;
+  // How long done waits for its turn's result to say which of the user's messages it took in.
+  readonly settleMs?: number;
 }
+// Claude Code ends a turn in a second or two once done has answered.
+const SETTLE_MS = 8000;
 export class ClaudeCodeCleanupError extends Error {
   constructor() {
     super("The Claude Code task could not be safely retired.");
@@ -504,6 +508,9 @@ export class ClaudeCodeDriver {
       completedCalls = 0,
       fenced = false,
       admitting = true,
+      // done has answered while a message of the user's was in flight: the turn's result says
+      // whether that turn took it in.
+      settling: ReturnType<typeof setTimeout> | undefined,
       nudged = false,
       acting = false,
       refusals = 0,
@@ -554,6 +561,10 @@ export class ClaudeCodeDriver {
       result = candidate;
       fence();
       completion.resolve(result);
+    };
+    const settle = () => {
+      clearTimeout(settling);
+      finish(pending.size ? { kind: "completed", pending: true } : { kind: "done" });
     };
     const guarded = (type: string, data: Record<string, unknown>) => {
       if (!current()) return;
@@ -664,13 +675,14 @@ export class ClaudeCodeDriver {
           pause: true,
           content: [text("Task paused before this call started.")],
         });
+      if (settling) return Promise.resolve(inactive());
       if (!admitting || session.safetyPause) return Promise.resolve(paused());
       // The newest full screenshot dot had seen when it chose this action.
       const seen = basis;
       inFlight++;
       const work = calls
         .then(async (): Promise<McpCallResult> => {
-          if (!current()) return inactive();
+          if (!current() || settling) return inactive();
           if (!admitting || session.safetyPause) return paused();
           if (!isToolName(name) && !session.connectors.get(name))
             return { isError: true, content: [text("Only localDot's tools are available.")] };
@@ -708,8 +720,19 @@ export class ClaudeCodeDriver {
             if (part.type === "image" && !part.region) returned = part.frameId;
           if (!session.safetyPause) {
             if (name === "done" && out.ok && out.final) {
-              finish(pending.size ? { kind: "completed", pending: true } : { kind: "done" });
-              return inactive();
+              if (!pending.size) {
+                finish({ kind: "done" });
+                return inactive();
+              }
+              // Claude Code folds a message sent mid-turn into the running turn between tool
+              // rounds and says so only in the turn's result: ended now, a message dot has already
+              // answered would look unread, and dot would answer it, and sum up, again.
+              admitting = false;
+              settling = setTimeout(settle, d.settleMs ?? SETTLE_MS);
+              return toCallToolResult({
+                ...out,
+                content: [text("Task finished. End your turn now, with no more tool calls.")],
+              });
             }
             if (out.final) {
               finish({ kind: "done" });
@@ -789,6 +812,10 @@ export class ClaudeCodeDriver {
         else if (event.error !== "max_output_tokens")
           finish({ kind: "retry", message: "Claude is unavailable right now." });
       } else if (event.kind === "result") {
+        if (settling) {
+          settle();
+          return;
+        }
         if (!event.ok) {
           finish({ kind: "retry", message: "Claude Code couldn't finish that step." });
           return;
@@ -960,6 +987,7 @@ export class ClaudeCodeDriver {
       });
     });
     const outcome = await completion.promise;
+    clearTimeout(settling);
     fence();
     clearTimeout(startupTimer);
     clearInterval(heartbeat);
