@@ -96,6 +96,14 @@ function blockReader(stream) {
         yield out;
       }
     },
+    // What is left of the stream, to its end.
+    async *rest() {
+      for (;;) {
+        if (pending.length) yield pending;
+        pending = Buffer.alloc(0);
+        if (!(await more())) return;
+      }
+    },
   };
 }
 
@@ -164,6 +172,11 @@ export async function scanSavedImage(stream) {
     }
     if (padding) await reader.read(padding);
   }
+  // An end that is never read never comes: the stream stays open, and so does the wait for what
+  // wrote it. After an archive's last file come only the empty blocks that close it.
+  for await (const chunk of reader.rest())
+    if (!chunk.every((byte) => byte === 0))
+      throw new Error("The saved image has data after its end.");
   if (!listed?.length) throw new Error("The saved image lists no layers.");
   for (const layer of listed)
     if (!scanned.has(layer))
