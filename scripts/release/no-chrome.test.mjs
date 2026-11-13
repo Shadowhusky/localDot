@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { forbiddenPath, scanSavedImage, unprovenImages } from "./no-chrome.mjs";
 
@@ -106,6 +107,47 @@ describe("the check that released images contain no Chrome", () => {
     await expect(scanSavedImage(save(directory, "manifest.json", ...layers(2)))).rejects.toThrow(
       /format/,
     );
+  });
+
+  // The end of an archive is two empty blocks. The scan knows it from the first, and what follows
+  // can come later: left unread, the stream never ends, and neither does the wait for Docker.
+  it("reads a saved image to its end, however its last blocks arrive", async () => {
+    const directory = await saved([["usr/bin/chromium"]]);
+    const bytes = execFileSync("tar", [
+      "-cf",
+      "-",
+      "-C",
+      directory,
+      "manifest.json",
+      "layer-0.tar",
+    ]);
+    const marker = bytes.findLastIndex((byte) => byte !== 0) + 1;
+    const end = Math.ceil(marker / 512) * 512 + 512;
+    const stream = Readable.from(
+      (async function* () {
+        yield bytes.subarray(0, end);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        yield bytes.subarray(end);
+      })(),
+      { objectMode: false },
+    );
+    expect(bytes.length).toBeGreaterThan(end);
+    expect((await scanSavedImage(stream)).found).toEqual([]);
+    expect(stream.readableEnded).toBe(true);
+  });
+
+  it("refuses an image with anything after its end", async () => {
+    const directory = await saved([["usr/bin/chromium"]]);
+    const bytes = execFileSync("tar", [
+      "-cf",
+      "-",
+      "-C",
+      directory,
+      "manifest.json",
+      "layer-0.tar",
+    ]);
+    const more = Readable.from([bytes, Buffer.from("more")], { objectMode: false });
+    await expect(scanSavedImage(more)).rejects.toThrow(/after its end/);
   });
 
   it("refuses what it can't read rather than calling it clean", async () => {
