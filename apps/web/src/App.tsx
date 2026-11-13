@@ -3310,6 +3310,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         !viewedConversation && (
           <DotStrip
             live={!!foot && (sentThinking || !session.ended)}
+            working={sentThinking || atWork(appStatus.row)}
             hidden={!showDot.value}
             band={level < 2 && phoneBand}
             status={level < 2 && statusWord}

@@ -331,6 +331,16 @@ test.describe("minimal mode", () => {
     await expect(page.locator(".presence-frame[data-shown]")).toBeVisible();
   });
 
+  // The typing bubble says dot is at work: over a finished task it read as work still going on.
+  test("over a finished task, nothing types in dot's place", async ({ page, ui }) => {
+    await ui.open("done");
+    await page.getByRole("button", { name: "Your dot" }).click();
+    await page.getByRole("menuitem", { name: "Hide dot" }).click();
+    await expect(page.locator(".dot-strip .narrator-dot")).toHaveCount(0);
+    await expect(page.locator(".dot-strip")).not.toHaveAttribute("data-typing");
+    await expect(page.locator(".dot-typing")).toHaveCount(0);
+  });
+
   test("under reduced motion the dot just goes", async ({ page, ui }) => {
     await ui.open("running");
     await page.getByRole("button", { name: "Your dot" }).click();

@@ -6,6 +6,8 @@ import "../ui/phone-layout.css";
 export interface DotStripProps {
   // dot at work stays at the foot while the thread scrolls; at rest it scrolls with the thread.
   live: boolean;
+  // dot is working now, not waiting on the user or done: what the typing bubble says.
+  working: boolean;
   // Minimal mode: dot has gone into the ⋯ menu.
   hidden: boolean;
   // dot and its one sentence.
@@ -25,8 +27,8 @@ export interface DotStripProps {
 
 // The foot of the thread: one dot, one sentence and, while this task has it, the computer. With dot
 // hidden, a task at work still shows it is going on, as a messenger shows the other side typing.
-export function DotStrip({ live, hidden, band, status, thumb, time }: DotStripProps) {
-  const typing = hidden && live && !!status;
+export function DotStrip({ live, working, hidden, band, status, thumb, time }: DotStripProps) {
+  const typing = hidden && live && working && !!status;
   const away = hidden && !typing;
   return (
     <div
