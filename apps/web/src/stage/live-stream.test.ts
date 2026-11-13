@@ -609,6 +609,22 @@ it("asks for no more than its stage's frame rate, and the full rate again once t
   }
 });
 
+it("says when its stage is only a thumbnail, so nobody watching is slowed for it", async () => {
+  const { stream, second, reports, restore } = await relayClient();
+  try {
+    stream.cap(12, true);
+    await second();
+    expect(reports().at(-1)).toBe(
+      qualityMessage({ visible: true, framerate: 12, crf: 25, glance: true }),
+    );
+    stream.cap(30);
+    await second();
+    expect(reports().at(-1)).toBe(qualityMessage({ visible: true, framerate: 30, crf: 25 }));
+  } finally {
+    restore();
+  }
+});
+
 // Safari: no MediaStreamTrackProcessor on the page. Its client counts decoded frames itself, as
 // WebKit's video counts none of a track a worker writes.
 async function safariClient(frames: boolean) {

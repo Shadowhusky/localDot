@@ -1,4 +1,4 @@
-import { qualityMessage, type StreamQualityReport } from "@localdot/protocol";
+import { qualityMessage, type StreamQuality, type StreamQualityReport } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 import { forgetOldTickets } from "./client-storage.ts";
 import { type FrameSource, tapVideoTrack } from "./frame-source.ts";
@@ -187,6 +187,7 @@ export class LiveStream {
   readonly #trips = new RoundTrips();
   #tripAt = 0;
   #tunedAt = 0;
+  #glance = false;
   #source: FrameSource | null = null;
   #presentedCount = 0;
   #counted: { client: Client; at: number; decoded: number; presented: number } | null = null;
@@ -261,9 +262,11 @@ export class LiveStream {
     } else if (document.visibilityState !== "hidden") this.#resume();
   }
 
-  // The most frames a second the stage asks for, as it grows, shrinks or changes hands.
-  cap(framerate: number): void {
+  // The most frames a second the stage asks for, as it grows, shrinks or changes hands, and whether
+  // it is a thumbnail's ask, which holds nobody else to it.
+  cap(framerate: number, glance = false): void {
     this.#quality.cap(framerate);
+    this.#glance = glance;
   }
 
   #startPolling(): void {
@@ -740,7 +743,7 @@ export class LiveStream {
     const last = this.#counted;
     this.#counted = { client, at: now, decoded, presented: this.#presentedCount };
     if (last?.client !== client || now <= last.at) {
-      if (this.#report(client, { visible: true, ...this.#quality.quality }, now))
+      if (this.#report(client, this.#wish(this.#quality.quality), now))
         streamPreferenceAdopted(preference, this.#quality.quality);
       return;
     }
@@ -753,8 +756,12 @@ export class LiveStream {
       decodedFps: since(decoded, last.decoded) / seconds,
       presentedFps: since(this.#presentedCount, last.presented) / seconds,
     });
-    if (this.#report(client, { visible: true, ...quality }, now))
+    if (this.#report(client, this.#wish(quality), now))
       streamPreferenceAdopted(preference, quality);
+  }
+
+  #wish(quality: StreamQuality): StreamQualityReport {
+    return { visible: true, ...quality, ...(this.#glance ? { glance: true as const } : {}) };
   }
 
   // Selkies' client keeps the numbers only once they are asked for, as its own stats panel does.

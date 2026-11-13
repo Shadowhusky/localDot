@@ -15,6 +15,7 @@ import {
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById, sameModelOptions } from "@localdot/providers";
+import { stepsRevision } from "@localdot/stage";
 import {
   type CSSProperties,
   useCallback,
@@ -1493,15 +1494,19 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the model is folded in place, so its version is what changes
+  // The model is folded in place, so its steps' revision is what changes: every step of a long task
+  // is not listed again for each thing dot says.
+  const stepsAt = stepsRevision(session.model);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   const rows = useMemo(
     () => (session.sessionId ? timelineRows(stepRows(session.model), session.model.keyUses) : []),
-    [session.sessionId, session.model, session.version],
+    [session.sessionId, session.model, stepsAt],
   );
+  const historyStepsAt = stepsRevision(historySession.model);
   // biome-ignore lint/correctness/useExhaustiveDependencies: history is folded in place too
   const historyRows = useMemo(
     () => timelineRows(stepRows(historySession.model), historySession.model.keyUses),
-    [historySession.model, historySession.version],
+    [historySession.model, historyStepsAt],
   );
   const keyUses = session.model.keyUses;
   const uses = useMemo(() => {

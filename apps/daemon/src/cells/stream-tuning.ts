@@ -24,16 +24,22 @@ export interface ViewerWish {
 
 // One capture serves every viewer of a computer, so it runs at the most constrained visible
 // viewer's wish: the lowest frame rate and the highest CRF any of them asks for. A hidden page, or
-// one whose client paused its video, asks for nothing.
+// one whose client paused its video, asks for nothing. A thumbnail's few frames are what it needs,
+// not all it can take: they count only while every visible viewer shows a thumbnail.
 export function sharedQuality(viewers: Iterable<ViewerWish>): StreamQuality {
-  let { framerate } = FULL_QUALITY;
+  let watched: number | undefined;
+  let glanced: number | undefined;
   let crf: number | undefined;
   for (const { paused, report } of viewers) {
     if (paused || !report?.visible) continue;
-    framerate = Math.min(framerate, report.framerate);
+    if (report.glance) glanced = Math.min(glanced ?? report.framerate, report.framerate);
+    else watched = Math.min(watched ?? report.framerate, report.framerate);
     crf = Math.max(crf ?? report.crf, report.crf);
   }
-  return { framerate, crf: crf ?? FULL_QUALITY.crf };
+  return {
+    framerate: Math.min(FULL_QUALITY.framerate, watched ?? glanced ?? FULL_QUALITY.framerate),
+    crf: crf ?? FULL_QUALITY.crf,
+  };
 }
 
 export interface TunedViewer {

@@ -27,6 +27,11 @@ export const HANDHELD_FRAMERATE = 30;
 // hands, gets the device's full rate.
 export const WATCHING_FRAMERATE = 30;
 export const LARGE_STAGE_SHARE = 0.6;
+// A thumbnail, as Chat keeps the screen (70 px wide, under 1% of the window), shows that dot is at
+// work and little else: it asks for the fewest frames, which a phone decodes at the screen's full
+// size whatever size it shows them.
+export const GLANCE_FRAMERATE = 12;
+export const GLANCE_STAGE_SHARE = 0.05;
 // x264 CRF: each step up saves about a fifth of the bit rate, and the picture softens. Still
 // screens are sharpened again by Selkies' paint-over whatever the step. The first step is Sharp's
 // alone: it spends more on a moving screen, where the paint-over can't help.
@@ -71,15 +76,21 @@ export function framerateCeiling(
   return matches("(pointer: coarse)") ? HANDHELD_FRAMERATE : FRAMERATES[0];
 }
 
-// The most a stage asks for: the device's ceiling for a large stage or the user's control, and the
-// watching rate otherwise.
-export function stageFramerate(
-  stage: { share: number; control: boolean },
-  ceiling = framerateCeiling(),
-): number {
-  return stage.control || stage.share >= LARGE_STAGE_SHARE
-    ? ceiling
-    : Math.min(ceiling, WATCHING_FRAMERATE);
+interface StageSize {
+  // Of the window; 0 until the stage has been measured.
+  share: number;
+  control: boolean;
+}
+
+// Whether the stage shows the screen as a thumbnail only.
+export const glances = (stage: StageSize): boolean =>
+  !stage.control && stage.share > 0 && stage.share < GLANCE_STAGE_SHARE;
+
+// The most a stage asks for: the device's ceiling for a large stage or the user's control, the
+// fewest for a thumbnail, and the watching rate otherwise.
+export function stageFramerate(stage: StageSize, ceiling = framerateCeiling()): number {
+  if (stage.control || stage.share >= LARGE_STAGE_SHARE) return ceiling;
+  return Math.min(ceiling, glances(stage) ? GLANCE_FRAMERATE : WATCHING_FRAMERATE);
 }
 
 const topStep = (maxFramerate: number) => {

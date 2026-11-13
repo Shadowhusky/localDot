@@ -35,7 +35,7 @@ import type { PumpStats } from "./pump.ts";
 import { StageCanvas } from "./StageCanvas.tsx";
 import { RelaunchNotice, StageNotice } from "./StageNotice.tsx";
 import type { ReplayHandle, StageCanvasHandle, StageView } from "./stage-engine.ts";
-import { stageFramerate } from "./stream-quality.ts";
+import { glances, stageFramerate } from "./stream-quality.ts";
 import { useDockCovered } from "./useDockCovered.ts";
 import type { StageFront } from "./useStageFront.ts";
 import { useUnderDesktop } from "./useUnderDesktop.ts";
@@ -326,8 +326,8 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     flips.current.push(flip);
   }, []);
 
-  // A small stage asks for fewer frames than a large one or the user's own control, and one out of
-  // sight asks for none and draws nothing.
+  // A small stage asks for fewer frames than a large one or the user's own control, a thumbnail for
+  // the fewest, and one out of sight asks for none and draws nothing.
   const [view, setStageView] = useState<StageView>({ onScreen: true, share: 0 });
   const control = !!manual?.enabled;
   const framerate = useMemo(
@@ -338,9 +338,10 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   useEffect(() => {
     canvas.current?.setView({ fps: framerate });
   }, [framerate]);
+  const glance = glances({ share: view.share, control });
   useEffect(() => {
-    stream?.cap(framerate);
-  }, [stream, framerate]);
+    stream?.cap(framerate, glance);
+  }, [stream, framerate, glance]);
   useEffect(() => {
     canvas.current?.setView({ hidden: !inSight });
   }, [inSight]);
