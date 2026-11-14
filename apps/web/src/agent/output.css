@@ -183,9 +183,22 @@
   min-width: 0;
   overflow: hidden;
 }
-/* Holds about a picture's room while it loads, so what is under it moves as little as can be. */
+/* Holds about a picture's room while it loads, so what is under it moves as little as can be, and
+   says so in the middle of that room. */
 .step-output-image:has(> p) {
+  display: grid;
+  place-items: center;
   min-height: calc(var(--spacing) * 40);
+  border-radius: var(--radius-md);
+  background-color: var(--color-control);
+}
+
+.step-output-image > p {
+  margin: 0;
+  padding: calc(var(--spacing) * 3);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-align: center;
 }
 .step-output-image img {
   display: block;
