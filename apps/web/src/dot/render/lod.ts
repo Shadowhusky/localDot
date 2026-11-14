@@ -23,6 +23,10 @@ export interface LodDetail {
   // The longest it waits between renders while a prop's loops (a caret, a sweep) run: 20 fps
   // reads as smooth at the dock's size, and a task keeps a prop out most of the time.
   loopGapMs: number;
+  // On a touch device, the longest it waits between renders while it moves quickly (0: every
+  // frame). A dot this small looks as smooth at half the display rate, and a phone that draws it
+  // on every frame through a long task grows warm.
+  touchQuickGapMs: number;
 }
 
 const BADGE: LodDetail = {
@@ -33,6 +37,7 @@ const BADGE: LodDetail = {
   shadow: false,
   calmGapMs: 250,
   loopGapMs: 33,
+  touchQuickGapMs: 33,
 };
 const GLANCE: LodDetail = {
   eyeScale: 1,
@@ -42,13 +47,14 @@ const GLANCE: LodDetail = {
   shadow: true,
   calmGapMs: 110,
   loopGapMs: 33,
+  touchQuickGapMs: 0,
 };
 
 // A glyph-sized live view draws like a badge; Dot shows the static Glyph there instead.
 export const LOD_DETAIL: Record<Lod, LodDetail> = {
   glyph: BADGE,
   badge: BADGE,
-  presence: { ...GLANCE, gloss: false, shadow: false, loopGapMs: 50 },
+  presence: { ...GLANCE, gloss: false, shadow: false, loopGapMs: 50, touchQuickGapMs: 33 },
   glance: GLANCE,
   hero: GLANCE,
 };

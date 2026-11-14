@@ -1,5 +1,6 @@
 import type { Wearable } from "@localdot/protocol";
 import { parseCssColor } from "../../stage/theme.ts";
+import { matches, TOUCH } from "../../ui/media.ts";
 import { DotEngine, type DotPose, type EyePose, type Point } from "../engine/engine.ts";
 import type { DotState, Lod, Reaction } from "../engine/states.ts";
 import type { DotTool } from "../engine/tools.ts";
@@ -25,6 +26,8 @@ const RESYNC_MS = 10_000;
 const CALM = 2;
 // A prop's slow loops draw at half the display rate.
 const LOOP_GAP_MS = 33;
+// A display frame can be stamped a little early, so a wait of two frames is not missed by one.
+const FRAME_SLACK_MS = 4;
 let uid = 0;
 
 const num = (v: number) => (Math.abs(v) < 1e-4 ? "0" : v.toFixed(3));
@@ -337,7 +340,8 @@ export class DotView implements Frameable {
     if (t - this.lastFrame > RESYNC_MS) this.engine.skipTo(t);
     this.lastFrame = t;
     if (this.engine.activity(t) >= CALM) {
-      this.render(t);
+      const gap = this.fullRate || !matches(TOUCH) ? 0 : this.detail.touchQuickGapMs;
+      if (t - this.lastRender >= gap - FRAME_SLACK_MS) this.render(t);
       return 0;
     }
     const gap = this.engine.looping(t)
