@@ -1041,8 +1041,10 @@
 }
 
 /* A result: what dot says it did, the files it handed over, and the proof of the work. */
+/* Its one column never grows past the card: a wide table or code block scrolls inside it. */
 .result-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: calc(var(--spacing) * 3);
   min-width: 0;
 }

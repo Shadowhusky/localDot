@@ -132,6 +132,43 @@ test.describe("the swipe back", () => {
 });
 
 test.describe("the thread", () => {
+  // A reply with a table wider than the phone stays on the screen; the table and code scroll in it.
+  test("a reply with a wide table stays on the screen, the table scrolling inside", async ({
+    page,
+    ui,
+  }) => {
+    const fixture = await ui.open("running");
+    const summary = [
+      "Detection on your card improved a little.",
+      "",
+      "| Footage made from your card | Hits found of 15 | False hits |",
+      "|---|---|---|",
+      "| Tripod, hand-held, shaky and swinging | 15 | 0 |",
+      "| Card small in the picture | 14 | 0 |",
+      "",
+      "```",
+      "const detector = createDetector({ threshold: 0.42, minimumArea: 18, darkInkTolerance: 0.11 });",
+      "```",
+    ].join("\n");
+    const done = await page.request.post(`${fixture.origin}/__qa/finish?done=1`, { data: summary });
+    expect(done.ok()).toBe(true);
+    const reply = page.locator(".result-summary").last();
+    await expect(reply).toContainText("Footage made from your card");
+    await reply.scrollIntoViewIfNeeded();
+    const width = await page.evaluate(() => document.documentElement.clientWidth);
+    const box = await reply.boundingBox();
+    expect(box && box.x + box.width).toBeLessThanOrEqual(width);
+    for (const wide of [reply.locator(".md-table"), reply.locator(".md-code pre")]) {
+      const sizes = await wide.evaluate((element) => ({
+        shown: element.clientWidth,
+        content: element.scrollWidth,
+        right: element.getBoundingClientRect().right,
+      }));
+      expect(sizes.content).toBeGreaterThan(sizes.shown);
+      expect(sizes.right).toBeLessThanOrEqual(width);
+    }
+  });
+
   test("is bubbles, with steps behind a caption that unfolds them", async ({ page, ui }) => {
     await ui.open("done");
     const caption = page.locator(".chat-steps .ui-disclosure-trigger").last();

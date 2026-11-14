@@ -953,6 +953,7 @@
   .phone-thread .result-summary {
     justify-self: start;
     width: fit-content;
+    max-width: 100%;
     padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.25) calc(var(--spacing) * 2.5);
     border-radius: var(--radius-xl);
     background-color: var(--color-raised);
