@@ -184,11 +184,9 @@ describe("foldAway", () => {
 describe("useFlip after closeGap", () => {
   it("moves no one where nothing changed, and glides those that moved with no arrival", () => {
     animations();
-    const tops = new Map([
-      ["a", 0],
-      ["b", 50],
-      ["c", 100],
-    ]);
+    // Each row's top as the page lays it out: 50 px a row, in the order the rows are now.
+    const top = (element: HTMLElement) =>
+      [...(element.parentElement?.children ?? [])].indexOf(element) * 50;
     const Boxes = () => {
       const [ids, setIds] = useState(["a", "b", "c"]);
       const ref = useRef<HTMLDivElement>(null);
@@ -201,7 +199,7 @@ describe("useFlip after closeGap", () => {
               data-flip={id}
               ref={(element) => {
                 if (!element) return;
-                element.getBoundingClientRect = () => ({ top: tops.get(id) ?? 0 }) as DOMRect;
+                element.getBoundingClientRect = () => ({ top: top(element) }) as DOMRect;
               }}
             />
           ))}
@@ -213,8 +211,6 @@ describe("useFlip after closeGap", () => {
     };
     render(<Boxes />);
     played = [];
-    tops.set("b", 0);
-    tops.set("c", 50);
     act(() => screen.getByRole("button").click());
     expect(played.map((each) => (each.element as HTMLElement).dataset.flip)).toEqual(["b", "c"]);
     expect(played[0]?.frames[0]?.transform).toBe("translateY(50px)");

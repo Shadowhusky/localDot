@@ -67,65 +67,84 @@ export function closeGap(rows: readonly Element[], remove: () => void): void {
 // item's own layout, so a row of cards that scrolls sideways moves nothing either. Under reduced
 // motion items take their places at once and newcomers only fade in. Only what could be on screen
 // moves, so a long list costs no more than a short one.
-export function useFlip(container: RefObject<HTMLElement | null>, order: string): void {
-  const places = useRef(new Map<string, { x: number; y: number }>());
-  const shown = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    const element = container.current;
-    if (!element) return;
-    const origin = element.getBoundingClientRect().top - element.scrollTop;
-    const items = [...element.querySelectorAll<HTMLElement>("[data-flip]")];
-    const now = new Map(
+type Places = Map<string, { x: number; y: number }>;
+// Where each row lies in its list's content, whatever the list's scroll.
+function placesOf(element: HTMLElement): { origin: number; items: HTMLElement[]; places: Places } {
+  const origin = element.getBoundingClientRect().top - element.scrollTop;
+  const items = [...element.querySelectorAll<HTMLElement>("[data-flip]")];
+  return {
+    origin,
+    items,
+    places: new Map(
       items.map((item) => [
         item.dataset.flip ?? "",
         { x: item.offsetLeft, y: item.getBoundingClientRect().top - origin },
       ]),
-    );
-    if (shown.current && shown.current !== order && typeof element.animate === "function") {
-      const style = getComputedStyle(element);
-      const still = matches(REDUCED_MOTION);
-      const height = window.innerHeight;
-      const onScreen = (y: number) => y + origin > -height && y + origin < 2 * height;
-      const moveMs = closing
-        ? tokenMs(style, "--dur-snappy", 340)
-        : tokenMs(style, "--dur-default", 470);
-      for (const item of items) {
-        const was = places.current.get(item.dataset.flip ?? "");
-        const is = now.get(item.dataset.flip ?? "") ?? { x: 0, y: 0 };
-        if (!onScreen(is.y) && (was === undefined || !onScreen(was.y))) continue;
-        // What comes with a gap closing (a foot back under the rows) waits until they have passed.
-        if (was === undefined && closing && !still)
-          item.animate([{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1 }], moveMs);
-        else if (was === undefined)
-          glide(
-            item,
-            still
-              ? [{ opacity: 0 }, { opacity: 1 }]
-              : [
-                  { opacity: 0, transform: "scale(0.96)" },
-                  { opacity: 1, transform: "none" },
-                ],
-            tokenMs(style, still ? "--dur-fade" : "--dur-default", still ? 150 : 470),
-            style,
-          );
-        else if (!still && (Math.abs(was.y - is.y) > 0.5 || Math.abs(was.x - is.x) > 0.5))
-          glide(
-            item,
-            [
-              {
-                transform:
-                  Math.abs(was.x - is.x) > 0.5
-                    ? `translate(${was.x - is.x}px, ${was.y - is.y}px)`
-                    : `translateY(${was.y - is.y}px)`,
-              },
-              { transform: "none" },
-            ],
-            moveMs,
-            style,
-          );
-      }
-    }
-    places.current = now;
+    ),
+  };
+}
+
+export function useFlip(container: RefObject<HTMLElement | null>, order: string): void {
+  const shown = useRef<string | null>(null);
+  // Where the rows were, read as a new order renders, while the page still shows the old one. A
+  // render that keeps the order reads nothing: a list redrawn for a status or a time costs no layout.
+  const before = useRef<{ order: string; places: Places } | null>(null);
+  if (
+    shown.current !== null &&
+    shown.current !== order &&
+    before.current?.order !== order &&
+    container.current
+  )
+    before.current = { order, places: placesOf(container.current).places };
+  useLayoutEffect(() => {
+    const element = container.current;
+    const was = before.current?.order === order ? before.current.places : null;
+    before.current = null;
+    const first = shown.current === null;
     shown.current = order;
-  });
+    if (!element || first || !was || typeof element.animate !== "function") return;
+    const { origin, items, places: now } = placesOf(element);
+    const style = getComputedStyle(element);
+    const still = matches(REDUCED_MOTION);
+    const height = window.innerHeight;
+    const onScreen = (y: number) => y + origin > -height && y + origin < 2 * height;
+    const moveMs = closing
+      ? tokenMs(style, "--dur-snappy", 340)
+      : tokenMs(style, "--dur-default", 470);
+    for (const item of items) {
+      const from = was.get(item.dataset.flip ?? "");
+      const is = now.get(item.dataset.flip ?? "") ?? { x: 0, y: 0 };
+      if (!onScreen(is.y) && (from === undefined || !onScreen(from.y))) continue;
+      // What comes with a gap closing (a foot back under the rows) waits until they have passed.
+      if (from === undefined && closing && !still)
+        item.animate([{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1 }], moveMs);
+      else if (from === undefined)
+        glide(
+          item,
+          still
+            ? [{ opacity: 0 }, { opacity: 1 }]
+            : [
+                { opacity: 0, transform: "scale(0.96)" },
+                { opacity: 1, transform: "none" },
+              ],
+          tokenMs(style, still ? "--dur-fade" : "--dur-default", still ? 150 : 470),
+          style,
+        );
+      else if (!still && (Math.abs(from.y - is.y) > 0.5 || Math.abs(from.x - is.x) > 0.5))
+        glide(
+          item,
+          [
+            {
+              transform:
+                Math.abs(from.x - is.x) > 0.5
+                  ? `translate(${from.x - is.x}px, ${from.y - is.y}px)`
+                  : `translateY(${from.y - is.y}px)`,
+            },
+            { transform: "none" },
+          ],
+          moveMs,
+          style,
+        );
+    }
+  }, [container, order]);
 }
