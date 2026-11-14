@@ -49,10 +49,10 @@ describe("remember into daily notes", () => {
   const asked = (h: ReturnType<typeof harness>) =>
     h.events().flatMap((e) => (e.type === "ask.request" ? [e.data.question] : []));
 
-  it("asks the user before a task that read outside words saves, and saves only on their yes", async () => {
+  it("asks the user before a task that read outside words saves a fact, and saves only on their yes", async () => {
     const h = harness();
     h.session.tainted = true;
-    const saving = h.call("remember", { file: "notes", op: "append", text: "From a web page" });
+    const saving = h.call("remember", { file: "USER.md", op: "append", text: "- From a web page" });
     await answer(h, "Don't save");
     expect((await saving).body.ok).toBe(false);
     expect(asked(h)[0]).toContain("From a web page");
@@ -63,6 +63,35 @@ describe("remember into daily notes", () => {
     expect((await again).body.ok).toBe(true);
     expect(asked(h)[1]).toContain("what I remember about you");
     expect(h.events().filter((e) => e.type === "memory.change")).toHaveLength(1);
+  });
+
+  // A task that has read files or pages and logs its own progress asks the user nothing: the note
+  // is refused, and the task's history is recorded anyway.
+  it("refuses a note in dot's own words from a task that read outside words, without a question", async () => {
+    const h = harness();
+    h.session.tainted = true;
+    const res = await h.call("remember", {
+      file: "notes",
+      op: "append",
+      text: "Round eight finished on branch soft-paper, 187 tests passing",
+    });
+    expect(res.body.ok).toBe(false);
+    expect(res.body.content[0]?.text).toContain("Carry on without it");
+    expect(asked(h)).toEqual([]);
+    expect(h.events().some((e) => e.type === "memory.change")).toBe(false);
+  });
+
+  it("still keeps a note the user asked for in their own words", async () => {
+    const h = harness();
+    h.session.requests.push("Note down that the venue changed to the Albert Hall on Friday");
+    h.session.tainted = true;
+    const res = await h.call("remember", {
+      file: "notes",
+      op: "append",
+      text: "The venue changed to the Albert Hall on Friday",
+    });
+    expect(res.body.ok).toBe(true);
+    expect(asked(h)).toEqual([]);
   });
 
   it("saves the user's own words from this task without asking, whatever it read since", async () => {

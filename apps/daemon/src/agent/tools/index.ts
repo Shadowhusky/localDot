@@ -373,11 +373,19 @@ async function dispatchAdmitted(
       };
     }
     // The user's yes to the exact words is their own word, and clears what the task read before it.
+    // A note in dot's own words is no lasting fact worth the question: it is refused as it is.
     if (
       name === "remember" &&
       session.tainted &&
       !inUsersWords((frozen as RememberInput).text, session.requests)
     ) {
+      if ((frozen as RememberInput).file === "notes")
+        return {
+          status: 200,
+          result: fail(
+            "Today's notes keep what the user asks to keep; this task's own history is recorded already. Carry on without it.",
+          ),
+        };
       const refused = await confirmMemory(deps.tools, ctx, frozen as RememberInput);
       if (refused || session.tainted)
         return {
