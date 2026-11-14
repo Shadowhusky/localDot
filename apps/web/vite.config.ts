@@ -5,7 +5,8 @@ import react from "@vitejs/plugin-react";
 import { build, defineConfig, type Plugin, type Rolldown } from "vite";
 
 const SRC = fileURLToPath(new URL("./src/", import.meta.url));
-const ZOD_CHUNK = /[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?zod[\\/]|[\\/]protocol[\\/]src[\\/]csp\.ts$/;
+const ZOD_CHUNK =
+  /[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?zod[\\/]|[\\/]protocol[\\/]src[\\/]csp\.ts$/;
 const KIT = `${SRC}ui/`;
 const LAYERS = "@layer theme, base, components, kit, utilities;";
 const CUSTOM_MEDIA = /^@custom-media [^;]+;$/gm;
