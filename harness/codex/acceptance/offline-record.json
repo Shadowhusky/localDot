@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "2144d23a152405c5e3013fe01ddd385e5742c7702e536eb51e419efc6059716e",
+  "inputSha256": "6637fbd079df571562419abf58cf4cf062362212eda31e56256bdcf93420d625",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -61,7 +61,7 @@
     "apps/daemon/src/agent/codex/mcp-endpoint.test.ts": "1400bbf47afbc79446e02ebfe37ae807c47bc419b87588d7779e3d7e24755ed3",
     "apps/daemon/src/agent/codex/mcp-endpoint.ts": "4b4985bc55bb92592aa694414f088fdbca629df037b403402d26aac32621f769",
     "apps/daemon/src/agent/codex/mcp-tools.test.ts": "bf2e5d5bedc456a52d0bb683e7da39a6c98ca5a84e6f505d855bc60b15cf7bae",
-    "apps/daemon/src/agent/codex/mcp-tools.ts": "2fb2be0c00b3ff6d486ed6eb311302798f2bab178b3e242e2523c4508d4724ff",
+    "apps/daemon/src/agent/codex/mcp-tools.ts": "ae7d8d857c2446525c1c5bd21c6f11496e0c3537e80ef06c63db72dc5f5282c9",
     "apps/daemon/src/agent/codex/native-pause.ts": "6b60290eb47879e6ae263c998d9d2be552fee204299ac652d48f6ede1ccef10d",
     "apps/daemon/src/agent/codex/routes.test.ts": "35f5b70422023a16f45bc897f4a4e423dbc9f7386c8bf7637a7a999dbe09664f",
     "apps/daemon/src/agent/codex/routes.ts": "5b130e5cef5e9b5d7ee8a4799acdb1ff7b49ec0949f94731262af9832deed86c",
@@ -327,14 +327,14 @@
     "apps/daemon/src/agent/tools/find.ts": "42daa017de469b4708af4b7e72ef81176f8dcd43883c5d0792c2b6b63355fa37",
     "apps/daemon/src/agent/tools/guest.test.ts": "fa710d50b3bb8c9268e953039384691774badafd0ed87a1f75b851b79384d1fd",
     "apps/daemon/src/agent/tools/handler-boundaries.test.ts": "77e894eb12e5853d2f3569fc942a6388398d0d0d71e94ea9ad2eb4f71bc96deb",
-    "apps/daemon/src/agent/tools/index.ts": "b8890db366e0aca2ecd372a480a5257176e47fd44640cbd383c022ceca05a557",
+    "apps/daemon/src/agent/tools/index.ts": "9cb94b8834a773ce41153ce88870a724a876067f19d730eb76b36abe072e4067",
     "apps/daemon/src/agent/tools/page-elements.test.ts": "6ca567e3fbee8173a5f42b37c71711b9dc482962acc673ca92703591020e3981",
     "apps/daemon/src/agent/tools/people.test.ts": "025295cd9262e4043cf940f4a8790d308382ce238df56354fe52190256626ed4",
     "apps/daemon/src/agent/tools/people.ts": "a8d2982c41c59ad870e78d5269d537bdf2dd7d2408fab08ad34110e9bb80b39f",
     "apps/daemon/src/agent/tools/plan.ts": "a4c99bd507c6aaa515d1c01e594ee391eb0c0f86e505f416cbb31982e38c39c3",
     "apps/daemon/src/agent/tools/recall.test.ts": "46d55eb12018ae1592d060c836a8908f88454bc1b3feb8dac1cf35e89cef2716",
     "apps/daemon/src/agent/tools/recall.ts": "3e775e91ca8b727eb8904196f092a6b32050628de4d0b68be26a5ab15faa187c",
-    "apps/daemon/src/agent/tools/remember-notes.test.ts": "085e3a0f6cd076998c1bead162f205af7f601fe6eca5907322885f90900c5549",
+    "apps/daemon/src/agent/tools/remember-notes.test.ts": "35df90d449c700f4a007f468881eb1c8eb36e1df32de02cec647c9213cec39a1",
     "apps/daemon/src/agent/tools/remember.ts": "64ea160784aff095a7aa5ca8ebbc120c7a7c0e45ff88f6928968d354b264fcb5",
     "apps/daemon/src/agent/tools/request-fix.ts": "94b766b26abda18f582833127d67fa404488dd72358d88a4627ddd42683e2e5a",
     "apps/daemon/src/agent/tools/research.test.ts": "4dd7b0be7f9dd94d069d69bc11cb0c1dcf5e31581c02e58341d25e81e29a6c1e",
@@ -1305,7 +1305,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "c810e40344ce7b5461bd79e6a4027a11388391ebfbdf5988e540e67938cccd9d",
+  "reportSha256": "793e8751010c53fcea938bdb8f35c61164b0c96eccab185a771ef5ad1cfb1db0",
   "exit": {
     "code": 0,
     "signal": null
