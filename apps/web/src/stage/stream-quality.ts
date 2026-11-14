@@ -26,6 +26,9 @@ export const HANDHELD_FRAMERATE = 30;
 // share of the window or more (full screen, the chat hidden), or a computer in the user's own
 // hands, gets the device's full rate.
 export const WATCHING_FRAMERATE = 30;
+// A handheld's screen in part of its window is a few centimetres wide: fewer frames show dot's
+// steps as plainly and spare the phone decoding and drawing the rest.
+export const HANDHELD_WATCHING_FRAMERATE = 18;
 export const LARGE_STAGE_SHARE = 0.6;
 // A thumbnail, as Chat keeps the screen (70 px wide, under 1% of the window), shows that dot is at
 // work and little else: it asks for the fewest frames, which a phone decodes at the screen's full
@@ -90,7 +93,9 @@ export const glances = (stage: StageSize): boolean =>
 // fewest for a thumbnail, and the watching rate otherwise.
 export function stageFramerate(stage: StageSize, ceiling = framerateCeiling()): number {
   if (stage.control || stage.share >= LARGE_STAGE_SHARE) return ceiling;
-  return Math.min(ceiling, glances(stage) ? GLANCE_FRAMERATE : WATCHING_FRAMERATE);
+  // A ceiling no higher than a handheld's is a handheld's.
+  const watching = ceiling <= HANDHELD_FRAMERATE ? HANDHELD_WATCHING_FRAMERATE : WATCHING_FRAMERATE;
+  return Math.min(ceiling, glances(stage) ? GLANCE_FRAMERATE : watching);
 }
 
 const topStep = (maxFramerate: number) => {
