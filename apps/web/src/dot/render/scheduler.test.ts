@@ -92,4 +92,20 @@ describe("scheduler", () => {
     expect(pending).toHaveLength(1);
     removeView(view);
   });
+
+  it("keeps no timer once its last view is gone", () => {
+    vi.useFakeTimers();
+    const pending: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => pending.push(cb));
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const view = { root: document.createElement("span"), visible: true, frame: vi.fn(() => 200) };
+    addView(view);
+    for (const cb of pending.splice(0)) cb(0);
+    expect(vi.getTimerCount()).toBe(1);
+    removeView(view);
+    expect(vi.getTimerCount()).toBe(0);
+    addView(view);
+    expect(pending).toHaveLength(1);
+    removeView(view);
+  });
 });
