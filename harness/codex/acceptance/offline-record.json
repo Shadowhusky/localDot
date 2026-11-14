@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "02dfb9e0a54c278a2cee1ef93e1271b97cc31d25b798d6af6b8929047aa09465",
+  "inputSha256": "0ad0f869fda86780d7b67715262b99ef6783132e181c1904b24350854b3bcc07",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -712,13 +712,13 @@
     "apps/daemon/src/exports/cdp.ts": "dbe90242633039b8f67303fe885eafe0e4a963cbf65f9d1eb20727641ff086b0",
     "apps/daemon/src/exports/chrome.test.ts": "a1b1261551c2e94fc79da7dadc175d056e72f46461b1569da54157827daecdd0",
     "apps/daemon/src/exports/chrome.ts": "9431e7bbef7038255706ae5eaaa4a49473a43034532720d75791ed9a5386addd",
-    "apps/daemon/src/exports/jobs.test.ts": "6027607527b37bcfe2475b23eb3ecb6e8f085fcbadf7b32791f7277d9174de91",
+    "apps/daemon/src/exports/jobs.test.ts": "565a88692604c263ad1f84a3501ef84344370f59d55c5bd049082008dd744753",
     "apps/daemon/src/exports/jobs.ts": "ba7beea443ec3bf6646421fd8fb362c4fa8b1a1e40427174aa7a43c78afe25fd",
     "apps/daemon/src/exports/routes.test.ts": "f028df7dab2a259a00ad04e4a650bb1c35310fbd04c3b18df984fa15d4cd67ce",
     "apps/daemon/src/exports/routes.ts": "d8e4907c98c278ddc2239dbc3a06586415173fbbbdcdfdba9bd051ef0aa725bc",
     "apps/daemon/src/exports/store.test.ts": "e796f2bb01a302ca0aa1b14ffb412c4fafbe54a43f5cae3fe5f530d31b592a3c",
     "apps/daemon/src/exports/store.ts": "9579e5a4f0535cd9078722cd3a8585b992dee25fb066a2fe221c7f4ece38fe3e",
-    "apps/daemon/src/exports/testing/fake-renderer.ts": "5d3fbd60922f4e4462e796048d64897d45cce76bedf880159ae8b032ab44f570",
+    "apps/daemon/src/exports/testing/fake-renderer.ts": "63fa273cf09514b4cad2bbaf494f4444a2c6e56f9b8d88e49182796788d494d9",
     "apps/daemon/src/gateway/computer-lease.test.ts": "f60f67e1ff1c18f07ed371bf32aaea1f50568fb960eb27975d4123adf5a4f1ec",
     "apps/daemon/src/gateway/computer-lease.ts": "9a8cee3035cb67afbe51c8436507dd14e069af3f4794527faec9d11e1b7a3339",
     "apps/daemon/src/gateway/frames.test.ts": "9cced1172e9240d7b45cd6587c265434508357f541752a24aea2f5d94c083051",
@@ -1305,7 +1305,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "f3fd1e80f6dea077ff74ac01b71ab6d97481eafc4913f92a02cba7f4d4641ab5",
+  "reportSha256": "45f6f91f717ef8afae3660ed80388038ce46b45125dbffd19ebf02e47182a570",
   "exit": {
     "code": 0,
     "signal": null
