@@ -23,7 +23,8 @@ const mocks = vi.hoisted(() => ({
   exits: new Map<string, (code: number) => void>(),
   prepare: vi.fn(async (_taskId: string, _signal?: AbortSignal) => {}),
 }));
-vi.mock("../desktopd/tools-client.ts", () => ({
+vi.mock("../desktopd/tools-client.ts", async (importOriginal) => ({
+  neverReached: (await importOriginal<typeof import("../desktopd/tools-client.ts")>()).neverReached,
   DesktopdTools: class {
     closed = false;
     constructor(readonly endpoint: { baseUrl: string; token: string }) {
@@ -275,6 +276,30 @@ it("a task stopped while its desktop browser is made ready sees that through and
   expect(contain).not.toHaveBeenCalled();
   expect(fences.isFenced(h.cellId)).toBe(false);
   expect(mocks.opens).toHaveLength(0);
+});
+
+// The computer's service was not listening: the request never reached it, so its browser is as it
+// was and the computer stays the user's.
+it("a task whose preparation the computer never received keeps the computer", async () => {
+  const h = setup();
+  const fences = new ComputerFences(h.home);
+  h.deps.fences = fences;
+  const contain = vi.spyOn(h.deps.killSwitch, "contain");
+  h.deps.keyd.secrets = async () => [];
+  h.agent.routes.settings.put({ main: { provider: "lmstudio", model: "fixture-tools-model" } });
+  await h.agent.start();
+  mocks.prepare.mockRejectedValueOnce(
+    new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), {
+        code: "ECONNREFUSED",
+      }),
+    }),
+  );
+  const session = await h.agent.runner.start(h.cellId, "Task");
+  await h.live.settled(session.id);
+  expect(mocks.prepare).toHaveBeenCalledOnce();
+  expect(contain).not.toHaveBeenCalled();
+  expect(fences.isFenced(h.cellId)).toBe(false);
 });
 
 it("lost scripted preparation replies fence the computer and cannot replay on another task", async () => {

@@ -62,7 +62,7 @@ import { StoredFiles } from "../deliverables/stored.ts";
 import { TaskScanner } from "../deliverables/task-scan.ts";
 import { DesktopdClient } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
-import { DesktopdTools } from "../desktopd/tools-client.ts";
+import { DesktopdTools, neverReached } from "../desktopd/tools-client.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "../gateway/frames.ts";
 import type { ActionGateway } from "../gateway/gateway.ts";
@@ -314,7 +314,13 @@ export function createAgent(d: AgentWiringDeps) {
     // would leave the browser's profile in doubt, and cost the user the computer.
     const lease = await untouched(() => transfers.acquire(cellId, [], check));
     try {
-      await tools.prepareBrowser(sessionId, lease.signal);
+      try {
+        await tools.prepareBrowser(sessionId, lease.signal);
+      } catch (error) {
+        // The computer's service never got the request: its browser is as it was.
+        if (neverReached(error)) throw new DesktopSound(error);
+        throw error;
+      }
       if (signal.aborted) throw new DesktopSound(signal.reason);
       lease.check();
     } finally {

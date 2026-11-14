@@ -20,7 +20,8 @@ const mocks = vi.hoisted(() => ({
   brainDeps: undefined as BrainCellsDeps | undefined,
   sweep: vi.fn(async () => 0),
 }));
-vi.mock("../desktopd/tools-client.ts", () => ({
+vi.mock("../desktopd/tools-client.ts", async (importOriginal) => ({
+  neverReached: (await importOriginal<typeof import("../desktopd/tools-client.ts")>()).neverReached,
   DesktopdTools: class {
     closed = false;
     constructor(readonly endpoint: { baseUrl: string; token: string }) {
