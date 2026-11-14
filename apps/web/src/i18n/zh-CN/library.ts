@@ -349,6 +349,7 @@ export const library = {
   "This is the last picture": "这是最后一张图片",
   "This is the last file": "这是最后一个文件",
   "Couldn't load the preview": "无法载入预览",
+  "No preview for this kind of file": "这类文件无法预览",
   "Loading the pages": "正在载入页面",
   "Loading the preview": "正在载入预览",
   "Loading the PDF": "正在载入 PDF",

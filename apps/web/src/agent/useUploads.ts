@@ -15,6 +15,8 @@ export interface UploadRow {
   readonly path?: string;
   readonly explanation?: string;
   readonly preview?: string;
+  // The file as chosen on this device, which opens in the viewer from here.
+  readonly file?: File;
   // A text the composer moved out of its field: what its chip is called, and the words, which stay
   // here so they can be read and survive a change of computer.
   readonly label?: string;
@@ -206,6 +208,7 @@ export function useUploads(props: Owner) {
         name: file.name,
         bytes: file.size,
         phase: "pending" as const,
+        file,
         ...(preview ? { preview } : {}),
       };
     });

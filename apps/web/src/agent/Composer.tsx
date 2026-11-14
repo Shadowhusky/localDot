@@ -1481,6 +1481,8 @@ export const Composer = memo(function Composer(props: ComposerProps) {
         <Collapse open={rows.length > 0} className="composer-files">
           <AttachmentChips
             rows={shownRows.current}
+            api={props.api}
+            sessionId={props.agent.sessionId}
             onRemove={uploads.remove}
             onRetry={uploads.retry}
           />

@@ -43,15 +43,23 @@ export interface FrameEntry {
   frameId: string;
   name: string;
 }
-export type AnyEntry = ViewerEntry | ComputerEntry | FrameEntry;
+// A file attached to a draft and not yet sent, shown from the copy on this device.
+export interface LocalEntry {
+  localId: string;
+  local: File;
+}
+export type AnyEntry = ViewerEntry | ComputerEntry | FrameEntry | LocalEntry;
 export const isComputerEntry = (entry: AnyEntry): entry is ComputerEntry => "path" in entry;
 export const isFrameEntry = (entry: AnyEntry): entry is FrameEntry => "frameId" in entry;
+export const isLocalEntry = (entry: AnyEntry): entry is LocalEntry => "localId" in entry;
 export const anyEntryKey = (entry: AnyEntry) =>
   isComputerEntry(entry)
     ? `computer:${entry.sessionId}:${entry.path}`
     : isFrameEntry(entry)
       ? `frame:${entry.sessionId}:${entry.frameId}`
-      : entryKey(entry);
+      : isLocalEntry(entry)
+        ? `local:${entry.localId}`
+        : entryKey(entry);
 // How the viewer gets a file: its download's state, why it can't start now, and starting it.
 export interface ViewerDownloads<E extends AnyEntry = AnyEntry> {
   state(entry: E): FileState | undefined;
