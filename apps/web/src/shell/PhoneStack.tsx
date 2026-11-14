@@ -7,11 +7,14 @@ import {
   useLayoutEffect,
   useRef,
 } from "react";
+import { t } from "../i18n/index.ts";
 import { matches, REDUCED_MOTION } from "../ui/media.ts";
 import { project } from "../ui/sheet-drag.ts";
+import { CHAT_LIST_WIDTH } from "./panel-width.ts";
 import { boxIn, type Flyer, type FlyerBox } from "./phone-flyer.ts";
 import { browserTab, type PhoneNav } from "./phone-route.ts";
 import { clamp, lerp, onSpringFrame, Spring, Velocity } from "./phone-spring.ts";
+import { ResizeHandle } from "./ResizeHandle.tsx";
 import "../ui/phone-layout.css";
 
 const NAV = { response: 0.42, damping: 1 };
@@ -387,6 +390,15 @@ export function PhoneStack({
         </div>
         {computer}
       </div>
+      {split && (
+        <ResizeHandle
+          panel={CHAT_LIST_WIDTH}
+          property="--chat-list-w"
+          label={t`Conversations width`}
+          side="right"
+          className="chat-list-resize"
+        />
+      )}
       <span ref={flyerHost} className="dot phone-flyer" aria-hidden="true" />
       {over}
     </div>

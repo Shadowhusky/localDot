@@ -132,6 +132,43 @@ test.describe("the swipe back", () => {
 });
 
 test.describe("the thread", () => {
+  // A reply with a table wider than the phone stays on the screen; the table and code scroll in it.
+  test("a reply with a wide table stays on the screen, the table scrolling inside", async ({
+    page,
+    ui,
+  }) => {
+    const fixture = await ui.open("running");
+    const summary = [
+      "Detection on your card improved a little.",
+      "",
+      "| Footage made from your card | Hits found of 15 | False hits |",
+      "|---|---|---|",
+      "| Tripod, hand-held, shaky and swinging | 15 | 0 |",
+      "| Card small in the picture | 14 | 0 |",
+      "",
+      "```",
+      "const detector = createDetector({ threshold: 0.42, minimumArea: 18, darkInkTolerance: 0.11 });",
+      "```",
+    ].join("\n");
+    const done = await page.request.post(`${fixture.origin}/__qa/finish?done=1`, { data: summary });
+    expect(done.ok()).toBe(true);
+    const reply = page.locator(".result-summary").last();
+    await expect(reply).toContainText("Footage made from your card");
+    await reply.scrollIntoViewIfNeeded();
+    const width = await page.evaluate(() => document.documentElement.clientWidth);
+    const box = await reply.boundingBox();
+    expect(box && box.x + box.width).toBeLessThanOrEqual(width);
+    for (const wide of [reply.locator(".md-table"), reply.locator(".md-code pre")]) {
+      const sizes = await wide.evaluate((element) => ({
+        shown: element.clientWidth,
+        content: element.scrollWidth,
+        right: element.getBoundingClientRect().right,
+      }));
+      expect(sizes.content).toBeGreaterThan(sizes.shown);
+      expect(sizes.right).toBeLessThanOrEqual(width);
+    }
+  });
+
   test("is bubbles, with steps behind a caption that unfolds them", async ({ page, ui }) => {
     await ui.open("done");
     const caption = page.locator(".chat-steps .ui-disclosure-trigger").last();
@@ -184,6 +221,43 @@ test.describe("the thread", () => {
     await page.waitForTimeout(100);
     await menu.getByRole("menuitem", { name: "Edit and send again" }).click();
     await expect(page.getByRole("textbox", { name: "Message" })).toHaveValue(said);
+  });
+
+  // The menu opens under the held message from its first frame: it never starts above it, while
+  // the message is still on its way up, and jumps.
+  test("a held message's menu opens under it from the first frame", async ({ page, ui }) => {
+    await ui.open("done");
+    const mine = page.locator('.thread-message[data-role="user"] .thread-bubble').last();
+    await mine.scrollIntoViewIfNeeded();
+    await ui.settle();
+    await page.evaluate(() => {
+      const seen: { menu: number; bubble: number }[] = [];
+      (window as { menuFrames?: typeof seen }).menuFrames = seen;
+      const watch = () => {
+        const menu = document.querySelector('[role="menu"][aria-label="Message actions"]');
+        const bubble = document.querySelector(".bubble-hold-preview");
+        if (menu && bubble && getComputedStyle(menu).visibility !== "hidden") {
+          const at = menu.getBoundingClientRect();
+          if (at.height > 0)
+            seen.push({ menu: at.top, bubble: bubble.getBoundingClientRect().top });
+        }
+        if (seen.length < 40) requestAnimationFrame(watch);
+      };
+      requestAnimationFrame(watch);
+    });
+    const hand = await finger(page);
+    await hand.hold(mine);
+    await expect(page.getByRole("menu", { name: "Message actions" })).toBeVisible();
+    await page.waitForTimeout(600);
+    const frames = await page.evaluate(
+      () => (window as { menuFrames?: { menu: number; bubble: number }[] }).menuFrames ?? [],
+    );
+    expect(frames.length).toBeGreaterThan(0);
+    for (const frame of frames) expect(frame.menu).toBeGreaterThan(frame.bubble);
+    const tops = frames.map((frame) => Math.round(frame.menu));
+    // It grows in where it opens; a jump to the other side would move it a whole message's height.
+    expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(16);
+    await hand.lift();
   });
 
   test("a question takes one tap on a chip", async ({ page, ui }) => {

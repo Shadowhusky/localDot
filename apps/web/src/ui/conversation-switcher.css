@@ -52,15 +52,60 @@
     border-top: 0;
   }
 
-  /* The tags in use, each a filter: a tap shows only that colour, another shows them all. They
-     scroll edge to edge and rest at the list's gutter. */
+  /* The tags in use, each a filter: a tap shows only that tag, another shows them all. They wrap
+     inside the list's gutter, so each is in sight; the rest wait behind All tags. */
   .conversations-tags {
     display: flex;
     flex: none;
+    flex-wrap: wrap;
     gap: calc(var(--spacing) * 2);
     padding-inline: var(--_gutter);
-    overflow-x: auto;
-    scrollbar-width: none;
+  }
+
+  .all-tags {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+    min-width: min(300px, 100%);
+  }
+
+  .all-tags-list {
+    display: grid;
+    gap: calc(var(--spacing) / 2);
+    max-height: min(360px, 55dvh);
+    overflow-y: auto;
+  }
+
+  .all-tags-row.ui-button {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .all-tags-row.ui-button > .ui-button-content {
+    width: 100%;
+    gap: calc(var(--spacing) * 2.5);
+  }
+
+  .all-tags-row.ui-button[aria-pressed="true"] {
+    --_bg: var(--color-control);
+  }
+
+  .all-tags-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-align: start;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .all-tags-count,
+  .all-tags-note {
+    color: var(--color-fg-2);
+  }
+
+  .all-tags-note {
+    margin: 0;
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   }
 
   .conversations-tag.ui-button {
@@ -173,6 +218,7 @@
     margin: 0 calc(var(--spacing) * -2);
     padding: var(--spacing) var(--_gutter) calc(var(--spacing) * 2);
     overflow-x: auto;
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
     list-style: none;
     scroll-padding-inline: var(--_gutter);

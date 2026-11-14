@@ -2,14 +2,18 @@
 
 import { type LocalDotEvent, ulid } from "@localdot/protocol";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
+import { preloadScreens } from "./shell/lazy-screen.tsx";
 import { closeStreams } from "./stage/live-stream.ts";
 import { fakeChromium, presentFrame } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
+
+// The screens that load apart from the app are there before it renders, as they are once it is up.
+beforeAll(preloadScreens);
 
 const json = (value: unknown) =>
   new Response(JSON.stringify(value), {

@@ -545,6 +545,8 @@
   --home-foot: calc(env(safe-area-inset-bottom) * 0.65);
   --rail-w: 368px;
   --sessions-w: 256px;
+  /* Chat's list beside the conversation, until its edge is dragged. */
+  --chat-list-w: clamp(300px, 38vw, 368px);
   --activity-w: 320px;
   --rail-inset: 8px;
   --gutter: 20px;

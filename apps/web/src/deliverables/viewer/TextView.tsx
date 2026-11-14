@@ -30,8 +30,8 @@ export function useText(api: ApiClient, file: FileRef, from: "start" | "end", at
   return text;
 }
 
-// A file that simply isn't text gets its card and no words.
 const TEXT_PROBLEMS = {
+  binary: tr("No preview for this kind of file"),
   missing: tr("This version is no longer available"),
   computer_off: tr("Turn on your computer to see this file"),
   busy: tr("Your computer is busy"),

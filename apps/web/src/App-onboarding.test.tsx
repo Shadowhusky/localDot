@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it } from "vitest";
 import { App } from "./App.tsx";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
+import { preloadScreens } from "./shell/lazy-screen.tsx";
+
+// The screens that load apart from the app are there before it renders, as they are once it is up.
+beforeAll(preloadScreens);
 
 afterEach(() => {
   cleanup();

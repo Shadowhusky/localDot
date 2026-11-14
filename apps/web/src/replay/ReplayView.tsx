@@ -3,7 +3,6 @@ import {
   microsToMs,
   type PersonaId,
   type SessionCard,
-  type SessionVerdict,
   type Wearable,
 } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
@@ -57,6 +56,7 @@ import { GapCard, type GapKind } from "./GapCard.tsx";
 import { LOADING, ReplayControls } from "./ReplayControls.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 import { useRecordingSummary } from "./recording-summary.ts";
+import { PREVIEW_ROOM, RECORDED_TASK, type RecordedTitle } from "./replay-title.ts";
 import {
   type LibraryFilter,
   libraryTotal,
@@ -81,9 +81,6 @@ import {
 import { useReplay } from "./useReplay.ts";
 import "./replay.css";
 
-// Below a laptop the library has no room for its preview, so a row opens its recording at once.
-// Wide enough for the chosen recording beside the list.
-export const PREVIEW_ROOM = "(width >= 1100px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
 const CONTINUE_LABEL = t`Continue working`;
 // What was deleted and freed shows in place of the library's total for this long.
@@ -121,15 +118,6 @@ const RESTING: DotFeed = {
   dispatched: null,
   done: false,
 };
-
-export const RECORDED_TASK = t`Recorded task`;
-
-export interface RecordedTitle {
-  sessionId: string;
-  title: string;
-  note: string;
-  verdict: SessionVerdict;
-}
 
 export interface ReplayViewProps {
   api: ApiClient;

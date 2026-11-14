@@ -755,8 +755,10 @@ export const shell = {
   "That sort can't be taken back now": "这次整理现在无法撤销",
   "The conversations couldn't be sorted. Try again.": "无法整理这些对话。请重试。",
   "Sort into tags": "按标签整理",
-  "{0} reads each conversation and tags it. Tags are only added, never taken off.":
-    "{0} 会阅读每个对话并为其添加标签。只会添加标签，不会移除。",
+  "{0} reads each conversation and gives it the one tag that fits.":
+    "{0} 会阅读每个对话，并给它最合适的一个标签。",
+  "Off, a conversation's tag may change to one that fits better.":
+    "关闭时，对话的标签可能会换成更合适的一个。",
   "How finely": "细分程度",
   Broad: "粗略",
   "A few tags, each holding many": "少量标签，每个包含许多对话",
@@ -783,4 +785,14 @@ export const shell = {
   "Take “{0}” off every conversation?": "要从所有对话中移除“{0}”吗？",
   "Delete tag": "删除标签",
   "Show only a tag": "只显示一个标签",
+  "Sorting {0} of {1} conversations…": "正在整理第 {0} 个，共 {1} 个对话…",
+  "Your model is reading your conversations…": "你的模型正在阅读你的对话…",
+  "Your model stopped answering before the rest.": "你的模型在整理完其余对话前停止了回答。",
+  Sorting: "正在整理",
+  "All tags · {0}": "全部标签 · {0}",
+  "Find a tag": "查找标签",
+  "Every conversation": "所有对话",
+  "No tag is called that.": "没有这个名称的标签。",
+  "All tags": "全部标签",
+  "{0}, {1}. {2}. {3}": "{0}，{1}。{2}。{3}",
 } satisfies Catalog;

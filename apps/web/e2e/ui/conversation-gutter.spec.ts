@@ -97,19 +97,24 @@ test.describe("Chat", () => {
         expect(at.when?.right, "a row's date").toBeCloseTo(gutter + 28 + 8, 0);
       } else expect(at.when?.right, "a row's right edge").toBeCloseTo(gutter, 0);
 
-      // The tags scroll edge to edge, the first and the last coming to rest at the gutter.
-      expect(at.tags?.left).toBe(0);
-      expect(at.tags?.right).toBe(0);
-      const ends = await tags.evaluate((row) => {
-        row.scrollLeft = row.scrollWidth;
-        const last = row.lastElementChild?.getBoundingClientRect();
+      // The tags wrap inside the gutter: none scrolls out of sight.
+      const chips = await tags.evaluate((row) => {
         const box = row.getBoundingClientRect();
         return {
-          overflows: row.scrollWidth > row.clientWidth,
-          right: box.right - (last?.right ?? 0),
+          scrolls: row.scrollWidth > row.clientWidth,
+          edges: [...row.children].map((chip) => {
+            const at = chip.getBoundingClientRect();
+            return { left: at.left - box.left, right: box.right - at.right };
+          }),
         };
       });
-      if (ends.overflows) expect(ends.right, "the last tag's rest").toBeCloseTo(gutter, 0);
+      expect(chips.scrolls).toBe(false);
+      // The pinned strip scrolls sideways only.
+      await expect(page.locator(".phone-rail")).toHaveCSS("overflow-y", "hidden");
+      for (const chip of chips.edges) {
+        expect(chip.left, "a tag's left edge").toBeGreaterThanOrEqual(gutter - 0.5);
+        expect(chip.right, "a tag's right edge").toBeGreaterThanOrEqual(gutter - 0.5);
+      }
 
       await page.getByRole("textbox", { name: "Search conversations" }).fill("zzzzz");
       await expect(page.locator(".phone-list-body .ui-empty")).toBeVisible();

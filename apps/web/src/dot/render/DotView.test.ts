@@ -440,6 +440,24 @@ describe("DotView", () => {
     expect(root.dataset.skin).toBeUndefined();
   });
 
+  it("draws a small dot's quick moves at half the display rate on a touch device", () => {
+    const pose = vi.spyOn(DotEngine.prototype, "pose");
+    const renders = (touch: boolean) => {
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: touch && query.includes("coarse"),
+      }));
+      const { view } = mount({ size: 56 });
+      drive(view, clock, clock + 2000);
+      pose.mockClear();
+      view.react("success");
+      drive(view, clock, clock + 400);
+      return pose.mock.calls.length;
+    };
+    const desk = renders(false);
+    expect(desk).toBeGreaterThan(20);
+    expect(renders(true)).toBeLessThanOrEqual(Math.ceil(desk / 2) + 1);
+  });
+
   it("draws a prop's loops at 20 fps at the dock's size, and at 30 fps while Replay plays it", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     const { view } = mount({ size: 56 });

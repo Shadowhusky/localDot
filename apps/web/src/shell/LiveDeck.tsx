@@ -10,6 +10,7 @@ import { triggerProps } from "../ui/Popover.tsx";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
 import { conversationLabel } from "./SessionRail.tsx";
 import "../ui/conversation-switcher.css";
+import { sidewaysWheel } from "../ui/sideways-wheel.ts";
 
 export interface LiveDeckProps {
   // The conversations under way, most urgent first.
@@ -50,7 +51,7 @@ export function LiveDeck({
       <div id={heading} className="conversations-day live-deck-head">
         {t`Under way`} <span className="live-deck-count num">{rows.length}</span>
       </div>
-      <ul className="live-deck-cards" data-count={Math.min(rows.length, 3)}>
+      <ul ref={sidewaysWheel} className="live-deck-cards" data-count={Math.min(rows.length, 3)}>
         {rows.map((row) => (
           <LiveCard
             key={row.entry.sessionId}

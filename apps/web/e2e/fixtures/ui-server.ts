@@ -398,7 +398,9 @@ const conversations = new Conversations(HOME, log);
 // under another, so a test knows what each gets.
 const sorter = new TagSorter({
   shelf: conversations,
+  // It takes a moment, as a model does, so a test sees the sort under way.
   ask: async (_system, prompt) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
     const tags: Record<string, string[]> = {};
     for (const [, n, body] of prompt.matchAll(
       /<conversation n="(\d+)">([\s\S]*?)<\/conversation>/g,
@@ -983,6 +985,7 @@ function finishTask(
   done = false,
   markdown = false,
   previews?: ResultPreview[],
+  summary?: string,
 ) {
   a("message.assistant", {
     messageId: ulid(),
@@ -1000,9 +1003,11 @@ function finishTask(
     { mode: 0o600 },
   );
   a("task.result", {
-    summary: markdown
-      ? MARKDOWN_SUMMARY
-      : "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
+    summary:
+      summary ??
+      (markdown
+        ? MARKDOWN_SUMMARY
+        : "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way."),
     files: [
       { name: "summary.md", path: "summary.md", bytes: 48 },
       { name: "totals.csv", path: "totals.csv", bytes: 32 },
@@ -4509,13 +4514,18 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(done = false, markdown = false, previews?: ResultPreview[]): string | undefined {
+function finish(
+  done = false,
+  markdown = false,
+  previews?: ResultPreview[],
+  summary?: string,
+): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append, done, markdown, previews);
+  finishTask(owned, append, done, markdown, previews, summary);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -5370,7 +5380,8 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", (c) =>
+// A body is the summary the task ends with.
+routes.post("/__qa/finish", async (c) =>
   reply(
     finish(
       c.req.query("done") === "1",
@@ -5386,6 +5397,7 @@ routes.post("/__qa/finish", (c) =>
             },
           ]
         : undefined,
+      (await c.req.text()) || undefined,
     ),
   ),
 );

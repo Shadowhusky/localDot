@@ -5,6 +5,7 @@ import {
   framerateCeiling,
   glances,
   HANDHELD_FRAMERATE,
+  HANDHELD_WATCHING_FRAMERATE,
   PROBE_TICKS,
   QualityController,
   type QualitySample,
@@ -234,6 +235,15 @@ describe("a stage's frame rate", () => {
     expect(stageFramerate({ share: 0.74, control: false }, 60)).toBe(60);
     expect(stageFramerate({ share: 0.2, control: true }, 60)).toBe(60);
     expect(stageFramerate({ share: 0.9, control: true }, HANDHELD_FRAMERATE)).toBe(30);
+  });
+
+  // A phone's picture of the computer in part of its window, as Chat shows it under the thread.
+  it("is a thumbnail's rate on a handheld until the screen fills the window or is in the user's hands", () => {
+    expect(stageFramerate({ share: 0.2, control: false }, HANDHELD_FRAMERATE)).toBe(
+      HANDHELD_WATCHING_FRAMERATE,
+    );
+    expect(stageFramerate({ share: 0.7, control: false }, HANDHELD_FRAMERATE)).toBe(30);
+    expect(stageFramerate({ share: 0.2, control: true }, HANDHELD_FRAMERATE)).toBe(30);
   });
 
   it("is the lowest for a thumbnail, which shows no more, but not for a stage yet to be measured", () => {

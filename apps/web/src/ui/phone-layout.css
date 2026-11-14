@@ -422,6 +422,8 @@
     /* A long name, the widest thing here, starts at the gutter, less its button's padding and border. */
     padding: 0 calc(var(--_gutter) - var(--spacing) / 2 - 1px);
     overflow-x: auto;
+    /* Sideways only: what pokes out of a pin, such as its press area, never scrolls it up and down. */
+    overflow-y: hidden;
     scrollbar-width: none;
     touch-action: pan-x pan-y;
   }
@@ -612,11 +614,6 @@
     align-items: flex-start;
     gap: calc(var(--spacing) * 2);
     min-width: 0;
-  }
-
-  .phone-row-foot > .ui-tag-names {
-    align-self: center;
-    max-width: 50%;
   }
 
   .phone-row-line {
@@ -956,6 +953,7 @@
   .phone-thread .result-summary {
     justify-self: start;
     width: fit-content;
+    max-width: 100%;
     padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.25) calc(var(--spacing) * 2.5);
     border-radius: var(--radius-xl);
     background-color: var(--color-raised);
@@ -1992,8 +1990,27 @@
 
   /* A tablet: the list beside the conversation. */
   .phone-stack[data-split] {
-    --_split: clamp(300px, 38%, 368px);
+    --_split: var(--chat-list-w);
     --_reading: 960px;
+  }
+
+  /* Its edge with the conversation takes a drag, as Studio's rails do. */
+  .phone-stack > .rail-resize.chat-list-resize {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--_split);
+    display: block;
+    margin: 0;
+    translate: -50% 0;
+  }
+
+  .phone-stack[data-list-hidden] > .rail-resize.chat-list-resize {
+    display: none;
+  }
+
+  .phone-stack:has(> .chat-list-resize[data-dragging]) > :is(.phone-list, .phone-chat) {
+    transition: none;
   }
 
   /* A wide screen gives the thread its room, up to a measure that still reads, its foot under it. */

@@ -87,11 +87,22 @@
     min-width: 0;
   }
 
+  .tag-chooser-pick.ui-button {
+    justify-content: flex-start;
+  }
+
+  .tag-chooser-pick.ui-button > .ui-button-content {
+    width: 100%;
+    gap: calc(var(--spacing) * 2.5);
+  }
+
   .tag-chooser-name {
-    display: inline-flex;
-    align-items: center;
-    gap: calc(var(--spacing) * 2);
+    flex: 1;
     min-width: 0;
+    overflow: hidden;
+    text-align: start;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tag-chooser-make.ui-button {
@@ -139,6 +150,12 @@
   .smart-tags {
     display: grid;
     gap: calc(var(--spacing) * 3);
+  }
+
+  .smart-tags-progress {
+    margin: 0;
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   }
 
   .smart-tags-problem {

@@ -46,7 +46,9 @@ export function fileNameTail(name: string): number {
 export function MiddleName({ name, className }: { name: string; className?: string }) {
   const chars = [...name];
   const end = chars.length - fileNameTail(name);
-  const start = Math.min(START, end);
+  // A middle of a character or two is narrower than the room kept for its ellipsis, which would
+  // show as a gap: it stays with the start.
+  const start = end - Math.min(START, end) < 3 ? end : Math.min(START, end);
   const between = chars.slice(start, end).join("");
   return (
     <span className={clsx("ui-middle-name", className)} title={name}>

@@ -30,6 +30,8 @@ export class FakeRenderer implements ExportRenderer {
   }
 
   render(job: HostExport, io: RenderIo, signal: AbortSignal): Promise<RenderResult> {
+    // As the real renderer does, one asked for after the stop doesn't start.
+    if (signal.aborted) return Promise.reject(signal.reason);
     return new Promise<RenderResult>((resolve, reject) => {
       const settle = () => {
         rendering.settled = true;

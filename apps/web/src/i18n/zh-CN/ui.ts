@@ -489,7 +489,7 @@ export const ui = {
   "[tag]": "[标签]",
   "Search tags": "搜索标签",
   "Tagged {0}.": "已标记为{0}。",
-  "Tags taken off.": "已移除标签。",
+  "Tag taken off.": "已移除标签。",
   "{0} taken off.": "已移除{0}。",
   "Sort conversations into tags": "按标签整理对话",
   "Your model reads them and tags each": "你的模型会阅读并为每个对话添加标签",

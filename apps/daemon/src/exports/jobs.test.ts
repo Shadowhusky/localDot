@@ -15,7 +15,10 @@ import { DEFAULT_EXPORT_LIMITS, ExportStore, INTERRUPTED } from "./store.ts";
 import { ABLE, FakeRenderer } from "./testing/fake-renderer.ts";
 
 const homes: string[] = [];
-afterEach(() => {
+const open: ExportJobs[] = [];
+// Each queue stops before its folder goes: one left running would start its next video there.
+afterEach(async () => {
+  await Promise.all(open.splice(0).map((jobs) => jobs.close()));
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
@@ -51,6 +54,7 @@ async function fixture(options: { home?: string; maxBytes?: number } = {}) {
     now,
     clock: () => clock,
   });
+  open.push(jobs);
   const states: ExportsState[] = [];
   jobs.subscribe((state) => states.push(state));
   await jobs.check();

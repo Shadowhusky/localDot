@@ -24,15 +24,7 @@ function Harness() {
         <MenuSeparator />
         <TagSwatches
           chosen={tags}
-          onSelect={(tag) =>
-            setTags(
-              tag === null
-                ? []
-                : tags.includes(tag)
-                  ? tags.filter((each) => each !== tag)
-                  : [...tags, tag],
-            )
-          }
+          onSelect={(tag) => setTags(tag === null || tags.includes(tag) ? [] : [tag])}
         />
         <MenuSeparator />
         <MenuItem onSelect={() => {}}>Delete</MenuItem>
@@ -44,11 +36,11 @@ function Harness() {
 const name = () => document.activeElement?.getAttribute("data-label");
 const key = (key: string) => fireEvent.keyDown(document.activeElement as Element, { key });
 
-it("lists no tag and the six colours as one row, those given checked", () => {
+it("lists no tag and the six colours as one row, the one given checked", () => {
   render(<Harness />);
   fireEvent.click(screen.getByRole("button", { name: "Actions" }));
   const row = screen.getByRole("group", { name: "Tag" });
-  const swatches = [...row.querySelectorAll("[role=menuitemcheckbox]")];
+  const swatches = [...row.querySelectorAll("[role=menuitemradio]")];
   expect(swatches.map((each) => each.getAttribute("aria-label"))).toEqual([
     "No tag",
     "Red",
@@ -58,12 +50,12 @@ it("lists no tag and the six colours as one row, those given checked", () => {
     "Blue",
     "Purple",
   ]);
-  expect(screen.getByRole("menuitemcheckbox", { name: "Green" }).getAttribute("aria-checked")).toBe(
+  expect(screen.getByRole("menuitemradio", { name: "Green" }).getAttribute("aria-checked")).toBe(
     "true",
   );
-  expect(
-    screen.getByRole("menuitemcheckbox", { name: "No tag" }).getAttribute("aria-checked"),
-  ).toBe("false");
+  expect(screen.getByRole("menuitemradio", { name: "No tag" }).getAttribute("aria-checked")).toBe(
+    "false",
+  );
   expect(document.querySelector(".ui-tag-mark")?.getAttribute("data-tag")).toBe("green");
 });
 
@@ -93,10 +85,10 @@ it("moves along the row with left and right, and leaves it with up and down", ()
   key("ArrowLeft");
   expect(name()).toBe("Purple");
   fireEvent.click(document.activeElement as Element);
-  expect(screen.getByText("Tags green purple")).toBeTruthy();
+  expect(screen.getByText("Tags purple")).toBeTruthy();
   expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger);
-  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "No tag" }));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "No tag" }));
   expect(screen.getByText("Tags none")).toBeTruthy();
   expect(document.querySelector(".ui-tag-mark")).toBeNull();
 });

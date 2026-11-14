@@ -1,5 +1,5 @@
 import { DEFAULT_SMART_TAGS, type SmartTagOptions } from "@localdot/protocol";
-import { type RefObject, useEffect, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import {
   readSmartTagOptions,
   saveSmartTagOptions,
@@ -12,6 +12,7 @@ import { type ApiClient, ApiError } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
+import { Progress } from "../ui/Progress.tsx";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { showToast } from "../ui/Toast.tsx";
@@ -22,6 +23,14 @@ const PROBLEMS: Partial<Record<string, string>> = {
   busy: tr("dot is already sorting your conversations."),
   "no-answer": tr("Your model didn't answer. Try again."),
 };
+
+const SORT_TOAST = "sort-tags";
+
+// "Tagged 16 of 42 conversations", or that the model is reading them, until its first answer.
+const sortingWords = ({ done, total }: { done: number; total: number }) =>
+  total
+    ? t`Sorting ${done.toLocaleString()} of ${total.toLocaleString()} conversations…`
+    : t`Your model is reading your conversations…`;
 
 // Sorts the conversations into tags with the user's model, at once: how finely, whether it may make
 // tags of its own, and which conversations; and whether each new one is tagged as it finishes.
@@ -46,7 +55,10 @@ export function SmartTagsDialog({
   const { tags: library } = useRecentConversations(api, open);
   const [options, setOptions] = useState<SmartTagOptions>(DEFAULT_SMART_TAGS);
   const [untagged, setUntagged] = useState(true);
-  const [sorting, setSorting] = useState(false);
+  // Under way: how far, once the first batch is answered.
+  const [sorting, setSorting] = useState<{ done: number; total: number } | null>(null);
+  const shown = useRef(open);
+  shown.current = open;
   const [problem, setProblem] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
@@ -58,24 +70,38 @@ export function SmartTagsDialog({
   // dot makes its own tags while the user has none.
   const create = options.create || !library.length;
   const sort = async () => {
-    setSorting(true);
+    setSorting({ done: 0, total: 0 });
     setProblem(null);
     try {
-      const result = await sortConversations(api, {
-        scope: untagged ? "untagged" : "all",
-        granularity: options.granularity,
-        create,
-      });
-      onClose();
+      const result = await sortConversations(
+        api,
+        { scope: untagged ? "untagged" : "all", granularity: options.granularity, create },
+        (progress) => {
+          setSorting(progress);
+          // Hidden, it goes on in a toast.
+          if (!shown.current) showToast({ id: SORT_TOAST, title: sortingWords(progress) });
+        },
+      );
+      if (shown.current) onClose();
       const made = result.created.map((tag) => tag.name).join(", ");
       showToast({
+        id: SORT_TOAST,
         title:
           result.tagged === 0
             ? t`No conversations needed a tag`
             : result.tagged === 1
               ? t`Tagged 1 conversation`
               : t`Tagged ${result.tagged.toLocaleString()} conversations`,
-        ...(made ? { description: t`New tags: ${made}` } : {}),
+        ...(made || result.incomplete
+          ? {
+              description: [
+                made && t`New tags: ${made}`,
+                result.incomplete && t`Your model stopped answering before the rest.`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+            }
+          : {}),
         ...(result.tagged > 0
           ? {
               action: {
@@ -90,12 +116,13 @@ export function SmartTagsDialog({
           : {}),
       });
     } catch (error) {
-      setProblem(
+      const why =
         (error instanceof ApiError && PROBLEMS[error.message.split("\n")[0] ?? ""]) ||
-          t`The conversations couldn't be sorted. Try again.`,
-      );
+        t`The conversations couldn't be sorted. Try again.`;
+      if (shown.current) setProblem(why);
+      else showToast({ id: SORT_TOAST, title: why, tone: "danger" });
     } finally {
-      setSorting(false);
+      setSorting(null);
     }
   };
   const remember = (next: SmartTagOptions) => {
@@ -111,8 +138,7 @@ export function SmartTagsDialog({
       {...(anchor ? { anchor } : {})}
       title={t`Sort into tags`}
       description={
-        unavailable ??
-        t`${model} reads each conversation and tags it. Tags are only added, never taken off.`
+        unavailable ?? t`${model} reads each conversation and gives it the one tag that fits.`
       }
       body={
         <div className="smart-tags">
@@ -147,6 +173,7 @@ export function SmartTagsDialog({
           />
           <Checkbox
             label={t`Only conversations without a tag`}
+            description={t`Off, a conversation's tag may change to one that fits better.`}
             checked={untagged}
             onCheckedChange={setUntagged}
           />
@@ -156,6 +183,14 @@ export function SmartTagsDialog({
             checked={options.auto}
             onCheckedChange={(auto) => remember({ ...options, auto })}
           />
+          {sorting && (
+            <Progress
+              label={t`Sorting`}
+              {...(sorting.total ? { value: sorting.done, max: sorting.total } : {})}
+              valueText={sortingWords(sorting)}
+            />
+          )}
+          {sorting && <p className="smart-tags-progress num">{sortingWords(sorting)}</p>}
           {problem && (
             <p className="smart-tags-problem" role="alert">
               {problem}
@@ -164,8 +199,14 @@ export function SmartTagsDialog({
         </div>
       }
     >
-      <Button variant="quiet" onClick={onClose}>
-        {t`Cancel`}
+      <Button
+        variant="quiet"
+        onClick={() => {
+          onClose();
+          if (sorting) showToast({ id: SORT_TOAST, title: sortingWords(sorting) });
+        }}
+      >
+        {sorting ? t`Hide` : t`Cancel`}
       </Button>
       <Button
         variant="primary"

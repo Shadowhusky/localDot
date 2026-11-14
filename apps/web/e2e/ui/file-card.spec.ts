@@ -202,3 +202,24 @@ test("each file the Workspace lists has its Open, and room for its name", async 
   await openButton.click();
   await expect(page.locator(".file-viewer video, .file-viewer audio").first()).toBeVisible();
 });
+
+// Show fewer sits clear of the last row's line, its words starting where the files' names do.
+test("a long file list's Show fewer keeps clear of the rows, in line with their names", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  await page.request.post(`${fixture.origin}/__qa/files?count=9`);
+  const more = page.locator(".deliverables-more").last();
+  await more.getByRole("button").click();
+  const toggle = more.getByRole("button", { name: "Show fewer files" });
+  await expect(toggle).toBeVisible();
+  const row = await more.boundingBox();
+  const button = await toggle.boundingBox();
+  const name = await page.locator(".deliverable .ui-file-name").last().boundingBox();
+  const label = await toggle.locator(".ui-button-content").boundingBox();
+  if (!row || !button || !label) throw new Error("Nothing to measure");
+  expect(button.y - row.y).toBeGreaterThanOrEqual(6);
+  expect(row.y + row.height - (button.y + button.height)).toBeGreaterThanOrEqual(6);
+  if (name) expect(Math.abs(label.x - name.x)).toBeLessThan(3);
+});

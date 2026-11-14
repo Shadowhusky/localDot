@@ -1,5 +1,5 @@
 import { EncodedPacketSink, type Input, type VideoSample, VideoSampleSink } from "mediabunny";
-import { openRecording } from "../replay/recording-source.ts";
+import { openRecording } from "../replay/recording-input.ts";
 import type { ReplaySource } from "../stage/worker-protocol.ts";
 
 // The recording read in order for an export. Each wanted time gets the picture on screen then; a

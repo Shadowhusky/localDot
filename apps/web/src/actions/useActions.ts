@@ -353,7 +353,7 @@ export function useActions(input: ActionsInput): {
           const id = choice.value === "none" ? null : choice.value;
           const next = toggledTag(filedTags, id);
           const tag = id ? tagOf(id, library) : undefined;
-          if (!tag) return organize({ tags: next }, t`Tags taken off.`);
+          if (!tag) return organize({ tags: next }, t`Tag taken off.`);
           return organize(
             { tags: next },
             next.includes(tag.id) ? t`Tagged ${tagName(tag)}.` : t`${tagName(tag)} taken off.`,

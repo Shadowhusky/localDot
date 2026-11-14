@@ -66,10 +66,12 @@ const Withdrawn = z.strictObject({
 // How the user organized each conversation, by its first task, which stays its own as it goes on.
 const ORGANIZED_FILE = "conversations-organized.json";
 const ORGANIZED_BYTES = 4 * 1024 * 1024;
+// A conversation once carried several tags; it keeps the last one given.
+const STORED_TAGS = 8;
 const Organized = z.strictObject({
   // Its one colour, from before tags had names.
   tag: ConversationTag.optional(),
-  tags: z.array(TagId).max(TAGS_PER_CONVERSATION).optional(),
+  tags: z.array(TagId).max(STORED_TAGS).optional(),
   pinned: z.literal(true).optional(),
   // Its latest task when it was archived: a task that goes on with it brings it back.
   archived: z.string().regex(ULID_PATTERN).optional(),
@@ -97,7 +99,7 @@ const TagsFile = z.strictObject({
 });
 type TagsFile = z.infer<typeof TagsFile>;
 const tagIdsOf = (record: Organized | undefined): TagId[] =>
-  record?.tags ?? (record?.tag ? [record.tag] : []);
+  (record?.tags ?? (record?.tag ? [record.tag] : [])).slice(-TAGS_PER_CONVERSATION);
 const sameName = (a: string, b: string) =>
   a.localeCompare(b, undefined, { sensitivity: "accent" }) === 0;
 export class TagError extends Error {}
@@ -716,7 +718,7 @@ ${checkpoint}`),
     const archived = change.archived ?? was?.archived === latest;
     const look = change.look === undefined ? was?.look : (change.look ?? undefined);
     const next: Organized = {
-      ...(tags.length ? { tags: [...new Set(tags)].slice(0, TAGS_PER_CONVERSATION) } : {}),
+      ...(tags.length ? { tags: [...new Set(tags)].slice(-TAGS_PER_CONVERSATION) } : {}),
       ...(pinned ? { pinned: true } : {}),
       ...(archived ? { archived: latest } : {}),
       ...(look ? { look } : {}),

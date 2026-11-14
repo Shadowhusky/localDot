@@ -244,6 +244,31 @@ test.describe("a desktop", () => {
 
   // A row's More shows for the pointer over the row, beside its date, never over it; a menu opened
   // with a right click doesn't bring it up.
+  // The list beside the conversation takes a drag at its edge, kept from one visit to the next.
+  test("the list's edge drags it wider, and it stays so", async ({ page, ui }) => {
+    await ui.open("conversations");
+    await expect(page.locator(".app")).not.toHaveAttribute("data-entering");
+    const list = page.locator(".phone-stack > .phone-list");
+    const handle = page.getByRole("separator", { name: "Conversations width" });
+    await expect(handle).toBeVisible();
+    const before = (await list.boundingBox())?.width ?? 0;
+    const at = await handle.boundingBox();
+    if (!at) throw new Error("Nothing to drag");
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(at.x + at.width / 2 + 120, at.y + at.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await list.boundingBox())?.width ?? 0)
+      .toBeCloseTo(before + 120, -1);
+    const chat = await page.locator(".phone-stack > .phone-chat").boundingBox();
+    expect(chat?.x).toBeCloseTo((await list.boundingBox())?.width ?? 0, -1);
+    await page.reload();
+    await expect
+      .poll(async () => (await list.boundingBox())?.width ?? 0)
+      .toBeCloseTo(before + 120, -1);
+  });
+
   test("a row's More shows under the pointer, clear of the date", async ({ page, ui }) => {
     await ui.open("conversations");
     await expect(page.locator(".app")).not.toHaveAttribute("data-entering");

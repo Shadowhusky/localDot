@@ -40,6 +40,12 @@ export function addView(view: Frameable): void {
 export function removeView(view: Frameable): void {
   views.delete(view);
   observer?.unobserve(view.root);
+  // With no view left nothing waits for a frame, so a page that drops its last dot keeps no timer.
+  if (views.size) return;
+  clearTimeout(sleeping);
+  sleeping = undefined;
+  if (raf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
+  raf = 0;
 }
 
 // Something changed: the views get the next display frame.

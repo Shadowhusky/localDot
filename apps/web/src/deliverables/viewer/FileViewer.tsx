@@ -37,6 +37,7 @@ import { useVersions } from "../useVersions.ts";
 import { comparePair, findVersion } from "../versions.ts";
 import { type Changes, ChangesView } from "./ChangesView.tsx";
 import { FrameView } from "./FrameView.tsx";
+import { LocalView } from "./LocalView.tsx";
 import { MediaView } from "./MediaView.tsx";
 import { PageView } from "./PageView.tsx";
 import { PictureView } from "./PictureView.tsx";
@@ -45,6 +46,7 @@ import {
   anyEntryKey,
   isComputerEntry,
   isFrameEntry,
+  isLocalEntry,
   type ShownVersion,
   type ViewerDownloads,
 } from "./scope.tsx";
@@ -109,6 +111,18 @@ function itemOf(entry: AnyEntry, shown?: ShownVersion & { key: string }): Item {
       own: true,
     };
   }
+  if (isLocalEntry(entry)) {
+    const { name, size } = entry.local;
+    return {
+      key,
+      entry,
+      name,
+      title: name,
+      file: { sessionId: "", name, version: null },
+      bytes: size,
+      own: true,
+    };
+  }
   if (isComputerEntry(entry)) {
     const name = computerFileName(entry.path);
     return {
@@ -165,7 +179,10 @@ function useAbout(api: ApiClient, file: FileRef, attempt: number): About | null 
 // Pictures are drawn on either side of the one on show, so a swipe carries the next one in with it;
 // anything else waits until it is on show. A file on the computer has to be asked after first.
 const drawnAhead = (entry: AnyEntry) =>
-  isFrameEntry(entry) || (!isComputerEntry(entry) && viewerKind(entry.file.name) === "picture");
+  isFrameEntry(entry) ||
+  (isLocalEntry(entry)
+    ? viewerKind(entry.local.name) === "picture"
+    : !isComputerEntry(entry) && viewerKind(entry.file.name) === "picture");
 const kindOf = (item: Item) => (isFrameEntry(item.entry) ? "picture" : viewerKind(item.name));
 
 // Puts a pane where it lies in the row of files, the row being at place `at`.
@@ -226,6 +243,8 @@ export function FileViewer<E extends AnyEntry>({
   const entry = entries[index] as E;
   const item = itemOf(entry, shown);
   const frame = isFrameEntry(entry);
+  // A screenshot has no file to download, and a draft's file is already on this device.
+  const kept = !frame && !isLocalEntry(entry);
   const total = entries.length;
   const root = useRef<HTMLDivElement>(null);
   const reduced = useMediaQuery(REDUCED_MOTION);
@@ -352,12 +371,12 @@ export function FileViewer<E extends AnyEntry>({
   const about = useAbout(api, item.file, attempt);
   const size =
     item.bytes ?? (about && about !== "failed" && about.kind === "file" ? about.bytes : null);
-  const state = frame ? undefined : downloads.state(entry);
+  const state = kept ? downloads.state(entry) : undefined;
   const kind = kindOf(item);
   // The arrows turn a document's own pages.
   const paged = kind === "pdf" || kind === "page";
   const meta = metaOf(item, size);
-  const download = !frame && (
+  const download = kept && (
     <Button
       size="md"
       icon={state === "done" ? "check" : "download"}
@@ -380,7 +399,7 @@ export function FileViewer<E extends AnyEntry>({
       {t`Download`}
     </Button>
   );
-  const openMac = onMac && !frame && !onComputer(item.file) && canOpenOnMac(item.name) && (
+  const openMac = onMac && kept && !onComputer(item.file) && canOpenOnMac(item.name) && (
     <Button
       size="md"
       variant="secondary"
@@ -495,6 +514,8 @@ export function FileViewer<E extends AnyEntry>({
               >
                 {isFrameEntry(pane.item.entry) ? (
                   <FrameView api={api} frame={pane.item.entry} />
+                ) : isLocalEntry(pane.item.entry) ? (
+                  <LocalView file={pane.item.entry.local} />
                 ) : (
                   <ViewBody
                     api={api}
@@ -533,7 +554,7 @@ function useChanges(api: ApiClient, item: Item): Changes | null {
       return entry.changes?.some((change) => change.patch)
         ? { kind: "patches", patches: entry.changes }
         : null;
-    if (onComputer(file) || !versions) return null;
+    if (isLocalEntry(entry) || onComputer(file) || !versions) return null;
     const pair = comparePair(name, versions, findVersion(versions, file));
     return pair
       ? {
@@ -612,7 +633,7 @@ function ViewBody({
     );
   if (kind === "page")
     return onComputer(file) ? (
-      <ViewerMessage name={name} />
+      <ViewerMessage name={name} title={t`No preview for this kind of file`} />
     ) : (
       <Suspense fallback={<ViewerLoading label={t`Loading the pages`} />}>
         <OfficePages api={api} file={file} />

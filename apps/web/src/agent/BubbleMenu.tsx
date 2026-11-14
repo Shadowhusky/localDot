@@ -31,6 +31,28 @@ const EDGE = 10;
 // How much of a bubble too tall for the screen fades out at the foot of its preview.
 const FADE_PX = 40;
 
+// Where a held bubble comes to rest, grown a little about its own middle: where it was, moved up
+// as far as its menu needs room below it, and cut short when the screen can't hold it all.
+function restOf({ from, items, note }: Pick<HeldBubble, "from" | "items" | "note">) {
+  const seen = from.getBoundingClientRect();
+  const width = sizeOf(from).w || seen.width;
+  const menuHeight = items.length * ITEM_PX + (note ? NOTE_PX : 0) + MENU_PAD + GAP * 2;
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  const room = height - menuHeight - EDGE * 2;
+  const rest = Math.min(seen.height, room);
+  const top = Math.max(EDGE, Math.min(seen.top, height - menuHeight - rest));
+  return {
+    width,
+    clipped: seen.height > room,
+    box: {
+      left: seen.left + (width * (1 - LIFT)) / 2,
+      top: top + (rest * (1 - LIFT)) / 2,
+      width: width * LIFT,
+      height: rest * LIFT,
+    },
+  };
+}
+
 // A hold: the bubble lifts out of the page, the page goes behind glass and the menu grows from under
 // it. Sliding to an item and letting go chooses it, as iOS does.
 export function BubbleMenu({ held, onClose }: { held: HeldBubble | null; onClose(): void }) {
@@ -49,28 +71,15 @@ export function BubbleMenu({ held, onClose }: { held: HeldBubble | null; onClose
     if (!shade || !card || !bubble) return null;
     copyInto(bubble, from);
     anchor.current = card;
-    const seen = from.getBoundingClientRect();
-    const width = sizeOf(from).w || seen.width;
-    const menuHeight = items.length * ITEM_PX + (note ? NOTE_PX : 0) + MENU_PAD + GAP * 2;
-    const height = window.visualViewport?.height ?? window.innerHeight;
-    const room = height - menuHeight - EDGE * 2;
-    const clipped = seen.height > room;
+    const { width, clipped, box } = restOf({ from, items, note });
     card.toggleAttribute("data-clip", clipped);
-    const rest = Math.min(seen.height, room);
-    const top = Math.max(EDGE, Math.min(seen.top, height - menuHeight - rest));
     const radius = getComputedStyle(from).borderRadius;
     shade.style.borderRadius = radius;
     card.style.borderRadius = radius;
     card.style.width = `${width}px`;
     shade.style.width = `${width}px`;
     return {
-      // Grown a little about its own middle.
-      place: {
-        x: seen.left + (width * (1 - LIFT)) / 2,
-        y: top + (rest * (1 - LIFT)) / 2,
-        w: width * LIFT,
-        h: rest * LIFT,
-      },
+      place: { x: box.left, y: box.top, w: box.width, h: box.height },
       dim: back.current,
       refresh: () => copyInto(bubble, from),
       draw(t, at) {
@@ -143,6 +152,9 @@ export function BubbleMenu({ held, onClose }: { held: HeldBubble | null; onClose
         open={!!held}
         onClose={onClose}
         anchor={anchor}
+        // Where the bubble comes to rest, from the menu's first frame: the bubble is still on its way
+        // there, and a menu placed by it would open on its other side, then jump.
+        against={() => (held ? restOf(held).box : undefined)}
         side="bottom"
         align={shown.mine ? "end" : "start"}
         label={t`Message actions`}

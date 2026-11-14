@@ -189,7 +189,7 @@ describe("the conversations under way", () => {
 });
 
 describe("tags in use", () => {
-  it("lists each tag given once, in the swatches' order", () => {
+  it("lists each tag given once, the most carried first, then in the swatches' order", () => {
     const rows = conversationRows(
       [
         entry({ tags: [{ id: "purple", color: "purple" }] }),
@@ -200,7 +200,11 @@ describe("tags in use", () => {
       ],
       QUIET,
     );
-    expect(tagsInUse(rows).map((tag) => tag.id)).toEqual(["red", "green", "purple"]);
+    expect(tagsInUse(rows).map((tag) => [tag.id, tag.count])).toEqual([
+      ["purple", 2],
+      ["red", 1],
+      ["green", 1],
+    ]);
     expect(tagsInUse([])).toEqual([]);
   });
 
@@ -214,10 +218,10 @@ describe("tags in use", () => {
     expect(tagsInUse(rows).map((tag) => tag.name ?? tag.id)).toEqual(["red", "Bills", "Trips"]);
   });
 
-  it("gives a tag or takes it off, and none takes every tag off", () => {
-    expect(toggledTag(["red"], "blue")).toEqual(["red", "blue"]);
-    expect(toggledTag(["red", "blue"], "red")).toEqual(["blue"]);
-    expect(toggledTag(["red", "01HZ00000000000000000000T1"], null)).toEqual([]);
+  it("gives the one tag chosen, and takes it off when it is chosen again or none is", () => {
+    expect(toggledTag(["red"], "blue")).toEqual(["blue"]);
+    expect(toggledTag(["red"], "red")).toEqual([]);
+    expect(toggledTag(["01HZ00000000000000000000T1"], null)).toEqual([]);
     expect(tagOf("green", [])).toEqual({ id: "green", color: "green" });
     expect(tagOf("01HZ00000000000000000000T1", [])).toBeUndefined();
   });

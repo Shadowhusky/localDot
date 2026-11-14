@@ -41,7 +41,7 @@ import { useTaskSearch } from "../replay/search-api.ts";
 import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { CheckMark } from "../ui/CheckMark.tsx";
-import { markOf, TagMark, TagNames, tagName } from "../ui/ConversationTag.tsx";
+import { markOf, TagMark, tagName, tagWords } from "../ui/ConversationTag.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { useFlip } from "../ui/flip.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -51,6 +51,7 @@ import { isMenuKey, Menu, MenuItem } from "../ui/Menu.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 import { SessionGlyph } from "../ui/SessionGlyph.tsx";
 import { type SwipeAction, SwipeActions } from "../ui/SwipeActions.tsx";
+import { sidewaysWheel } from "../ui/sideways-wheel.ts";
 import { TextField } from "../ui/TextField.tsx";
 import { useEscape } from "../ui/useEscape.ts";
 import { ConversationAvatar } from "./ConversationAvatar.tsx";
@@ -447,7 +448,11 @@ export function PhoneList({
               data-unread={unread || undefined}
               role={choosing ? "checkbox" : undefined}
               aria-checked={choosing ? chosen : undefined}
-              aria-label={t`${row.title}. ${STATUS_LABEL[row.status]}. ${line}`}
+              aria-label={
+                row.entry.tags?.[0]
+                  ? t`${row.title}, ${tagWords(row.entry.tags[0])}. ${STATUS_LABEL[row.status]}. ${line}`
+                  : t`${row.title}. ${STATUS_LABEL[row.status]}. ${line}`
+              }
               aria-current={id === current || undefined}
               disabledReason={choosing ? undefined : blocked(row)}
               onKeyDown={choosing ? undefined : menuKey(row)}
@@ -475,7 +480,6 @@ export function PhoneList({
                   </time>
                 </span>
                 <span className="phone-row-foot">
-                  <TagNames tags={row.entry.tags} />
                   <span className="phone-row-line">
                     {match?.snippet ? <Highlight text={match.snippet} before={32} /> : line}
                   </span>
@@ -671,7 +675,7 @@ export function PhoneList({
         />
         <div ref={body} className="phone-list-body" aria-busy={recent.loading || matches.pending}>
           {pinned.length > 0 && (
-            <ul className="phone-rail" aria-label={t`Pinned`}>
+            <ul ref={sidewaysWheel} className="phone-rail" aria-label={t`Pinned`}>
               {pinned.map((row) => (
                 <RailItem
                   key={row.entry.sessionId}

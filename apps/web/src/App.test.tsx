@@ -3,17 +3,21 @@
 import { emptyManifest, type LocalDotEvent, type SessionCard, ulid } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { GREETINGS } from "./dot/tips.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { ONBOARDING_KEY } from "./onboarding/wizard.ts";
 import { providerFixture } from "./settings/testing.ts";
+import { preloadScreens } from "./shell/lazy-screen.tsx";
 import { VIEW_STYLE_KEY } from "./shell/view-style.ts";
 import { FakeWorker, fakeChromium, playInClient } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 import { setListening } from "./voice/listening.ts";
+
+// The screens that load apart from the app are there before it renders, as they are once it is up.
+beforeAll(preloadScreens);
 
 // The attention feed (/api/events) has its own suite (notify/useAttention.test.tsx); these tests
 // follow the computer's and the task's sockets.

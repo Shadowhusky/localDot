@@ -87,6 +87,7 @@ test("a message's files open from their chips, each kind as itself", async ({ pa
 
   await next(viewer);
   await expect(viewer.locator(".ui-file-card")).toBeVisible();
+  await expect(viewer.getByText("No preview for this kind of file")).toBeVisible();
   await shoot(page, ui, "viewer-binary");
   const [download] = await Promise.all([
     page.waitForEvent("download"),
@@ -103,6 +104,49 @@ test("a message's files open from their chips, each kind as itself", async ({ pa
   await page.keyboard.press("Escape");
   await expect(viewer).not.toBeVisible();
   await expect(chips.getByRole("button", { name: "Open photo.png" })).toBeVisible();
+});
+
+// A draft's files open before they are sent, from the copy on this device: a picture as itself, a
+// text's words, and anything else saying it has no preview. Nothing there downloads.
+test("a draft's files open from their chips before they are sent", async ({ page, ui }) => {
+  await ui.open("running");
+  const composer = page.locator(".composer");
+  const pixel = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const files = [
+    { name: "pixel.png", mimeType: "image/png", buffer: pixel },
+    { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("first line\nsecond line\n") },
+    {
+      name: "firmware.bin",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from([0, 1, 2, 3]),
+    },
+  ];
+  const chips = composer.getByRole("list", { name: "Attached files" });
+  // The composer turns files away while it reconnects to the task it just opened; once it takes
+  // them, they stay.
+  await expect(async () => {
+    if ((await chips.getByRole("listitem").count()) === 0)
+      await composer.locator("input[type=file]").setInputFiles(files);
+    await expect(chips.getByRole("listitem")).toHaveCount(3, { timeout: 2_000 });
+  }).toPass();
+
+  await chips.getByRole("button", { name: "Open pixel.png" }).click();
+  const viewer = page.locator(".file-viewer");
+  const pixelShown = viewer.getByRole("img", { name: "pixel.png" });
+  await expect.poll(() => pixelShown.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+  await expect(viewer.getByRole("button", { name: "Download" })).toHaveCount(0);
+
+  await next(viewer);
+  await expect(viewer.getByText("second line")).toBeVisible();
+  await next(viewer);
+  await expect(viewer.getByText("No preview for this kind of file")).toBeVisible();
+  await shoot(page, ui, "draft-binary");
+  await page.keyboard.press("Escape");
+  await expect(viewer).toBeHidden();
+  await expect(chips.getByRole("listitem")).toHaveCount(3);
 });
 
 test("a changed file opens from Activity's Files, beside its changes", async ({ page, ui }) => {
