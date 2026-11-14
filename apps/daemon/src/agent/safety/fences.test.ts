@@ -4,6 +4,7 @@ import { DEFAULT_AUTONOMY, type PauseSnapshot, ulid } from "@localdot/protocol";
 import { afterEach, expect, it } from "vitest";
 import { EventLog } from "../../event-log.ts";
 import { ComputerFences } from "./fences.ts";
+import { NativeTasks } from "./native-tasks.ts";
 import { SafetyIntentStore } from "./store.ts";
 
 const homes: string[] = [];
@@ -166,4 +167,25 @@ it("an unsettled intent still fences when its task log cannot be read", () => {
   expect(fences.isFenced(cellId)).toBe(true);
   expect(fences.isFenced(ulid())).toBe(false);
   expect(fences.record(cellId)).toMatchObject({ cellId, sessionId: session, executor: "api" });
+});
+
+// An earlier version fenced a task stopped before it launched anything as one whose native process
+// had to be seen to exit. With nothing of its own left running on the computer, the next start
+// confirms its retirement, so Replace computer can go ahead.
+it("a native task fenced before it launched anything is retired at the next start", () => {
+  const dir = home(),
+    log = open(dir),
+    cellId = ulid(),
+    earlier = log.createSession("an earlier task, done"),
+    stopped = log.createSession("stopped while the desktop was prepared");
+  new NativeTasks(dir).write(earlier, {
+    v: 1,
+    route: "claude-code",
+    settled: true,
+    cellId,
+    sessionId: earlier,
+    runs: [{ id: ulid(), identity: { pid: 123, start: "100:20" } }],
+  });
+  new ComputerFences(dir).capture(cellId, stopped, "native");
+  expect(restart(dir).record(cellId)).toMatchObject({ sessionId: stopped, nativeRetired: true });
 });

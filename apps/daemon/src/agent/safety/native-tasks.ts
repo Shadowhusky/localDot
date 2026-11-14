@@ -120,17 +120,27 @@ export class NativeTasks extends PrivateRecords<TaskRecord> {
   state(cellId: string, sessionId: string): NativeTaskState {
     let own: TaskRecord | undefined,
       ownId: string | undefined,
-      onCell = false;
+      onCell = false,
+      underCell = false;
     const others: TaskRecord[] = [];
     for (const [id, record] of this.entries()) {
       if (record.cellId === cellId) onCell = true;
+      if (id === cellId) underCell = true;
       if (record.sessionId === sessionId && ownId !== sessionId) {
         own = record;
         ownId = id;
       } else if (record.sessionId !== sessionId && record.cellId === cellId && !record.settled)
         others.push(record);
     }
-    if (!own) return onCell ? "unknown" : "legacy";
+    // A record is written before each launch and goes only once it has settled, so a task with
+    // none of its own launched nothing that is still running: what is left is the others' on its
+    // computer. A record an earlier version kept under the computer may have been written over
+    // this task's by a later launch, and proves nothing.
+    if (!own) {
+      if (!onCell) return "legacy";
+      if (underCell) return "unknown";
+      return combined(others.map((record) => this.#state(record)));
+    }
     if (own.cellId !== cellId) return "unknown";
     return combined([own, ...others].map((record) => this.#state(record)));
   }

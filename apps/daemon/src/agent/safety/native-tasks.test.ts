@@ -147,10 +147,38 @@ describe("tasks that share a computer", () => {
     f.tasks.spawn(f.cell, f.session, child);
     f.probe.status.mockReturnValue("exited");
     f.tasks.confirmed(f.session);
+    f.probe.status.mockReturnValue("alive");
     f.tasks.spawn(f.cell, next, child);
     expect(f.tasks.read(f.session)).toBeUndefined();
-    expect(f.tasks.state(f.cell, f.session)).toBe("unknown");
+    // Its own exit was confirmed; what still runs on its computer is the next task's.
+    expect(f.tasks.state(f.cell, f.session)).toBe("alive");
     expect(f.tasks.list().map((record) => record.sessionId)).toEqual([next]);
+  });
+
+  // A task stopped before it launched anything has no record: it waits only on what the others
+  // launched on its computer, unless an earlier version kept the computer's record.
+  it("has a task that launched nothing wait only on the others' launches on its computer", () => {
+    const f = fixture(),
+      other = ulid(),
+      unlaunched = ulid();
+    f.tasks.spawn(f.cell, other, child);
+    expect(f.tasks.state(f.cell, unlaunched)).toBe("alive");
+    f.probe.status.mockReturnValue("exited");
+    expect(f.tasks.state(f.cell, unlaunched)).toBe("exited");
+    f.tasks.confirmed(other);
+    expect(f.tasks.state(f.cell, unlaunched)).toBe("exited");
+    expect(f.tasks.state(ulid(), unlaunched)).toBe("legacy");
+    const g = fixture();
+    g.tasks.write(g.cell, {
+      v: 1,
+      route: "claude-code",
+      settled: true,
+      cellId: g.cell,
+      sessionId: ulid(),
+      boot,
+      runs: [{ id: ulid(), identity: { pid: 123, start: "100:20" } }],
+    });
+    expect(g.tasks.state(g.cell, g.session)).toBe("unknown");
   });
 
   it("reads a record an earlier version saved under the computer, and moves it under its task", () => {

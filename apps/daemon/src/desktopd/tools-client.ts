@@ -173,6 +173,28 @@ async function textBody(res: Response, signal: AbortSignal, limit: number): Prom
   }
 }
 
+// Connection failures that happen before anything is sent: the computer's service never saw the
+// request, so nothing there can have acted on it. A reset or a timeout once connected proves
+// nothing either way.
+const NOT_REACHED = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "EADDRNOTAVAIL",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+const failureCodes = (value: unknown): string[] =>
+  value instanceof AggregateError
+    ? value.errors.flatMap(failureCodes)
+    : typeof (value as { code?: unknown } | null)?.code === "string"
+      ? [(value as { code: string }).code]
+      : [];
+export function neverReached(error: unknown): boolean {
+  const codes = failureCodes(error instanceof Error ? error.cause : undefined);
+  return codes.length > 0 && codes.every((code) => NOT_REACHED.has(code));
+}
+
 // This client owns one dispatcher for its cell endpoint. Explicit deadlines remain active until
 // body completion; undici's implicit five-minute header/body limit cannot truncate a long shell.
 export class DesktopdTools {

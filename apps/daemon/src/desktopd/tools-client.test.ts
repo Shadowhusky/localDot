@@ -13,6 +13,7 @@ import { addToolRoutes } from "../../../../cells/desktop/desktopd/src/tools/rout
 import {
   DesktopdTools,
   describeShellDiagnosis,
+  neverReached,
   ShellCleanupUncertainError,
   ShellExecutionUncertainError,
 } from "./tools-client.ts";
@@ -217,6 +218,33 @@ describe("DesktopdTools real routes", () => {
       ),
     ).rejects.toMatchObject({ status: 409 });
     expect((await tools.readFile("Downloads/attachment.txt")).content).toBe("original");
+  });
+});
+
+// A computer whose service is not listening never saw a request: preparing its browser for a task
+// then changed nothing there.
+describe("a request the computer never received", () => {
+  it("is told apart from one that was sent and then lost", async () => {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const tools = new DesktopdTools({ baseUrl: `http://127.0.0.1:${port}`, token });
+    const refused = await tools.prepareBrowser("01HZ0000000000000000000001").catch((e) => e);
+    await tools.close();
+    expect(neverReached(refused)).toBe(true);
+
+    const reset = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+    expect(neverReached(new TypeError("fetch failed", { cause: reset }))).toBe(false);
+    expect(neverReached(new Error("tool request refused"))).toBe(false);
+    const both = new AggregateError(
+      [
+        Object.assign(new Error("refused"), { code: "ECONNREFUSED" }),
+        Object.assign(new Error("reset"), { code: "ECONNRESET" }),
+      ],
+      "connect failed",
+    );
+    expect(neverReached(new TypeError("fetch failed", { cause: both }))).toBe(false);
   });
 });
 

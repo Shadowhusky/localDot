@@ -121,7 +121,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     TAKEOVER_LAST,
   request_fix: REQUEST_FIX_DESCRIPTION,
   remember:
-    'Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping), or append to today\'s daily notes (file "notes"), which are searchable but not loaded into later tasks.',
+    'Save a lasting fact the user gave you: add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping), or append to today\'s daily notes (file "notes"), which are searchable but not loaded into later tasks. Never use it to log what this task did: localDot records every task, and recall searches them.',
   recall:
     "Search the user's earlier tasks and daily notes (titles, their messages, your replies, steps, result file names); returns up to 8 dated matches as untrusted text. Use it before asking the user about something they did with you before. After a search, remember is refused until the user replies.",
   people:
