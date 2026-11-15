@@ -33,6 +33,37 @@ export function tar(files: TarFile[], mtimeSeconds = Math.floor(Date.now() / 100
   return Buffer.concat(parts);
 }
 
+// The bytes of the regular file `name` in an archive Docker sent, or undefined when it holds none.
+// A malformed archive throws.
+export function untar(archive: Buffer, name: string): Buffer | undefined {
+  for (let offset = 0; offset + BLOCK <= archive.length; ) {
+    const h = archive.subarray(offset, offset + BLOCK);
+    if (h.every((byte) => byte === 0)) return undefined;
+    const size = Number.parseInt(field(h, 124, 12), 8);
+    const checksum = Number.parseInt(field(h, 148, 8), 8);
+    let actual = 0;
+    for (let i = 0; i < BLOCK; i++) actual += i >= 148 && i < 156 ? 32 : (h[i] ?? 0);
+    if (
+      checksum !== actual ||
+      !Number.isSafeInteger(size) ||
+      size < 0 ||
+      offset + BLOCK + size > archive.length
+    )
+      throw new RangeError("tar: the archive is damaged or cut short");
+    const type = h[156];
+    if (field(h, 0, 100) === name && (type === 0x30 || type === 0))
+      return archive.subarray(offset + BLOCK, offset + BLOCK + size);
+    offset += BLOCK + Math.ceil(size / BLOCK) * BLOCK;
+  }
+  return undefined;
+}
+
+const field = (h: Buffer, start: number, length: number) =>
+  h
+    .subarray(start, start + length)
+    .toString()
+    .replace(/\0.*$/s, "");
+
 function header(name: string, size: number, mode: number, mtime: number): Buffer {
   const h = Buffer.alloc(BLOCK);
   h.write(name, 0, "ascii");

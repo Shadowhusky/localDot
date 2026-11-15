@@ -28,6 +28,7 @@ import { BrowserRecovery, credentialsChanged } from "./cells/browser-recovery.ts
 import { pullPinnedImages } from "./cells/computer-image-pull.ts";
 import { ComputerSizes } from "./cells/computer-size.ts";
 import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
+import { DisplayServer } from "./cells/display-server.ts";
 import { DockerClient } from "./cells/docker.ts";
 import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
 import { CellOrchestrator } from "./cells/orchestrator.ts";
@@ -262,6 +263,7 @@ const updates = new ComputerUpdates({
 const orchestrator = new CellOrchestrator({
   updates,
   size: sizes,
+  display: new DisplayServer(docker, images.desktop),
   diagnosticAdmission: (id) => live.admitIdleOperation(id),
   externalKeydPorts: () => [
     ...(agent?.reservedPorts() ?? []),

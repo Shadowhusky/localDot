@@ -19,6 +19,7 @@ import { downloadDetail, stallGuard, UpdateFailure } from "../updates/progress.t
 import type { ComputerSizes } from "./computer-size.ts";
 import type { ComputerUpdates } from "./computer-update.ts";
 import { type DiagnosticSelfTest, probeDiagnosticSelfTest } from "./diagnostic-selftest.ts";
+import type { DisplayServer } from "./display-server.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import { inspectOwnedCell, requireFreshNames, retireExactCell } from "./exact-retirement.ts";
 import { gateCaptures, type ImageInspect, type Images } from "./images.ts";
@@ -96,6 +97,8 @@ export interface OrchestratorDeps {
   images: Images;
   // The dot's computer size, which each desktop takes before it starts.
   size?: Pick<ComputerSizes, "prepare" | "read">;
+  // Puts back localDot's display server in a desktop an app's install replaced it in.
+  display?: Pick<DisplayServer, "keep">;
   // How gates reach keyd and the daemon (cells/relay.ts); Docker Desktop's host name by default.
   relay?: () => Promise<GateRelay>;
   streamFullcolor?: boolean;
@@ -1509,6 +1512,8 @@ export class CellOrchestrator {
           .catch((err: unknown) =>
             console.error(`cell ${record.id}: desktop kept its size (${messageOf(err)})`),
           );
+        if (!this.#current(record.id, starting)) return false;
+        await this.deps.display?.keep(d.desktop);
         if (!this.#current(record.id, starting)) return false;
         await this.#docker.request({
           method: "POST",
