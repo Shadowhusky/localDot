@@ -5,6 +5,7 @@ import {
   LIBRARY_CACHE,
   LIBRARY_ID_CACHE,
   type Manifest,
+  MERGE_RULES,
   migrationPlan,
   SystemMigrationConflict,
   verifyMigration,
@@ -212,6 +213,63 @@ describe("the dock's index of apps", () => {
         { [APP_INDEX]: index("old") },
         { [APP_INDEX]: index("image") },
         { [APP_INDEX]: ["l", 0o777, 0, 0, "/tmp/elsewhere"] },
+      ),
+    ).toThrow(SystemMigrationConflict);
+  });
+});
+
+describe("caches checked against the folders they describe", () => {
+  const cache = (text: string): Manifest[string] => ["f", 0o644, 0, 0, text];
+  const FONTS = "/var/cache/fontconfig/7ef2298fde41cc6eeb7af42e48b7d293-le64.cache-9";
+  const ICONS = "/usr/share/icons/hicolor/icon-theme.cache";
+
+  it("keeps the user's font and icon caches when installed fonts or apps and the update both rewrote them", () => {
+    const base = { [FONTS]: cache("old"), [ICONS]: cache("old") };
+    const target = {
+      [FONTS]: cache("image"),
+      [ICONS]: cache("image"),
+      "/usr/bin/new": file("new"),
+    };
+    const current = {
+      [FONTS]: cache("user"),
+      [ICONS]: cache("user"),
+      "/opt/app": file("installed"),
+    };
+    const plan = migrationPlan(base, target, current);
+    expect(plan).toEqual({
+      copy: ["/usr/bin/new"],
+      remove: [],
+      directories: [],
+      ldconfig: false,
+      appIndex: false,
+    });
+    verifyMigration(current, target, { ...current, "/usr/bin/new": file("new") }, plan);
+    // An update refused for these before is offered again.
+    expect(MERGE_RULES).toBeGreaterThanOrEqual(3);
+  });
+
+  it("still takes the image's cache where the computer left it alone", () => {
+    const plan = migrationPlan(
+      { [FONTS]: cache("old") },
+      { [FONTS]: cache("image") },
+      {
+        [FONTS]: cache("old"),
+      },
+    );
+    expect(plan.copy).toEqual([FONTS]);
+  });
+
+  it("refuses a cache that isn't a plain file on every side, and other caches", () => {
+    const link: Manifest[string] = ["l", 0o777, 0, 0, "/elsewhere"];
+    expect(() =>
+      migrationPlan({ [FONTS]: cache("old") }, { [FONTS]: cache("image") }, { [FONTS]: link }),
+    ).toThrow(SystemMigrationConflict);
+    const other = "/var/cache/apt/pkgcache.bin";
+    expect(() =>
+      migrationPlan(
+        { [other]: cache("old") },
+        { [other]: cache("image") },
+        { [other]: cache("user") },
       ),
     ).toThrow(SystemMigrationConflict);
   });

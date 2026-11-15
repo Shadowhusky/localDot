@@ -24,14 +24,20 @@ export class SystemMigrationConflict extends Error {
 }
 
 // How much a migration settles by itself, raised each time a file both sides changed stops being a
-// conflict (2: the dock's index of apps). An update refused under fewer is tried again.
-export const MERGE_RULES = 2;
+// conflict (2: the dock's index of apps; 3: font and icon caches). An update refused under fewer is
+// tried again.
+export const MERGE_RULES = 3;
 
 // ldconfig's private record of the libraries it has read, keyed by each file's identity. It checks
 // every entry against the file it names and reads changed files again, so the user's copy stays.
 export const LIBRARY_ID_CACHE = "/var/cache/ldconfig/aux-cache";
 // The loader's index of the libraries present, which ldconfig derives from them alone.
 export const LIBRARY_CACHE = "/etc/ld.so.cache";
+// Caches whose readers check each against the folder it describes and read the folder itself when
+// it no longer matches: fontconfig's of each font folder, and GTK's of each icon theme. Installing
+// fonts or apps rewrites them, so the user's copy stays.
+const CHECKED_CACHE =
+  /^\/var\/cache\/fontconfig\/[^/]+$|^\/usr\/share\/icons\/[^/]+\/icon-theme\.cache$/;
 // The dock's index of the apps installed, which bamfdaemon's own package trigger writes from the
 // apps present alone, as root.
 export const APP_INDEX = "/usr/share/applications/bamf-2.index";
@@ -62,6 +68,11 @@ export function migrationPlan(base: Manifest, target: Manifest, current: Manifes
       // stay user-owned without losing new children. File/type conflicts must be resolved first.
       if (before?.[0] === "d" && next?.[0] === "d" && now?.[0] === "d") continue;
       if (path === LIBRARY_ID_CACHE) continue;
+      if (
+        CHECKED_CACHE.test(path) &&
+        [before, next, now].every((entry) => entry === undefined || entry[0] === "f")
+      )
+        continue;
       // Neither side's index lists the other's libraries; rebuild it from both once they are in.
       const files = [before, next, now].every((entry) => entry?.[0] === "f");
       if (path === LIBRARY_CACHE && files) ldconfig = true;
