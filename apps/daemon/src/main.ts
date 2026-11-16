@@ -160,9 +160,7 @@ if (serviceIdentity) retainManagedDaemonLease(process.env, serviceIdentity);
 let serviceReadiness: ManagedServiceReadiness | undefined;
 const releaseLock = lockHome(join(home, "daemon.lock"));
 process.on("exit", releaseLock);
-const shutdown: { name: string; stop: () => void | Promise<void> }[] = [
-  { name: "busy watch", stop: watchBusy() },
-];
+const shutdown: { name: string; stop: () => void | Promise<void> }[] = [];
 let shuttingDown = false;
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
@@ -1171,6 +1169,8 @@ const app = createApp({
 });
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
+  // Only once it serves: before then no page is waiting on it, however long starting up takes.
+  shutdown.push({ name: "busy watch", stop: watchBusy() });
   remoteAccess.start();
   console.log(`localdot daemon on http://127.0.0.1:${port} (token in ${tokenFile})`);
   if (!serviceIdentity) {
