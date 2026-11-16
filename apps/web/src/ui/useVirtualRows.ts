@@ -1,6 +1,11 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react";
 
+// Steps are kept whole up to this many. A row windowed in as the reader scrolls is measured only
+// once drawn, and putting back the rows its true height moved is a scroll of the list's own, which
+// on iOS catches a finger's glide mid-move.
+export const WHOLE_STEPS = 200;
+
 // Where the rows a list held begin in it now: the ones added before them are an earlier page.
 function heldFrom(held: readonly string[], now: readonly string[]): number {
   const at = new Map(now.map((key, index) => [key, index]));
@@ -13,7 +18,8 @@ function heldFrom(held: readonly string[], now: readonly string[]): number {
 
 // Lists can live in a sheet, rail or page. Observe their actual scroll parent instead of
 // introducing a nested scroller. Small lists retain their normal layout and keyboard behavior.
-// An anchored list's scroller keeps the reader's place itself (useFollowScroll).
+// An anchored list's scroller keeps the reader's place itself (useFollowScroll). Lists are windowed
+// only past `beyond` rows.
 // A row the window draws again as the reader scrolls gets [data-returned], and so does a row of an
 // earlier page: both were there before the reader looked, so they and what they hold stand as they
 // are, where a row just added arrives.
@@ -21,9 +27,9 @@ export function useVirtualRows(
   list: RefObject<HTMLElement | null>,
   keys: readonly string[],
   estimateSize: (index: number) => number,
-  { anchored = false }: { anchored?: boolean } = {},
+  { anchored = false, beyond = 30 }: { anchored?: boolean; beyond?: number } = {},
 ) {
-  const enabled = keys.length > 30;
+  const enabled = keys.length > beyond;
   const [scroll, setScroll] = useState<HTMLElement | null>(null);
   const [margin, setMargin] = useState(0);
   const [located, setLocated] = useState(false);
