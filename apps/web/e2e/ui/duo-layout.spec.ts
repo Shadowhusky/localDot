@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect, finger, runAt, test } from "./harness.ts";
 
 // The iPhone Duo open, in points: held upright, the conversation takes the whole width and the list
@@ -107,5 +108,58 @@ test.describe("Studio on the Duo held sideways", () => {
     await expand.click();
     await page.keyboard.press("Escape");
     await expect(rail).not.toHaveAttribute("data-expanded");
+  });
+});
+
+// What Safari reports as its keyboard comes up: the visible part of the page, and how far it pans.
+const keyboard = (page: Page, height: number, offsetTop = 0) =>
+  page.evaluate(
+    ({ height, offsetTop }) => {
+      const view = window.visualViewport;
+      if (!view) throw new Error("Visual viewport required");
+      Object.defineProperty(view, "height", { configurable: true, value: height });
+      Object.defineProperty(view, "offsetTop", { configurable: true, value: offsetTop });
+      view.dispatchEvent(new Event("resize"));
+      view.dispatchEvent(new Event("scroll"));
+    },
+    { height, offsetTop },
+  );
+
+test.describe("Studio on the Duo held sideways, typing", () => {
+  test.use({ viewport: SIDEWAYS, viewStyle: "studio" });
+
+  test("keeps the composer on the keyboard and the top bar in view, however far Safari pans", async ({
+    page,
+    ui,
+  }) => {
+    await ui.open("running");
+    const app = page.locator(".app");
+    await expect(app).not.toHaveAttribute("data-entering");
+    const field = page.getByRole("textbox", { name: "Message", exact: true }).first();
+    const toolbar = page.locator(".rail-chat .thread-toolbar");
+    const bar = page.locator(".app > .bar");
+    const gap =
+      SIDEWAYS.height - (await toolbar.evaluate((node) => node.getBoundingClientRect().bottom));
+    await field.focus();
+    for (const offset of [0, 150, 260]) {
+      await keyboard(page, SIDEWAYS.height - 260, offset);
+      await expect(app).toHaveAttribute("data-keyboard-up");
+      await expect
+        .poll(async () => {
+          const box = await toolbar.boundingBox();
+          return Math.round((box?.y ?? 0) + (box?.height ?? 0));
+        })
+        .toBe(SIDEWAYS.height - 260 + offset - Math.round(gap));
+      await expect.poll(async () => Math.round((await bar.boundingBox())?.y ?? -1)).toBe(offset);
+      // The conversations go with the page, not under the keyboard.
+      const rail = await page.locator(".sessions").boundingBox();
+      expect(Math.round(rail?.y ?? -1)).toBe(offset);
+      expect(Math.round(rail?.height ?? 0)).toBe(SIDEWAYS.height - 260);
+      await expect(field).toBeFocused();
+    }
+    await field.blur();
+    await keyboard(page, SIDEWAYS.height);
+    await expect(app).not.toHaveAttribute("data-keyboard-up");
+    await expect.poll(async () => Math.round((await bar.boundingBox())?.y ?? -1)).toBe(0);
   });
 });

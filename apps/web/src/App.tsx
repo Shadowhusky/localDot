@@ -2422,7 +2422,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         : (session.model.title ?? NEW_TITLE);
   const page = useRef<HTMLDivElement>(null);
   useViewportFit(page, !stack);
-  useChatFit(page, stack);
+  // Held sideways, the open iPhone Duo's keyboard covers the foot of Studio's laptop layout: the
+  // page follows what the keyboard leaves in view, as Chat does.
+  useChatFit(page, stack || railOverlays);
   // The top bar's parts, kept from one render to the next so the bar draws only when they change.
   const saved = settings.saved;
   const brand = useMemo(

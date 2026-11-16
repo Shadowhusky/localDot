@@ -444,6 +444,11 @@
     background-color: var(--color-void);
     box-shadow: var(--shadow-overlay);
   }
+
+  /* With the page, which follows the part of the screen the keyboard leaves (app.css). */
+  .app > .watch > :is(.sessions, .sessions-scrim) {
+    position: absolute;
+  }
 }
 
 .sessions-scrim {

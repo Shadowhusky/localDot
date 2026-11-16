@@ -8,6 +8,9 @@
 @custom-media --phone (width < 700px),
   (pointer: coarse) and (orientation: landscape) and (height < 500px);
 @custom-media --phone-landscape (pointer: coarse) and (orientation: landscape) and (height < 500px);
+@custom-media --touch-sideways (pointer: coarse) and (orientation: landscape) and (
+    900px <= width < 1100px
+  );
 
 /* The visible viewport, written on .app as the keyboard and Safari's toolbars move and read only by
    .app: not inherited, so a change restyles .app rather than the whole page. */
@@ -45,6 +48,20 @@
     env(safe-area-inset-bottom) 0;
   overflow: clip;
   background-color: var(--color-void);
+}
+
+/* A touch screen held sideways at a laptop's width, as the iPhone Duo open: the page follows the part
+   of the screen the keyboard leaves (chat-fit.ts), its top bar at the top and the composer on the
+   keyboard, rather than Safari panning it up and back as the field takes the focus. At rest it is
+   the whole screen. */
+@media (--touch-sideways) {
+  .app:not([data-stack]) {
+    position: fixed;
+    top: var(--_visible-top, 0px);
+    right: 0;
+    left: 0;
+    height: var(--_visible-h, 100dvh);
+  }
 }
 
 .watch {
