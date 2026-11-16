@@ -1,4 +1,4 @@
-import { composer, expect, runAt, test } from "./harness.ts";
+import { composer, expect, finger, runAt, test } from "./harness.ts";
 
 runAt("c39", "w39");
 test("minimize gives the conversation room and restores the same computer", async ({
@@ -20,7 +20,15 @@ test("minimize gives the conversation room and restores the same computer", asyn
   if (!bottom) throw new Error("Composer is not visible");
   expect(bottom.y + bottom.height).toBeLessThanOrEqual(844);
   await expect(page.getByRole("menu")).toBeHidden();
-  await expect(page.locator(".stage-col")).toHaveCSS("max-height", "0px");
+  // Still live, small in a corner, and the conversation's text starts below it.
+  await expect(stage).toHaveAttribute("data-floating");
+  const tucked = page.getByRole("button", { name: "Show screen", exact: true });
+  await expect.poll(async () => (await tucked.boundingBox())?.width ?? 999).toBeLessThan(390 / 2);
+  await expect(async () => {
+    const corner = await tucked.boundingBox();
+    const text = await page.locator(".rail-chat .thread-scroll").boundingBox();
+    expect(text?.y ?? 0).toBeGreaterThanOrEqual((corner?.y ?? 0) + (corner?.height ?? 0));
+  }).toPass();
   await page.screenshot({ path: test.info().outputPath("conversation-expanded.png") });
   await page.getByRole("button", { name: "Show screen", exact: true }).click();
   await expect.poll(() => chat.evaluate((n) => n.clientHeight)).toBe(before);
@@ -55,7 +63,7 @@ test("Replay opens its picture when Watch is minimized and keeps the live prefer
     .getByRole("button", { name: "Watch" })
     .click();
   await expect(page.getByRole("button", { name: "Show screen", exact: true })).toBeVisible();
-  await expect(page.locator(".watch > .stage-col")).toHaveCSS("max-height", "0px");
+  await expect(page.locator(".app")).toHaveAttribute("data-screen-minimized");
   // Reloading a replay link must also ignore the saved live-screen preference.
   await page.goto(`${fixture.origin}/?replay=${fixture.seeded[0]}&t=20000`);
   await expect(page.locator(".replay-opening")).toBeHidden();
@@ -117,4 +125,67 @@ test("the island never runs under the buttons in its corners, at any phone width
       clip: { x: 0, y: 0, width, height: 120 },
     });
   }
+});
+
+test("reading back through the conversation tucks the screen into a corner, clear of the text", async ({
+  page,
+  ui,
+}) => {
+  await ui.open("running");
+  const app = page.locator(".app");
+  await expect(app).not.toHaveAttribute("data-entering");
+  const chat = page.locator(".rail-chat");
+  const thread = chat.locator(".thread-scroll");
+  const before = await chat.evaluate((n) => n.clientHeight);
+  const area = await thread.boundingBox();
+  if (!area) throw new Error("No conversation");
+  const x = area.x + area.width / 2;
+  const y = area.y + 40;
+  // Once the screen has come through the curtain; there is nothing to tuck away before.
+  await expect(async () => {
+    if (test.info().project.name.startsWith("c")) await (await finger(page)).drag(x, y, x, y + 120);
+    else
+      await thread.evaluate((element) =>
+        element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true })),
+      );
+    await expect(app).toHaveAttribute("data-screen-minimized", { timeout: 1_000 });
+  }).toPass();
+  await expect.poll(() => chat.evaluate((n) => n.clientHeight)).toBeGreaterThan(before + 200);
+
+  // In the top corner under the island, and the conversation's text starts below it.
+  const tucked = page.getByRole("button", { name: "Show screen", exact: true });
+  const width = page.viewportSize()?.width ?? 0;
+  const height = page.viewportSize()?.height ?? 0;
+  const corner = await tucked.boundingBox();
+  const island = await page.locator(".island").boundingBox();
+  if (!corner || !island) throw new Error("No picture");
+  expect(corner.width).toBeLessThan(width / 2);
+  expect(corner.x + corner.width).toBeGreaterThan(width - 24);
+  expect(corner.y).toBeGreaterThanOrEqual(island.y + island.height);
+  expect((await thread.boundingBox())?.y ?? 0).toBeGreaterThanOrEqual(corner.y + corner.height);
+
+  // A finger takes it to the corner it is let go nearest, and the text makes room there instead.
+  await (await finger(page)).drag(
+    corner.x + corner.width / 2,
+    corner.y + corner.height / 2,
+    80,
+    height - 220,
+  );
+  await expect(app).toHaveAttribute("data-pip", "bottom-left");
+  await expect(app).toHaveAttribute("data-screen-minimized");
+  await expect.poll(async () => Math.round((await tucked.boundingBox())?.x ?? 0)).toBe(12);
+  const low = await tucked.boundingBox();
+  const foot = await chat.locator(".thread-foot").boundingBox();
+  const text = await thread.boundingBox();
+  if (!low || !foot || !text) throw new Error("No picture");
+  expect(low.y + low.height).toBeLessThanOrEqual(foot.y);
+  expect(text.y + text.height).toBeLessThanOrEqual(low.y);
+  expect(text.y).toBeLessThan(corner.y + corner.height);
+  await page.screenshot({ path: test.info().outputPath("tucked-low.png") });
+
+  // A tap brings it back where it was.
+  await tucked.click();
+  await expect(app).not.toHaveAttribute("data-screen-minimized");
+  await expect(app).not.toHaveAttribute("data-pip");
+  await expect.poll(() => chat.evaluate((n) => n.clientHeight)).toBe(before);
 });

@@ -172,9 +172,9 @@ for (const { fps, task, glass, full } of [
   });
 }
 
-test("stage cost: a minimised phone screen", async ({ page, ui }) => {
+test("stage cost: a phone screen tucked into a corner", async ({ page, ui }) => {
   test.setTimeout(150_000);
-  test.skip(test.info().project.name !== "c39", "The phone's screen folds away");
+  test.skip(test.info().project.name !== "c39", "The phone's screen tucks away");
   await installProbes(page);
   await streamDesktop(page);
   const fixture = await ui.open("running");
@@ -186,7 +186,7 @@ test("stage cost: a minimised phone screen", async ({ page, ui }) => {
   await cdp.send("Performance.enable");
   await page.getByRole("button", { name: "More", exact: true }).click();
   await page.getByRole("menuitem", { name: "Minimize screen", exact: true }).click();
-  await expect(page.locator(".stage-col")).toHaveCSS("max-height", "0px");
+  await expect(page.getByRole("button", { name: "Show screen", exact: true })).toBeVisible();
   await page.waitForTimeout(3_000);
   const from = { page: await mark(page, cdp), stage: await stage() };
   await page.waitForTimeout(WINDOW_MS / 2);
@@ -198,7 +198,7 @@ test("stage cost: a minimised phone screen", async ({ page, ui }) => {
   const result = {
     spec: "stage",
     project: test.info().project.name,
-    name: "a running task, its phone screen minimised",
+    name: "a running task, its phone screen tucked into a corner",
     looksPerS: rate("looks"),
     rendersPerS: rate("renders"),
     uploadsPerS: rate("uploads"),
@@ -215,6 +215,5 @@ test("stage cost: a minimised phone screen", async ({ page, ui }) => {
   await expect.poll(async () => (await stage()).uploads - shown.uploads).toBeGreaterThan(10);
   await cdp.detach();
   if (process.env.QA_UI_DIR) return;
-  expect(result.uploadsPerS, "a folded screen takes no frames").toBeLessThan(1);
-  expect(result.looksPerS, "and draws nothing").toBeLessThan(1);
+  expect(result.uploadsPerS, "a tucked screen plays on").toBeGreaterThan(1);
 });
