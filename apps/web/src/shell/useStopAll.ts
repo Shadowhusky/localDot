@@ -1,5 +1,5 @@
-import type { StopAllOutcome } from "@localdot/protocol";
-import { useCallback, useMemo, useRef, useState } from "react";
+import type { RoutineListReply, StopAllOutcome } from "@localdot/protocol";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { locale, t } from "../i18n/index.ts";
 import type { RoutinesApi } from "../routines/routines-api.ts";
 import { showToast } from "../ui/Toast.tsx";
@@ -27,6 +27,52 @@ export function stoppedText(outcome: StopAllOutcome): string {
   return t`${list}.`;
 }
 
+// Turns back on the routines Stop everything paused, and says how that went.
+function continueRoutines(
+  api: Pick<RoutinesApi, "resume">,
+  toast: (options: ToastOptions) => void,
+): ToastOptions["action"] {
+  return {
+    label: t`Continue routines`,
+    onAction: () =>
+      void api
+        .resume()
+        .then(() => toast({ id: TOAST, title: t`Routines are running again` }))
+        .catch(() =>
+          toast({
+            id: TOAST,
+            title: t`Routines couldn't be turned back on`,
+            tone: "danger",
+          }),
+        ),
+  };
+}
+
+// Routines Stop everything paused stay paused through an update or a new page, where its own toast
+// is long gone: the first list read here says so once, with the way to continue them.
+export function useStoppedRoutinesNotice(
+  reply: RoutineListReply | undefined,
+  api: Pick<RoutinesApi, "resume">,
+  toast: (options: ToastOptions) => void = showToast,
+): void {
+  const told = useRef(false);
+  useEffect(() => {
+    if (!reply || told.current) return;
+    told.current = true;
+    const paused = reply.routines.filter((routine) => routine.pausedReason === "stop_all").length;
+    if (!paused) return;
+    toast({
+      id: TOAST,
+      title:
+        paused === 1
+          ? t`1 routine is still paused`
+          : t`${paused.toLocaleString(locale())} routines are still paused`,
+      description: t`Stop everything paused them. They run again once you continue them.`,
+      action: continueRoutines(api, toast),
+    });
+  }, [reply, api, toast]);
+}
+
 export interface StopAll {
   run(): Promise<void>;
   running: boolean;
@@ -51,24 +97,7 @@ export function useStopAll(
           id: TOAST,
           title: t`Everything stopped`,
           description: stoppedText(outcome),
-          ...(outcome.routinesPaused > 0
-            ? {
-                action: {
-                  label: t`Continue routines`,
-                  onAction: () =>
-                    void api
-                      .resume()
-                      .then(() => toast({ id: TOAST, title: t`Routines are running again` }))
-                      .catch(() =>
-                        toast({
-                          id: TOAST,
-                          title: t`Routines couldn't be turned back on`,
-                          tone: "danger",
-                        }),
-                      ),
-                },
-              }
-            : {}),
+          ...(outcome.routinesPaused > 0 ? { action: continueRoutines(api, toast) } : {}),
         });
       } catch {
         toast({

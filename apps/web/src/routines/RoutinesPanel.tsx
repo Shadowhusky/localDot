@@ -2,6 +2,7 @@ import type { Routine } from "@localdot/protocol";
 import { memo, useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import { t } from "../i18n/index.ts";
+import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
 import { Group } from "../ui/Group.tsx";
@@ -39,6 +40,9 @@ export const RoutinesPanel = memo(function RoutinesPanel({
   const list = (routines.reply?.routines ?? []).filter((routine) => routine.state !== "proposed");
   const now = Date.now();
   const active = list.filter((routine) => routine.state === "active").length;
+  // Stop everything pauses every routine until they are turned back on, which an update or a new
+  // page must not hide.
+  const stopped = list.filter((routine) => routine.pausedReason === "stop_all").length;
   const login = routines.reply?.startAtLogin;
   return (
     <div className="routines-panel">
@@ -103,6 +107,28 @@ export const RoutinesPanel = memo(function RoutinesPanel({
                     onCheckedChange={(on) => void routines.act((api) => api.setStartAtLogin(on))}
                   />
                 </Group>
+              )}
+              {stopped > 0 && (
+                <Banner
+                  tone="attention"
+                  title={
+                    stopped === 1
+                      ? t`Stop everything paused 1 routine`
+                      : t`Stop everything paused ${stopped.toLocaleString()} routines`
+                  }
+                  actions={
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabledReason={routines.busy ? t`Saving…` : undefined}
+                      onClick={() => void routines.act((api) => api.resume())}
+                    >
+                      {t`Continue routines`}
+                    </Button>
+                  }
+                >
+                  {t`They run again on schedule once you continue them.`}
+                </Banner>
               )}
               {routines.problem && (
                 <p className="routines-problem" role="alert">
