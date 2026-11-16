@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "08b441aee2b6caa8a05d6afafab1d93f2d9ce42beb2696c403dd190649f8430c",
+  "inputSha256": "9ebd32bc760f71365216f8d6da449aa9ccb115bffadb4835541e2bd95471a335",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -716,7 +716,7 @@
     "apps/daemon/src/exports/chrome.ts": "9431e7bbef7038255706ae5eaaa4a49473a43034532720d75791ed9a5386addd",
     "apps/daemon/src/exports/jobs.test.ts": "565a88692604c263ad1f84a3501ef84344370f59d55c5bd049082008dd744753",
     "apps/daemon/src/exports/jobs.ts": "ba7beea443ec3bf6646421fd8fb362c4fa8b1a1e40427174aa7a43c78afe25fd",
-    "apps/daemon/src/exports/routes.test.ts": "f028df7dab2a259a00ad04e4a650bb1c35310fbd04c3b18df984fa15d4cd67ce",
+    "apps/daemon/src/exports/routes.test.ts": "88904227d5e7d4905aa97c07171cc430608a92f1e70c6488679dc2f57abcbd4c",
     "apps/daemon/src/exports/routes.ts": "d8e4907c98c278ddc2239dbc3a06586415173fbbbdcdfdba9bd051ef0aa725bc",
     "apps/daemon/src/exports/store.test.ts": "e796f2bb01a302ca0aa1b14ffb412c4fafbe54a43f5cae3fe5f530d31b592a3c",
     "apps/daemon/src/exports/store.ts": "9579e5a4f0535cd9078722cd3a8585b992dee25fb066a2fe221c7f4ece38fe3e",
@@ -1307,7 +1307,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "e892c02385c4d6270def0fa12729485ac481b4c653d2fa7c5ace56be21710ebc",
+  "reportSha256": "ee5c7c3b514d8805da3b979a061428b0b7ad5efb325a2ebf0724a8e758c51571",
   "exit": {
     "code": 0,
     "signal": null
