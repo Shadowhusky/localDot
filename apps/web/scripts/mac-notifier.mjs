@@ -28,6 +28,7 @@ export function buildMacNotifier(webDir, outDir) {
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>LSUIElement</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>localDot brings its tab that is already open to the front when you click one of its notifications.</string>
 <key>LSMinimumSystemVersion</key><string>11.0</string>
 </dict></plist>`,
   );
