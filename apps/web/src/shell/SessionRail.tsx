@@ -1,4 +1,4 @@
-import type { ConversationEntry } from "@localdot/protocol";
+import type { ConversationEntry, TagId } from "@localdot/protocol";
 import {
   type KeyboardEvent,
   type MouseEvent,
@@ -14,12 +14,14 @@ import {
 import {
   arrangeConversations,
   type ConversationRow,
+  carries,
   conversationRows,
   type LiveFacts,
   type Organize,
   organizeConversation,
   renameConversation,
   STATUS_LABEL,
+  tagsInUse,
   useRecentConversations,
   whenLabel,
 } from "../agent/conversation-list.ts";
@@ -54,6 +56,7 @@ import { DeleteConversationDialog } from "./DeleteConversationDialog.tsx";
 import type { Layout } from "./layout.ts";
 import { RailSearch } from "./RailSearch.tsx";
 import { switchConversation } from "./switch-motion.ts";
+import { TagFilter } from "./TagFilter.tsx";
 import { useConversationSelection } from "./useConversationSelection.ts";
 import { DOCK_POINTER, useDockMagnify } from "./useDockMagnify.ts";
 import "../ui/conversations-layout.css";
@@ -80,6 +83,8 @@ export interface SessionRailProps {
   onDeleted?(sessions: readonly string[]): void;
   // The overview of every conversation: whether it is on show, and what pressing it does.
   overview?: { open: boolean; onPress(): void };
+  // Has dot sort the conversations into tags.
+  onSortTags?(): void;
 }
 
 // "Plan the trip, blue tag, working, on screen, 2 min": what a screen reader calls a row.
@@ -134,6 +139,7 @@ export const SessionRail = memo(function SessionRail({
   newReason,
   onDeleted,
   overview,
+  onSortTags,
 }: SessionRailProps) {
   const recent = useRecentConversations(api, true);
   const [query, setQuery] = useState("");
@@ -144,8 +150,11 @@ export const SessionRail = memo(function SessionRail({
     expanded && (searching || (archiveOpen && recent.archivedCount > 0)),
     "archived",
   );
-  // Collapsed, the rail has no room for what a search finds, so it lets the search go.
+  // The tag the names are filtered by, kept only while a conversation still carries it.
+  const [tag, setTag] = useState<TagId | null>(null);
+  // Collapsed, the rail has no room for what a search finds or for the tags, so it lets them go.
   if (!expanded && query) setQuery("");
+  if (!expanded && tag) setTag(null);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), AGE_TICK_MS);
@@ -172,14 +181,20 @@ export const SessionRail = memo(function SessionRail({
         : was,
     );
   }, [recent.entries]);
-  const rows = useMemo(
-    () => arrangeConversations(withNames(conversationRows(recent.entries, facts), names)),
+  const all = useMemo(
+    () => withNames(conversationRows(recent.entries, facts), names),
     [recent.entries, facts, names],
   );
-  const archived = useMemo(
-    () => withNames(conversationRows(archive.entries, facts), names),
-    [archive.entries, facts, names],
+  const tags = useMemo(() => (expanded ? tagsInUse(all) : []), [expanded, all]);
+  const tagged = tag && tags.some((each) => each.id === tag) ? tag : null;
+  const rows = useMemo(
+    () => arrangeConversations(tagged ? all.filter((row) => carries(row.entry, tagged)) : all),
+    [all, tagged],
   );
+  const archived = useMemo(() => {
+    const rows = withNames(conversationRows(archive.entries, facts), names);
+    return tagged ? rows.filter((row) => carries(row.entry, tagged)) : rows;
+  }, [archive.entries, facts, names, tagged]);
   const content = useTaskSearch(api, searching ? query : "");
   const found = useMemo(
     () =>
@@ -476,6 +491,14 @@ export const SessionRail = memo(function SessionRail({
         inputRef={searchField}
         resultsId={resultsId}
       />
+      {expanded && !selection.selecting && (
+        <TagFilter
+          tags={tags}
+          tagged={tagged}
+          onTag={setTag}
+          {...(onSortTags && all.length > 0 ? { onSort: onSortTags } : {})}
+        />
+      )}
       <ScrollArea
         ref={scroller}
         id={resultsId}

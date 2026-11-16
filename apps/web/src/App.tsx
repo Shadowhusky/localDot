@@ -4008,6 +4008,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   newReason={newConversation.reason}
                   onDeleted={deletedFromRail}
                   overview={railOverview}
+                  onSortTags={sortTags}
                 />
               )}
               {railOver && (
