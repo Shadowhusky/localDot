@@ -2060,6 +2060,39 @@
     display: none;
   }
 
+  /* Held upright between a phone and a tablet (the iPhone Duo open): the conversation keeps the
+     whole width and the list slides over it from the leading edge, a raised layer over the dimmed
+     conversation, as an iPad's sidebar does held upright. The list leaves the way it came. */
+  .phone-stack[data-slide-over] > .phone-chat,
+  .phone-stack[data-slide-over][data-list-hidden] > .phone-chat {
+    left: 0;
+  }
+
+  .phone-stack[data-slide-over] > .phone-list {
+    z-index: 3;
+    width: min(var(--_split), calc(100% - var(--spacing) * 18));
+    border-right: 0;
+    box-shadow: var(--shadow-overlay);
+  }
+
+  .phone-stack[data-slide-over][data-list-hidden] > .phone-list {
+    translate: calc(-100% - var(--spacing) * 8) 0;
+  }
+
+  .phone-scrim {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    background-color: var(--color-scrim);
+    opacity: 1;
+    transition: opacity var(--dur-default) var(--ease-standard);
+  }
+
+  .phone-stack[data-list-hidden] > .phone-scrim {
+    opacity: 0;
+    pointer-events: none;
+  }
+
   /* dot's long replies, as a messenger's, take most of it; the user's bubbles a little less. */
   .phone-stack[data-split]
     .phone-thread

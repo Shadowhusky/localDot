@@ -222,7 +222,7 @@ import {
 } from "./shell/island.ts";
 import { LocalDotSwitcher } from "./shell/LocalDotSwitcher.tsx";
 import { LookChooser } from "./shell/LookChooser.tsx";
-import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
+import { SLIDE_OVER, useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
 import { lazyScreen } from "./shell/lazy-screen.tsx";
 import { forgetLocalDot, useOtherLocalDots } from "./shell/localdot-handoff.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
@@ -979,7 +979,10 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const viewStyle = guest ? { ...chosenStyle, value: "chat" as const } : chosenStyle;
   // Chat: a stack of the list, the conversation and the computer, opened out from tablet width up.
   const stack = viewStyle.value === "chat";
-  const split = stack && layout !== "phone";
+  const slideOverWidth = useMediaQuery(SLIDE_OVER);
+  const split = stack && (layout !== "phone" || slideOverWidth);
+  // The list over the conversation rather than beside it.
+  const slideOver = split && slideOverWidth;
   // On a wide screen Replay takes the whole page, under the top bar.
   const wideReplay = stack && layout !== "phone" && !!replayId;
   // Studio's phone layout.
@@ -2668,6 +2671,12 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const monitorButton = useRef<HTMLButtonElement>(null);
   const tuck = useDotTuck({ showDot, flyer, more: moreButton, look: shown.look });
   const [listHidden, setListHidden] = useState(false);
+  // Slid over, the list rests out of the way; beside the conversation it rests in sight.
+  useEffect(() => {
+    setListHidden(slideOver);
+  }, [slideOver]);
+  const hideList = useCallback(() => setListHidden(true), []);
+  const showList = useCallback(() => setListHidden(false), []);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [dotMenu, setDotMenu] = useState(false);
   const [dressing, setDressing] = useState<ConversationEntry | null>(null);
@@ -3569,6 +3578,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       nav={nav}
       split={split}
       listHidden={listHidden}
+      slideOver={slideOver}
+      onHideList={hideList}
+      onShowList={showList}
       flyer={flyer}
       flightFrom={flightFrom}
       showDot={showDot.value}
@@ -3587,10 +3599,12 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           onOpen={(row, from) => {
             flightFrom.current = from;
             pickConversation(row.entry.sessionId, row.entry.sessions);
+            if (slideOver) hideList();
           }}
           onNew={() => {
             if (fresh) nav.show("new");
             else newConversation.run();
+            if (slideOver) hideList();
           }}
           newReason={conversationReason}
           onReplay={() => selectReplay(LIBRARY)}

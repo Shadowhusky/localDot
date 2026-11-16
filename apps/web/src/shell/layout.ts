@@ -10,6 +10,9 @@ export type Layout = "wide" | "laptop" | "tablet" | "phone";
 export const LANDSCAPE_PHONE =
   "(pointer: coarse) and (orientation: landscape) and (height < 500px)";
 export const HANDHELD = `(width < 700px), ${LANDSCAPE_PHONE}`;
+// Held upright, a screen too wide for a phone's stack and too narrow for a list beside the
+// conversation, as the iPhone Duo open: the list slides over the conversation instead.
+export const SLIDE_OVER = "(600px <= width < 700px) and (orientation: portrait)";
 
 export function useLayout(): Layout {
   const wide = useMediaQuery("(width >= 1880px)");
