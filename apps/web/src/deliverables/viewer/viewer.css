@@ -1011,8 +1011,125 @@ div.viewer-json-row {
   flex-shrink: 0;
 }
 
+/* Marking up a picture: what to draw with and in which colour above it, the picture shown whole
+   with the drawing over it, and Cancel or Add to message under it. */
+.markup-bar {
+  justify-content: flex-start;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.markup-group {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: calc(var(--spacing) * 1);
+}
+
+.markup-group + .markup-group {
+  padding-left: calc(var(--spacing) * 3);
+  border-left: 1px solid var(--color-hairline);
+}
+
+/* An ink is its colour's dot, ringed while it is the one drawing. */
+.markup-ink.ui-button {
+  width: calc(var(--spacing) * 8);
+  min-width: 0;
+  height: calc(var(--spacing) * 8);
+  padding: 0;
+  border-radius: var(--radius-full);
+}
+
+.markup-ink-swatch {
+  --_swatch: var(--color-tag-red);
+  display: block;
+  width: calc(var(--spacing) * 5);
+  height: calc(var(--spacing) * 5);
+  border-radius: var(--radius-full);
+  background-color: var(--_swatch);
+  box-shadow: 0 0 0 0 var(--color-fg-1);
+  transition: box-shadow var(--dur-snappy) var(--ease-spring);
+}
+
+.markup-ink[aria-pressed="true"] .markup-ink-swatch {
+  box-shadow:
+    0 0 0 2px var(--color-overlay),
+    0 0 0 4px var(--color-fg-1);
+}
+
+.markup-ink[data-ink="yellow"] .markup-ink-swatch {
+  --_swatch: var(--color-tag-yellow);
+}
+
+.markup-ink[data-ink="green"] .markup-ink-swatch {
+  --_swatch: var(--color-tag-green);
+}
+
+.markup-ink[data-ink="blue"] .markup-ink-swatch {
+  --_swatch: var(--color-tag-blue);
+}
+
+.markup-ink[data-ink="purple"] .markup-ink-swatch {
+  --_swatch: var(--color-tag-purple);
+}
+
+.markup-stage {
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.markup-picture,
+.markup-canvas {
+  position: absolute;
+}
+
+.markup-picture {
+  opacity: 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.markup-picture[data-ready] {
+  opacity: 1;
+}
+
+.markup-canvas {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.markup-note {
+  margin: auto;
+  color: var(--color-fg-3);
+}
+
+.markup-foot {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3) calc(var(--spacing) * 6)
+    calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-hairline);
+}
+
+.markup-foot-gap {
+  flex: 1;
+}
+
+.markup-problem {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--color-danger-fg);
+}
+
 @media (--phone) {
   .viewer-bar {
+    padding-inline: calc(var(--spacing) * 4);
+  }
+
+  .markup-foot {
     padding-inline: calc(var(--spacing) * 4);
   }
 

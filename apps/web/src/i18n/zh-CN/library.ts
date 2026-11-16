@@ -682,4 +682,21 @@ export const library = {
   "Stop {0}": "停止“{0}”",
   "On this Mac": "在这台 Mac 上",
   "Close {0} on this Mac": "在这台 Mac 上关闭“{0}”",
+  "Mark up": "\u6807\u8bb0",
+  Pen: "\u7b14",
+  Arrow: "\u7bad\u5934",
+  Box: "\u65b9\u6846",
+  "Draw with": "\u7ed8\u5236\u5de5\u5177",
+  "Drawing over {0}": "\u5728\u201c{0}\u201d\u4e0a\u7ed8\u5236",
+  "Nothing to undo": "\u6ca1\u6709\u53ef\u64a4\u9500\u7684\u5185\u5bb9",
+  Redo: "\u91cd\u505a",
+  "Nothing to redo": "\u6ca1\u6709\u53ef\u91cd\u505a\u7684\u5185\u5bb9",
+  "Draw on the picture first": "\u8bf7\u5148\u5728\u56fe\u7247\u4e0a\u7ed8\u5236",
+  "Add to message": "\u6dfb\u52a0\u5230\u6d88\u606f",
+  "This picture can't be marked up here.":
+    "\u8fd9\u5f20\u56fe\u7247\u65e0\u6cd5\u5728\u8fd9\u91cc\u6807\u8bb0\u3002",
+  "The marked-up picture is attached to your message.":
+    "\u6807\u8bb0\u540e\u7684\u56fe\u7247\u5df2\u9644\u52a0\u5230\u4f60\u7684\u6d88\u606f\u3002",
+  "Open a conversation to attach it.":
+    "\u8bf7\u5148\u6253\u5f00\u4e00\u4e2a\u5bf9\u8bdd\u518d\u9644\u52a0\u3002",
 } satisfies Catalog;

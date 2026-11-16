@@ -22,6 +22,7 @@ import { createPortal } from "react-dom";
 import {
   type Action,
   type ActionInput,
+  onComposerAttach,
   onComposerFill,
   rememberAction,
 } from "../actions/actions.ts";
@@ -513,6 +514,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
   // Pasted pictures and long texts get names of their own; attaching answers whether it could.
   const pasteNames = useRef(new Set<string>());
   const attach = useRef<(files: readonly File[]) => boolean>(() => false);
+  const attachWhy = useRef<string | undefined>(undefined);
   const draft = useRef(0);
   // A long text moved out of the field as its message was sent goes once it has uploaded.
   const sendOnceUploaded = useRef<boolean | null>(null);
@@ -1222,6 +1224,16 @@ export const Composer = memo(function Composer(props: ComposerProps) {
     if (rows.length) typing.current.submit(later);
   }, [uploads.blocked, rows.length]);
   useEffect(() => onComposerFill((text) => typing.current.write(text)), []);
+  // A picture marked up in a viewer joins the draft as a dropped one does.
+  useEffect(
+    () =>
+      onComposerAttach((files) =>
+        attach.current(files)
+          ? null
+          : (attachWhy.current ?? t`The message box can't take files right now.`),
+      ),
+    [],
+  );
   useEffect(() => onSendAfter(() => typing.current.submit(true)), []);
   // From a phone's More menu: research the message, with the field ready for it. Given the question,
   // it goes at once.
@@ -1342,6 +1354,7 @@ export const Composer = memo(function Composer(props: ComposerProps) {
       : sending || uncertain
         ? t`Wait until your message is sent.`
         : reason;
+  attachWhy.current = attachReason;
   attach.current = (files) => {
     if (attachReason || !files.length) return false;
     sendConfirmed.current = false;

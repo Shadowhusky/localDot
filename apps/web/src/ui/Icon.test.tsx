@@ -42,6 +42,12 @@ const PLANNED: IconName[] = [
   "clipboard-paste",
   "download",
   "undo-2",
+  // Marking up a picture: its button, what it draws with, and redo beside undo.
+  "pen-line",
+  "pencil",
+  "move-up-right",
+  "square",
+  "redo-2",
   "terminal",
   "file-diff",
   "circle-alert",

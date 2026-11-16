@@ -6,8 +6,14 @@ import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
 import { kindLabel } from "../kind-label.ts";
 import type { ViewChoice, ViewName } from "./views.ts";
 
-// What the viewer knows of the file on show, for whichever view has to stop and say so.
-export const ViewerFile = createContext<{ meta?: string; actions?: ReactNode }>({});
+// What the viewer knows of the file on show, for whichever view has to stop and say so, and how it
+// closes once a view is done with it.
+export const ViewerFile = createContext<{
+  meta?: string;
+  actions?: ReactNode;
+  close?(): void;
+  marking?(on: boolean): void;
+}>({});
 
 // While a file loads: the shape of what is coming, no words that flash past. A wait long enough to
 // wonder about says what it is waiting for.

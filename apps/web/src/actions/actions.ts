@@ -246,6 +246,27 @@ export function rememberAction(id: string): void {
   }
 }
 
+// Takes files into the message box as a drop on it would: null once taken, else why not.
+type Attach = (files: readonly File[]) => string | null;
+const attaches = new Set<Attach>();
+
+// Hands files to the message box on show; says why not when none could take them.
+export function attachToComposer(files: readonly File[]): string | null {
+  let why = t`Open a conversation to attach it.`;
+  for (const attach of attaches) {
+    const refused = attach(files);
+    if (refused === null) return null;
+    why = refused;
+  }
+  return why;
+}
+export function onComposerAttach(attach: Attach): () => void {
+  attaches.add(attach);
+  return () => {
+    attaches.delete(attach);
+  };
+}
+
 type Fill = (text: string) => void;
 const fills = new Set<Fill>();
 
