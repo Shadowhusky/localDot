@@ -140,7 +140,8 @@ const sameLine = (was: LiveWorkLineProps, now: LiveWorkLineProps) =>
   was.changedTo?.model === now.changedTo?.model;
 
 // The run's head stays in view with its list, which keeps room for a few steps however short the
-// thread.
+// thread. The list ends a little above the jump to the latest, which floats over the thread's foot.
+const ROOM_MARGIN = 24;
 function useHistoryRoom(root: RefObject<HTMLDivElement | null>, open: boolean) {
   useLayoutEffect(() => {
     const node = root.current;
@@ -149,7 +150,12 @@ function useHistoryRoom(root: RefObject<HTMLDivElement | null>, open: boolean) {
     const trigger = node.querySelector<HTMLElement>(".ui-disclosure-trigger");
     let frame = 0;
     const measure = () => {
-      const available = viewport.clientHeight - (trigger?.offsetHeight ?? 0) - 24;
+      const body = viewport.parentElement;
+      const jump = body?.querySelector<HTMLElement>(":scope > .thread-jump");
+      // Where the jump sits by layout, whether it shows now or not.
+      const reach = body && jump ? Math.max(0, body.clientHeight - jump.offsetTop) : 0;
+      const available =
+        viewport.clientHeight - (trigger?.offsetHeight ?? 0) - ROOM_MARGIN - reach;
       node.style.setProperty("--work-history-room", `${Math.max(MIN_ROOM, available)}px`);
     };
     const schedule = () => {
