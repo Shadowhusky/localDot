@@ -88,6 +88,7 @@ import { localdotHome, secureHome } from "./paths.ts";
 import { startDockerDesktop } from "./platform/docker-start.ts";
 import { parsePort } from "./port.ts";
 import { previewPortRange } from "./previews/config.ts";
+import { desktopSiteStorage } from "./previews/desktop-storage.ts";
 import { previewFronts } from "./previews/fronts.ts";
 import { Previews } from "./previews/previews.ts";
 import { PreviewServe } from "./previews/serve.ts";
@@ -998,24 +999,15 @@ const previews = new Previews({
       ),
     ),
   serve: new PreviewServe((args) => accessLinks.runTailscale(args), previewPorts),
-  siteStorage: async (cellId, sessionId, origins, signal) => {
-    const own = sessionId ? slots.keyOf(sessionId) : undefined;
-    for (const key of new Set([...(own ? [own] : []), cellId])) {
-      const ready = owned.endpoints(key);
-      if (!ready) continue;
-      const client = new BrowserClient(ready);
-      try {
-        for (const origin of origins) {
-          const items = await client.siteStorage(origin, { signal, check: () => {} });
-          if (items.length) return items;
-        }
-      } catch {
-        // An older browser, or one busy past the wait: the preview opens as it would anyway.
-      } finally {
-        client.close();
-      }
+  // Read like any job localDot does on a computer: never while the user holds it or Stop runs.
+  siteStorage: async (cellId, origins, signal) => {
+    const access = running.computerAccess(cellId, signal);
+    if (!access || access === "busy") return [];
+    try {
+      return await desktopSiteStorage(access.tools, origins, access.signal);
+    } finally {
+      access.release();
     }
-    return [];
   },
 });
 shutdown.push(

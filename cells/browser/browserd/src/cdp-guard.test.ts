@@ -136,7 +136,7 @@ describe("closed private CDP command boundary", () => {
     "Network.getAllCookies",
     "Storage.setCookies",
     "Storage.clearCookies",
-    "DOMStorage.setDOMStorageItem",
+    "DOMStorage.getDOMStorageItems",
     "IndexedDB.requestData",
     "CacheStorage.requestEntries",
     "Fetch.enable",
@@ -152,35 +152,6 @@ describe("closed private CDP command boundary", () => {
     "constructor",
   ])("refuses %s before anything can be sent to Chromium", (method) => {
     expect(() => guardCdpCommand(method, {}, capabilities, "session-1")).toThrow("method");
-  });
-
-  // A preview of a server in the computer opens signed in as it is here; no other site's saved
-  // storage, nor any page's session storage, leaves the browser.
-  it("reads saved storage only for the computer's own servers, in a tab it owns", () => {
-    const read = (securityOrigin: string, isLocalStorage: unknown = true, session = "session-1") =>
-      guardCdpCommand(
-        "DOMStorage.getDOMStorageItems",
-        { storageId: { securityOrigin, isLocalStorage } },
-        capabilities,
-        session,
-      );
-    for (const origin of ["http://localhost:4173", "http://127.0.0.1:3102", "http://[::1]:5173"])
-      expect(read(origin).method).toBe("DOMStorage.getDOMStorageItems");
-    for (const origin of [
-      "https://accounts.google.com",
-      "http://example.com:4173",
-      "https://localhost:4173",
-      "http://localhost",
-      "http://localhost:0",
-      "http://localhost:4173/",
-      "http://app.localhost:4173",
-    ])
-      expect(() => read(origin), origin).toThrow("url");
-    expect(() => read("http://localhost:4173", false)).toThrow("params");
-    expect(() => read("http://localhost:4173", true, "session-2")).toThrow("scope");
-    expect(() => guardCdpCommand("DOMStorage.enable", {}, capabilities, "session-2")).toThrow(
-      "scope",
-    );
   });
 
   it("sets a page's lifecycle and a window's state to known values only", () => {
