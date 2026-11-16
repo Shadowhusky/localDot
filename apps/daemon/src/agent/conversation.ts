@@ -155,7 +155,7 @@ const NOTHING_DONE = new Set<LocalDotEvent["type"]>([
 
 export type ConversationLog = Pick<
   EventLog,
-  "hasSession" | "logFile" | "listSessions" | "titles" | "forget"
+  "hasSession" | "logFile" | "recentSessions" | "titles" | "forget"
 >;
 
 interface TaskHead {
@@ -570,7 +570,7 @@ ${checkpoint}`),
   }
 
   #latestTask(): string | null {
-    for (const session of this.log.listSessions().slice(0, LOOK_BACK))
+    for (const session of this.log.recentSessions().slice(0, LOOK_BACK))
       if (this.isTask(session.id)) return session.id;
     return null;
   }
@@ -754,7 +754,7 @@ ${checkpoint}`),
   #found(): { sessions: string[]; startedAt: string }[] {
     const found: { sessions: string[]; startedAt: string }[] = [];
     const continuedBy = new Map<string, (typeof found)[number]>();
-    for (const session of this.log.listSessions().slice(0, LIST_SCAN)) {
+    for (const session of this.log.recentSessions().slice(0, LIST_SCAN)) {
       const head = this.#facts(session.id);
       if (!head) continue;
       let conversation = continuedBy.get(session.id);

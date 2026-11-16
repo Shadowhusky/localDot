@@ -36,13 +36,13 @@ function edge(file: string, end: boolean): LocalDotEvent[] {
 export class RecentActivity {
   constructor(
     private readonly deps: {
-      log: Pick<EventLog, "listSessions" | "logFile">;
+      log: Pick<EventLog, "recentSessions" | "logFile">;
       isLive(sessionId: string): boolean;
     },
   ) {}
   list(exclude?: string, limit = RECENT_TASKS): RecentTask[] {
     const tasks: RecentTask[] = [];
-    for (const session of this.deps.log.listSessions().slice(0, LOOK_BACK)) {
+    for (const session of this.deps.log.recentSessions().slice(0, LOOK_BACK)) {
       if (tasks.length >= limit) break;
       const title = session.title?.replace(/\s+/g, " ").trim();
       if (session.id === exclude || !title) continue;

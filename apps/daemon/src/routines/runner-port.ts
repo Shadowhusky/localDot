@@ -7,7 +7,7 @@ import type { RoutineRunnerPort } from "./launch.ts";
 export function agentRunnerPort(
   runner: Pick<AgentRunner, "start" | "end" | "get">,
   live: Pick<LiveSessions, "sessionsOn" | "settled" | "lease">,
-  log: Pick<EventLog, "listSessions">,
+  log: Pick<EventLog, "sessionInfo">,
   conversations: () => Pick<Conversations, "has" | "latest"> | undefined,
 ): RoutineRunnerPort {
   return {
@@ -32,7 +32,7 @@ export function agentRunnerPort(
       return true;
     },
     settled: (id) => live.settled(id),
-    title: (id) => log.listSessions().find((row) => row.id === id)?.title ?? undefined,
+    title: (id) => log.sessionInfo([id]).get(id)?.title ?? undefined,
     latest: (id) => {
       const known = conversations();
       return known?.has(id) ? known.latest(id) : undefined;

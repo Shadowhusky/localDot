@@ -23,6 +23,7 @@ import { SessionScreens } from "./browser/session-screens.ts";
 import { BrowserSlots, extraBrowsers } from "./browser/slots.ts";
 import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
+import { watchBusy } from "./busy-watch.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery, credentialsChanged } from "./cells/browser-recovery.ts";
 import { pullPinnedImages } from "./cells/computer-image-pull.ts";
@@ -159,7 +160,9 @@ if (serviceIdentity) retainManagedDaemonLease(process.env, serviceIdentity);
 let serviceReadiness: ManagedServiceReadiness | undefined;
 const releaseLock = lockHome(join(home, "daemon.lock"));
 process.on("exit", releaseLock);
-const shutdown: { name: string; stop: () => void | Promise<void> }[] = [];
+const shutdown: { name: string; stop: () => void | Promise<void> }[] = [
+  { name: "busy watch", stop: watchBusy() },
+];
 let shuttingDown = false;
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
