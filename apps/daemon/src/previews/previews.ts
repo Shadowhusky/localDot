@@ -44,6 +44,8 @@ const LISTING_MS = 2_000;
 const COMPUTER_MS = 10_000;
 // A server that says nothing for this long isn't answering.
 const CHECK_MS = 2_000;
+// How long opening a preview waits for the computer's browser to say what the app saved.
+const STORAGE_MS = 2_500;
 // While the list is on show, each server is asked again this often.
 const RECHECK_MS = 10_000;
 const TITLE_MS = 8_000;
@@ -89,6 +91,15 @@ export interface PreviewsDeps {
   // A task is under way on this computer, or the user holds it: nothing of dot's is stopped then.
   working?(cellId: string): boolean;
   fronts(): Promise<PreviewFronts>;
+  // What a server's app saved in the computer's browser, at the first of the origins the browser
+  // knows it by, so its preview opens signed in as it is there. The task asking looks first in its
+  // own browser.
+  siteStorage?(
+    cellId: string,
+    sessionId: string | undefined,
+    origins: readonly string[],
+    signal: AbortSignal,
+  ): Promise<readonly (readonly [string, string])[]>;
   serve?: Pick<PreviewServe, "add" | "remove" | "close">;
   now?: () => number;
   idleMs?: number;
@@ -155,6 +166,8 @@ export interface PreviewTurn {
 export class Previews {
   readonly #open = new Map<number, Open>();
   readonly #lastKey = new Map<number, string>();
+  // The task that last opened a preview on each computer, whose browser is asked first.
+  readonly #openedBy = new Map<string, string>();
   readonly #freedAt = new Map<number, number>();
   readonly #listings = new Map<
     string,
@@ -332,6 +345,7 @@ export class Previews {
     requestHost?: string,
   ): Promise<PreviewOpened> {
     const cellId = this.#cell(sessionId);
+    this.#openedBy.set(cellId, sessionId);
     const endpoint = this.#endpoint(cellId);
     if (endpoint === "off")
       throw new PreviewError(409, { state: "computer-off", message: COMPUTER_OFF });
@@ -429,6 +443,7 @@ export class Previews {
         connect: (to) => this.#connect(cellId, to),
         computer: () => this.#computer(cellId),
         hop: (to, host) => this.#hop(cellId, to, host, false),
+        storage: () => this.#storage(cellId, target),
         reused: this.#lastKey.get(port) !== key,
         now: this.#now,
       });
@@ -495,6 +510,7 @@ export class Previews {
       connect: (to) => this.#connect(cellId, to),
       computer: () => this.#computer(cellId),
       hop: (to, host) => this.#hop(cellId, to, host, true),
+      storage: () => this.#storage(cellId, target),
       reused: false,
       now: this.#now,
     });
@@ -548,6 +564,14 @@ export class Previews {
     if (!gone) return [];
     this.#end(gone);
     return [gone.site.port];
+  }
+
+  // The computer's browser knows a server by its loopback names at its own port.
+  #storage(cellId: string, target: PreviewTarget): Promise<readonly (readonly [string, string])[]> {
+    const read = this.deps.siteStorage;
+    if (!read || target.scheme !== "http") return Promise.resolve([]);
+    const origins = [`http://localhost:${target.port}`, `http://127.0.0.1:${target.port}`];
+    return read(cellId, this.#openedBy.get(cellId), origins, AbortSignal.timeout(STORAGE_MS));
   }
 
   async #serve(port: number): Promise<void> {

@@ -386,6 +386,21 @@ export class BrowserClient {
     return reply.cookies;
   }
 
+  // A server in the computer's saved storage, from a tab of the browser showing it, so its preview
+  // opens signed in as it is there. Nothing when no tab shows it.
+  async siteStorage(origin: string, scope: BrowserScope): Promise<[string, string][]> {
+    const reply = await this.#json(
+      "POST",
+      "/sites/storage",
+      { origin },
+      scope,
+      5000,
+      z.strictObject({ items: z.array(z.tuple([z.string(), z.string()])).max(256) }),
+      2 * 1024 * 1024,
+    );
+    return reply.items;
+  }
+
   async armDownloads(raw: BrowserDownloadBinding, scope: BrowserScope): Promise<void> {
     const binding = this.#downloadBinding(raw);
     await this.#json(

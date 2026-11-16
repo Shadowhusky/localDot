@@ -32,6 +32,7 @@ import { DOWNLOAD_BYTES } from "../../../../packages/protocol/src/quarantine.ts"
 import { WorkWindowUpdate } from "../../../../packages/protocol/src/work-window.ts";
 import type { WorkWindow } from "../../../desktop/desktopd/src/work-window.ts";
 import { type BrowserAccounts, isSiteName } from "./accounts.ts";
+import { devServerOrigin } from "./cdp-guard.ts";
 import type { BrowserControl } from "./control.ts";
 import type { BrowserDownloadService } from "./download-service.ts";
 import { type BrowserInput, BrowserInputError } from "./input.ts";
@@ -109,8 +110,10 @@ const routes = new Set([
   "POST /uploads/send",
   "GET /accounts/cookies",
   "POST /accounts/sign-out",
+  "POST /sites/storage",
 ]);
 const signOutSchema = schema.strictObject({ site: schema.string().max(253) });
+const siteStorageSchema = schema.strictObject({ origin: schema.string().max(64) });
 
 export interface BrowserHttpOptions {
   readonly workWindow?: Pick<WorkWindow, "update" | "hide" | "close">;
@@ -128,6 +131,7 @@ export interface BrowserHttpOptions {
   readonly downloads?: Pick<BrowserDownloadService, "arm" | "list" | "read" | "acknowledge">;
   readonly uploads?: Pick<BrowserUploadService, "chooser" | "upload">;
   readonly accounts?: Pick<BrowserAccounts, "domains" | "signOut">;
+  readonly sites?: Pick<BrowserTargets, "siteStorage">;
   readonly signInPage?: Pick<BrowserSignInPage, "read">;
   readonly signIn?: {
     state(): schema.infer<typeof BrowserSignInState>;
@@ -504,7 +508,8 @@ export class BrowserHttp {
       if (
         !route.startsWith("POST /downloads/") &&
         route !== "POST /timing" &&
-        route !== "PUT /lifecycle"
+        route !== "PUT /lifecycle" &&
+        route !== "POST /sites/storage"
       )
         await this.#options.workWindow?.hide();
       if (route === "POST /stop") {
@@ -521,6 +526,16 @@ export class BrowserHttp {
         return;
       }
       this.#available(signal);
+      if (route === "POST /sites/storage") {
+        const parsed = siteStorageSchema.safeParse(body);
+        if (!parsed.success || !devServerOrigin(parsed.data.origin))
+          throw new HttpRefusal(400, "request");
+        if (!this.#options.sites) throw new HttpRefusal(503, "unavailable");
+        const items = await this.#options.sites.siteStorage(parsed.data.origin, signal);
+        this.#available(signal);
+        send(response, 200, { items });
+        return;
+      }
       if (route === "POST /accounts/sign-out") {
         const parsed = signOutSchema.safeParse(body);
         if (!parsed.success || !isSiteName(parsed.data.site)) throw new HttpRefusal(400, "request");

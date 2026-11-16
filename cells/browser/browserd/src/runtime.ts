@@ -393,6 +393,9 @@ export class BrowserRuntime {
         get accounts() {
           return runtime.#accounts;
         },
+        get sites() {
+          return required(runtime.#targets);
+        },
         get signInPage() {
           return runtime.#signInPage;
         },

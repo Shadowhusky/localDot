@@ -1000,6 +1000,25 @@ const previews = new Previews({
       ),
     ),
   serve: new PreviewServe((args) => accessLinks.runTailscale(args), previewPorts),
+  siteStorage: async (cellId, sessionId, origins, signal) => {
+    const own = sessionId ? slots.keyOf(sessionId) : undefined;
+    for (const key of new Set([...(own ? [own] : []), cellId])) {
+      const ready = owned.endpoints(key);
+      if (!ready) continue;
+      const client = new BrowserClient(ready);
+      try {
+        for (const origin of origins) {
+          const items = await client.siteStorage(origin, { signal, check: () => {} });
+          if (items.length) return items;
+        }
+      } catch {
+        // An older browser, or one busy past the wait: the preview opens as it would anyway.
+      } finally {
+        client.close();
+      }
+    }
+    return [];
+  },
 });
 shutdown.push(
   { name: "previews", stop: () => previews.close() },

@@ -10,7 +10,7 @@ import {
 import { type AddressInfo, connect } from "node:net";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { previewTarget } from "@localdot/protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import type { Route } from "./rewrite.ts";
 import {
@@ -65,6 +65,7 @@ async function site(
     ports?: number[];
     hop?: SiteOptions["hop"];
     navigateMs?: number;
+    storage?: SiteOptions["storage"];
   } = {},
 ) {
   const port = await freePort();
@@ -81,6 +82,7 @@ async function site(
     reused: options.reused ?? false,
     now: options.now,
     navigateMs: options.navigateMs,
+    ...(options.storage ? { storage: options.storage } : {}),
   });
   await preview.listen();
   closers.push(() => preview.close());
@@ -159,6 +161,27 @@ describe("signing a device in", () => {
     expect(script.body).toContain("history.replaceState");
   });
 
+  // The app's sign-in lives in what it saved in the computer's browser; the device's browser takes
+  // it as the preview opens, so the app opens signed in there too.
+  it("hands the device what the app saved in the computer's browser as it opens", async () => {
+    const dev = await devServer();
+    const storage = vi.fn(async () => [["workos:refresh-token", "mock-refresh"] as const]);
+    const { preview, port, host } = await site(dev.port, { storage });
+    const { answer } = await signIn(port, host, preview.mint("/"));
+    expect(JSON.parse(answer.body)).toMatchObject({
+      storage: [["workos:refresh-token", "mock-refresh"]],
+    });
+    // A browser that can't say leaves the preview to open as it would anyway.
+    const failing = await site(dev.port, {
+      storage: async () => Promise.reject(new Error("gone")),
+    });
+    const opened = await signIn(failing.port, failing.host, failing.preview.mint("/"));
+    expect(opened.answer.status).toBe(200);
+    expect(JSON.parse(opened.answer.body)).toMatchObject({ storage: [] });
+    const script = await send(port, `${ENTRY_PATH}.js`, { host });
+    expect(script.body).toContain("localStorage.getItem(key) === null");
+  });
+
   it("trades a one-use secret for an HttpOnly, Secure, Lax cookie of this port's own", async () => {
     const dev = await devServer();
     const { preview, port, host } = await site(dev.port);
@@ -168,6 +191,7 @@ describe("signing a device in", () => {
     expect(JSON.parse(answer.body)).toEqual({
       next: "/app?tab=2",
       server: `localhost:${dev.port}`,
+      storage: [],
     });
     expect(answer.headers["set-cookie"]?.[0]).toMatch(
       new RegExp(`^${cookieName(port)}=[A-Za-z0-9_-]{43}; Path=/; Secure; HttpOnly; SameSite=Lax$`),

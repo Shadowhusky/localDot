@@ -6,11 +6,19 @@ import {
   BrowserUploadOffer,
 } from "../../../../packages/protocol/src/browser-uploads.ts";
 import { CdpRequestError, GuardedCdp } from "./cdp.ts";
-import { cookiePartitionKey } from "./cdp-guard.ts";
+import { cookiePartitionKey, devServerOrigin } from "./cdp-guard.ts";
 import { navigateOwnedDocument } from "./navigation.ts";
 import type { CdpTransport } from "./pipe.ts";
 
 export const MAX_BROWSER_TARGETS = 256;
+// What a server's saved storage may carry out of the browser: plenty for a sign-in and settings.
+const MAX_STORAGE_ITEMS = 256;
+const MAX_STORAGE_KEY = 1024;
+const MAX_STORAGE_VALUE = 256 * 1024;
+const MAX_STORAGE_BYTES = 1024 * 1024;
+const storageItems = schema.object({
+  entries: schema.array(schema.tuple([schema.string(), schema.string()])).max(10_000),
+});
 export const MAX_DOCUMENT_NODES = 4096;
 export const MAX_BROWSER_NODES = 32768;
 export const BROWSER_TARGET_START_TIMEOUT_MS = 30_000;
@@ -953,6 +961,48 @@ export class BrowserTargets {
       { signal },
     );
     this.#checkOpen();
+  }
+
+  // A server in the computer's saved storage, read from a tab already showing it, so its preview
+  // opens signed in as it is here. No other site's values leave Chromium, and a server no tab
+  // shows gives nothing: browserd never opens one to read it.
+  async siteStorage(
+    origin: string,
+    signal?: AbortSignal,
+  ): Promise<readonly (readonly [string, string])[]> {
+    this.#checkOpen();
+    if (!devServerOrigin(origin)) throw new BrowserTargetError("protocol");
+    const listed = schema
+      .object({ targetInfos: schema.array(targetInfo).max(MAX_BROWSER_TARGETS) })
+      .safeParse(await this.#broker.send("Target.getTargets", { filter }, { signal }));
+    this.#checkOpen();
+    if (!listed.success) throw new BrowserTargetError("protocol");
+    const sessionId = listed.data.targetInfos
+      .filter((info) => info.type === "page" && URL.canParse(info.url))
+      .filter((info) => new URL(info.url).origin === origin)
+      .map((info) => this.#targets.get(info.targetId)?.sessionId)
+      .find((id) => id !== undefined);
+    if (!sessionId) return [];
+    await this.#broker.send("DOMStorage.enable", {}, { sessionId, signal });
+    const items = storageItems.safeParse(
+      await this.#broker.send(
+        "DOMStorage.getDOMStorageItems",
+        { storageId: { securityOrigin: origin, isLocalStorage: true } },
+        { sessionId, signal },
+      ),
+    );
+    this.#checkOpen();
+    if (!items.success) throw new BrowserTargetError("protocol");
+    const kept: (readonly [string, string])[] = [];
+    let bytes = 0;
+    for (const [key, value] of items.data.entries) {
+      if (kept.length >= MAX_STORAGE_ITEMS) break;
+      if (key.length > MAX_STORAGE_KEY || value.length > MAX_STORAGE_VALUE) continue;
+      bytes += key.length + value.length;
+      if (bytes > MAX_STORAGE_BYTES) break;
+      kept.push(Object.freeze([key, value] as const));
+    }
+    return Object.freeze(kept);
   }
 
   // Names and scopes only: cookie values never leave Chromium through browserd.

@@ -87,7 +87,12 @@ const ENTRY_CODE = `(async () => {
   try {
     const answer = await fetch(${JSON.stringify(ENTRY_PATH)}, { method: "POST", body: secret, cache: "no-store" });
     if (!answer.ok) throw new Error();
-    const { next, server } = await answer.json();
+    const { next, server, storage } = await answer.json();
+    // Signed in as it is in the computer: what the app saved there, where this browser has none.
+    try {
+      for (const [key, value] of storage ?? [])
+        if (localStorage.getItem(key) === null) localStorage.setItem(key, value);
+    } catch {}
     title.textContent = "Waiting for " + server + " to answer…";
     const started = Date.now();
     setInterval(() => {
@@ -105,6 +110,8 @@ const ENTRY_CODE = `(async () => {
 export interface SiteOptions {
   port: number;
   target: PreviewTarget;
+  // What the app saved in the computer's browser, which the device's browser takes as it opens.
+  storage?(): Promise<readonly (readonly [string, string])[]>;
   // The Host values a request may carry: the tailnet fronts' names with this port.
   hosts(): ReadonlySet<string>;
   // A new connection to a server in the computer, with TLS already started for an https one.
@@ -265,6 +272,7 @@ export class PreviewSite {
     if (secret) this.#entries.delete(secret);
     if (!entry || entry.expires <= this.#now()) return plain(res, 401, "link used or expired");
     this.#lastUsed = this.#now();
+    const storage = (await this.options.storage?.().catch(() => [])) ?? [];
     if (this.local)
       for (const name of cookies(req.headers.cookie).keys())
         if (!isPreviewCookie(name) && !this.#own.has(name)) this.#foreign.add(name);
@@ -280,7 +288,7 @@ export class PreviewSite {
         ? { "clear-site-data": '"storage"' }
         : {}),
     });
-    res.end(JSON.stringify({ next: entry.path, server: this.target.host }));
+    res.end(JSON.stringify({ next: entry.path, server: this.target.host, storage }));
   }
 
   // Another server in the computer, named by the via path. A page the device opens there becomes a
