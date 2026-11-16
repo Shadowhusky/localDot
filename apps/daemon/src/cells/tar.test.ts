@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { tar } from "./tar.ts";
+import { tar, untar } from "./tar.ts";
 
 let temporary: string | undefined;
 afterEach(() => {
@@ -73,5 +73,26 @@ describe("tar", () => {
     for (const mtime of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 8 ** 11]) {
       expect(() => tar([{ name: "token", data: "a" }], mtime)).toThrow(RangeError);
     }
+  });
+});
+
+describe("untar", () => {
+  it("reads back the file asked for, byte for byte, past the files before it", () => {
+    const binary = Buffer.from([0, 128, 255, 192, 10]);
+    const archive = tar([
+      { name: "first", data: "x".repeat(700) },
+      { name: "Xvfb", data: binary, mode: 0o755 },
+    ]);
+    expect(untar(archive, "Xvfb")).toEqual(binary);
+    expect(untar(archive, "first")?.toString()).toBe("x".repeat(700));
+    expect(untar(archive, "missing")).toBeUndefined();
+  });
+
+  it("refuses a damaged or cut-short archive", () => {
+    const archive = tar([{ name: "Xvfb", data: "server" }]);
+    const damaged = Buffer.from(archive);
+    damaged[0] = 1;
+    expect(() => untar(damaged, "Xvfb")).toThrow(RangeError);
+    expect(() => untar(archive.subarray(0, 514), "Xvfb")).toThrow(RangeError);
   });
 });

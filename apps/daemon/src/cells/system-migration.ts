@@ -16,7 +16,7 @@ import {
   verifyMigration,
 } from "./system-migration-plan.ts";
 import { BLANK_CREDENTIALS, ComputerSystemState, snapshotOf } from "./system-state.ts";
-import { tar } from "./tar.ts";
+import { tar, untar } from "./tar.ts";
 import type { CellRecord } from "./types.ts";
 
 type Docker = Pick<DockerClient, "request">;
@@ -351,29 +351,14 @@ export function helperOutput(buffer: Buffer): Buffer {
 
 // Docker wraps the generated tar in a single-file tar response. Unwrap only that known file.
 export function archivePayload(envelope: Buffer): Buffer {
-  for (let offset = 0; offset + 512 <= envelope.length; ) {
-    const header = envelope.subarray(offset, offset + 512);
-    if (header.every((byte) => byte === 0)) break;
-    const name = header.subarray(0, 100).toString().replace(/\0.*$/s, "");
-    const size = Number.parseInt(header.subarray(124, 136).toString().replace(/\0.*$/s, ""), 8);
-    const checksum = Number.parseInt(
-      header.subarray(148, 156).toString().trim().replace(/\0.*$/s, ""),
-      8,
-    );
-    let actual = 0;
-    for (let i = 0; i < 512; i++) actual += i >= 148 && i < 156 ? 32 : (header[i] ?? 0);
-    if (
-      checksum !== actual ||
-      !Number.isSafeInteger(size) ||
-      size < 0 ||
-      offset + 512 + size > envelope.length
-    )
-      throw failure();
-    if (name === "localdot-update.tar" && (header[156] === 48 || header[156] === 0))
-      return envelope.subarray(offset + 512, offset + 512 + size);
-    offset += 512 + Math.ceil(size / 512) * 512;
+  let payload: Buffer | undefined;
+  try {
+    payload = untar(envelope, "localdot-update.tar");
+  } catch {
+    throw failure();
   }
-  throw failure();
+  if (!payload) throw failure();
+  return payload;
 }
 
 // Used by both installers and daemon recovery before a migrated image can replace an original.

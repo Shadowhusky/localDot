@@ -60,7 +60,13 @@ func makeFixture(t *testing.T, role string) *fixture {
 		}
 	}
 	owner := strings.Repeat("a", 32)
-	s := settings{state, home, "/Users/example", "/usr/bin/true", filepath.Join(root, "docker.sock"), os.Getuid(), 4750, owner}
+	// The daemon's program must be a plain file, not a link to one: /usr/bin/true is a link on
+	// some systems (Ubuntu 26.04's coreutils), so the fixture brings its own.
+	node := filepath.Join(root, "node")
+	if err := os.WriteFile(node, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := settings{state, home, "/Users/example", node, filepath.Join(root, "docker.sock"), os.Getuid(), 4750, owner}
 	c := configuration{Settings: s, Release: admin.ReleaseIdentity{Version: "1.2.3", PackageSHA256: strings.Repeat("b", 64), ManifestSHA256: strings.Repeat("c", 64)}}
 	c.Configuration = configurationID(c)
 	record := journal{V: 1, ID: "01234567-89ab-4cde-8fab-0123456789ab", Configuration: c, Previous: json.RawMessage("null"), Phase: "starting"}
@@ -124,7 +130,7 @@ func TestRoleLeaseAndDerivedLaunch(t *testing.T) {
 			if role == "keyd" && (l.Program != f.helper || strings.Join(l.Arguments[1:], " ") != "-home "+f.scope.Home+" -vault "+vaultMode(runtime.GOOS)+" -ports 4760-4789") {
 				t.Fatal("keyd defaults changed")
 			}
-			if role == "daemon" && (l.Program != "/usr/bin/true" || !strings.HasSuffix(l.Arguments[1], "/app/dist/daemon.mjs")) {
+			if role == "daemon" && (l.Program != f.record.Configuration.Settings.Node || !strings.HasSuffix(l.Arguments[1], "/app/dist/daemon.mjs")) {
 				t.Fatal("wrong daemon entry")
 			}
 			if !strings.Contains(strings.Join(l.Environment, "\n"), "LOCALDOT_SERVICE_ATTEMPT="+f.record.ID) {

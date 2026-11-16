@@ -95,6 +95,7 @@ async function setup(
     updates?: ConstructorParameters<typeof CellOrchestrator>[0]["updates"];
     keyd?: ConstructorParameters<typeof CellOrchestrator>[0]["keyd"];
     size?: (home: string, store: CellStore) => ComputerSizes;
+    display?: ConstructorParameters<typeof CellOrchestrator>[0]["display"];
   } = {},
 ) {
   fake = await startFakeDocker();
@@ -120,6 +121,7 @@ async function setup(
     ...(opts.externalKeydPorts ? { externalKeydPorts: opts.externalKeydPorts } : {}),
     ...(opts.relay ? { relay: opts.relay } : {}),
     ...(opts.size ? { size: opts.size(home, store) } : {}),
+    ...(opts.display ? { display: opts.display } : {}),
   });
   made.push(orchestrator);
   orchestrator.subscribe((cell) => changes.push(cell));
@@ -185,6 +187,31 @@ describe("CellOrchestrator.create", () => {
       baseUrl: "http://127.0.0.1:50001",
       authorization: `Basic ${Buffer.from(`localdot:${record?.tokens.stream}`).toString("base64")}`,
     });
+  });
+
+  it("checks a desktop's display server before it first starts, and before each start after", async () => {
+    const kept: { desktop: string; calls: number }[] = [];
+    const { orchestrator, store, stateOf } = await setup({
+      display: {
+        keep: async (desktop) => {
+          kept.push({ desktop, calls: fake.state.calls.length });
+        },
+      },
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const desktop = store.get(cell.id)?.docker.desktop ?? "";
+    const started = () =>
+      fake.state.calls.flatMap((c, i) =>
+        c.method === "POST" && c.path === `/containers/${desktop}/start` ? [i] : [],
+      );
+    expect(kept.map((k) => k.desktop)).toEqual([desktop]);
+    expect(started()[0]).toBeGreaterThanOrEqual(kept[0]?.calls ?? Number.POSITIVE_INFINITY);
+
+    await orchestrator.stop(cell.id);
+    await orchestrator.start(cell.id);
+    expect(kept.map((k) => k.desktop)).toEqual([desktop, desktop]);
+    expect(started()[1]).toBeGreaterThanOrEqual(kept[1]?.calls ?? Number.POSITIVE_INFINITY);
   });
 
   it("gives a new desktop the dot's size before it first starts, and again after a restart", async () => {

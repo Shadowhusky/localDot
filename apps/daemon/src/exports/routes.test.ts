@@ -12,7 +12,10 @@ import { ExportStore } from "./store.ts";
 import { FakeRenderer } from "./testing/fake-renderer.ts";
 
 const homes: string[] = [];
-afterEach(() => {
+const open: ExportJobs[] = [];
+// Each queue stops before its folder goes: one left running would still be writing there.
+afterEach(async () => {
+  await Promise.all(open.splice(0).map((jobs) => jobs.close()));
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
@@ -41,6 +44,7 @@ async function fixture() {
   const renderer = new FakeRenderer();
   const store = new ExportStore(home);
   const jobs = new ExportJobs({ store, renderer });
+  open.push(jobs);
   await jobs.check();
   const app = createApp({ token: "fixture", port: 4747, eventLog: {} as EventLog, exports: jobs });
   const call = (path: string, init: RequestInit = {}) => app.request(`${ORIGIN}${path}`, init);
@@ -205,6 +209,7 @@ describe("export routes", () => {
     homes.push(home);
     const renderer = new FakeRenderer();
     const jobs = new ExportJobs({ store: new ExportStore(home), renderer });
+    open.push(jobs);
     const app = createApp({
       token: "fixture",
       port: 4747,
@@ -226,6 +231,7 @@ describe("export routes", () => {
     const renderer = new FakeRenderer();
     renderer.able = null;
     const jobs = new ExportJobs({ store: new ExportStore(home), renderer });
+    open.push(jobs);
     await jobs.check();
     const app = createApp({
       token: "fixture",
