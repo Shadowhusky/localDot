@@ -233,6 +233,26 @@ describe("the list of conversations", () => {
   });
 });
 
+describe("conversations' looks", () => {
+  it("gives each conversation's look its draw once and keeps it, whatever else is listed", async () => {
+    const f = setup();
+    const older = await f.task("Plan the trip");
+    const newer = await f.task("Draw a dog");
+    const listed = f.open().list().conversations;
+    expect(listed.map((entry) => entry.draw)).toEqual([expect.any(Number), expect.any(Number)]);
+    const file = join(f.home, "conversations-organized.json");
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    expect(saved.conversations[newer].draw).toBe(listed[0]?.draw);
+    // Kept once given, though nothing listed with it now draws alike: deleting the older one, tagging
+    // this one or listing again never draws it anew.
+    saved.conversations[newer].draw = 3;
+    writeFileSync(file, JSON.stringify(saved));
+    rmSync(join(f.home, "sessions", older), { recursive: true, force: true });
+    f.open().organize(newer, { tags: ["blue"] });
+    expect(f.open().list().conversations).toMatchObject([{ sessionId: newer, draw: 3 }]);
+  });
+});
+
 describe("organizing conversations", () => {
   it("tags and pins a conversation by any of its tasks, and keeps both as it goes on", async () => {
     const f = setup();
@@ -373,7 +393,7 @@ describe("organizing conversations", () => {
       JSON.parse(readFileSync(join(f.home, "conversations-organized.json"), "utf8")).conversations[
         trip
       ],
-    ).toEqual({ tags: ["purple"], pinned: true });
+    ).toEqual({ tags: ["purple"], pinned: true, draw: expect.any(Number) });
   });
 
   it("keeps how dot sorts into tags", async () => {

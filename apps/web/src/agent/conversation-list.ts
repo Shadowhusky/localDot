@@ -9,6 +9,7 @@ import {
   ConversationTag,
   ConversationTagsEvent,
   type CreateTag,
+  drawnFrom,
   type LookWearables,
   NamedTag,
   type PersonaId,
@@ -16,6 +17,7 @@ import {
   type SmartTagOptions,
   type SmartTagRequest,
   type SmartTagResult,
+  spreadDraws,
   type TagId,
   type TagOnConversation,
   taskOutfit,
@@ -248,35 +250,27 @@ export function conversationLook(
 export const lookSeed = (entry: ConversationEntry) =>
   entry.firstTask ?? entry.sessions.at(-1) ?? entry.sessionId;
 
-// A conversation whose draw matches an older one's look draws again, so no two in the list look
-// alike while the outfits allow it. Oldest first by their first task's id (a ULID), so a look never
-// changes as newer conversations arrive, and every device draws the same.
-const redrawn = new Map<string, string>();
-const REDRAWS = 12;
-const drawSeed = (entry: ConversationEntry) => redrawn.get(lookSeed(entry)) ?? lookSeed(entry);
+// The daemon gives each conversation its draw once, so its look never changes as others come and
+// go, and every device draws the same. One it has not given a draw to yet, as from an older daemon,
+// draws again here while it matches an older one's look in the list.
+const redrawn = new Map<string, number>();
+const drawSeed = (entry: ConversationEntry) =>
+  drawnFrom(lookSeed(entry), entry.draw ?? redrawn.get(lookSeed(entry)) ?? 0);
 
 export function spreadLooks(entries: readonly ConversationEntry[]): void {
   redrawn.clear();
-  const taken = new Set<string>();
-  const oldestFirst = [...entries].sort((a, b) =>
-    lookSeed(a) < lookSeed(b) ? -1 : lookSeed(a) > lookSeed(b) ? 1 : 0,
+  const given = spreadDraws(
+    entries.map((entry) => {
+      const persona = entry.live?.persona ?? entry.persona;
+      return {
+        seed: lookSeed(entry),
+        ...(persona ? { persona } : {}),
+        ...(entry.look ? { look: entry.look } : {}),
+        ...(entry.draw !== undefined ? { draw: entry.draw } : {}),
+      };
+    }),
   );
-  for (const entry of oldestFirst) {
-    if (entry.look) {
-      taken.add(entry.look.join(" "));
-      continue;
-    }
-    const seed = lookSeed(entry);
-    const persona = entry.live?.persona ?? entry.persona;
-    let drawn = seed;
-    let worn = taskOutfit(drawn, persona).join(" ");
-    for (let n = 1; n <= REDRAWS && taken.has(worn); n++) {
-      drawn = `${seed}#${n}`;
-      worn = taskOutfit(drawn, persona).join(" ");
-    }
-    taken.add(worn);
-    if (drawn !== seed) redrawn.set(seed, drawn);
-  }
+  for (const [seed, draw] of given) if (draw) redrawn.set(seed, draw);
 }
 
 // An empty title gives the conversation back its own.

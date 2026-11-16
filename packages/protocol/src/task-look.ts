@@ -109,3 +109,43 @@ export function taskOutfit(seed: string, persona?: PersonaId): Wearable[] {
   }
   return out;
 }
+
+// How often a conversation's look is drawn again so it wears something no older one does.
+export const LOOK_REDRAWS = 12;
+
+// What a conversation's outfit is drawn from: its first task's id, or that id drawn again.
+export const drawnFrom = (seed: string, draw: number): string => (draw ? `${seed}#${draw}` : seed);
+
+export interface LookRow {
+  // Its first task's id (a ULID), which also orders the rows oldest first.
+  seed: string;
+  persona?: PersonaId;
+  // The look the user chose, which no draw changes.
+  look?: readonly Wearable[];
+  // The draw it was given before, kept for good.
+  draw?: number;
+}
+
+// Oldest first, each conversation keeps the draw it has, and one without gets the first that wears
+// something no older one wears, while the outfits allow. Returns the draws given now, by seed.
+export function spreadDraws(rows: readonly LookRow[]): Map<string, number> {
+  const taken = new Set<string>();
+  const given = new Map<string, number>();
+  const oldestFirst = [...rows].sort((a, b) => (a.seed < b.seed ? -1 : a.seed > b.seed ? 1 : 0));
+  for (const row of oldestFirst) {
+    if (row.look) {
+      taken.add(row.look.join(" "));
+      continue;
+    }
+    const wears = (draw: number) => taskOutfit(drawnFrom(row.seed, draw), row.persona).join(" ");
+    if (row.draw !== undefined) {
+      taken.add(wears(row.draw));
+      continue;
+    }
+    let draw = 0;
+    while (draw < LOOK_REDRAWS && taken.has(wears(draw))) draw++;
+    taken.add(wears(draw));
+    given.set(row.seed, draw);
+  }
+  return given;
+}
