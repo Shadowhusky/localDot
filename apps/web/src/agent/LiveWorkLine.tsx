@@ -154,8 +154,7 @@ function useHistoryRoom(root: RefObject<HTMLDivElement | null>, open: boolean) {
       const jump = body?.querySelector<HTMLElement>(":scope > .thread-jump");
       // Where the jump sits by layout, whether it shows now or not.
       const reach = body && jump ? Math.max(0, body.clientHeight - jump.offsetTop) : 0;
-      const available =
-        viewport.clientHeight - (trigger?.offsetHeight ?? 0) - ROOM_MARGIN - reach;
+      const available = viewport.clientHeight - (trigger?.offsetHeight ?? 0) - ROOM_MARGIN - reach;
       node.style.setProperty("--work-history-room", `${Math.max(MIN_ROOM, available)}px`);
     };
     const schedule = () => {
