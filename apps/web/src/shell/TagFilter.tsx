@@ -1,23 +1,34 @@
 import type { TagId } from "@localdot/protocol";
-import { type RefObject, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { TagInUse } from "../agent/conversation-list.ts";
 import { t } from "../i18n/index.ts";
 import { Button } from "../ui/Button.tsx";
 import { TagDot, tagName } from "../ui/ConversationTag.tsx";
-import { PHONE, useMediaQuery } from "../ui/media.ts";
-import { Popover } from "../ui/Popover.tsx";
-import { Sheet } from "../ui/Sheet.tsx";
+import { Collapse } from "../ui/Disclosure.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { Marquee } from "../ui/Marquee.tsx";
+import { matches } from "../ui/media.ts";
+import { sidewaysWheel } from "../ui/sideways-wheel.ts";
 import { TextField } from "../ui/TextField.tsx";
 import "../ui/conversation-switcher.css";
 
-// The most a row shows before the rest wait behind All tags.
-const SHOWN = 8;
-
 const fold = (text: string) => text.trim().toLocaleLowerCase();
 
-// Above a list: the tags its conversations carry most, each showing only those with it, the rest a
-// search away under All tags; and what sorts them into tags with the user's model. The row wraps,
-// so every tag on it is in sight.
+// Which ends of the strip have more tags past them, so each fades out where it does.
+function useEdges() {
+  const [edges, setEdges] = useState({ start: false, end: false });
+  const read = useCallback((strip: HTMLElement) => {
+    const room = strip.scrollWidth - strip.clientWidth;
+    const start = strip.scrollLeft > 1;
+    const end = strip.scrollLeft < room - 1;
+    setEdges((was) => (was.start === start && was.end === end ? was : { start, end }));
+  }, []);
+  return [edges, read] as const;
+}
+
+// Above a list: one line of the tags its conversations carry, each a filter, that scrolls sideways
+// under a pinned All. All unfolds the whole list in place, with a search, and what sorts the
+// conversations into tags with the user's model.
 export function TagFilter({
   tags,
   tagged,
@@ -29,92 +40,170 @@ export function TagFilter({
   onTag(tag: TagId | null): void;
   onSort?(): void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [edges, readEdges] = useEdges();
+  const strip = useRef<HTMLDivElement | null>(null);
   const allButton = useRef<HTMLButtonElement>(null);
-  const [all, setAll] = useState(false);
+  const panel = useId();
+  // The chosen tag comes into sight in the strip, however it was chosen.
+  useEffect(() => {
+    const row = strip.current;
+    const chip =
+      tagged &&
+      [...(row?.querySelectorAll<HTMLElement>("[data-tag-id]") ?? [])].find(
+        (each) => each.dataset.tagId === tagged,
+      );
+    if (!row || !chip) return;
+    // The strip is the chips' offset parent.
+    const left = chip.offsetLeft;
+    const right = left + chip.offsetWidth;
+    const pad = row.clientWidth * 0.1;
+    const to =
+      left < row.scrollLeft
+        ? Math.max(0, left - pad)
+        : right > row.scrollLeft + row.clientWidth
+          ? right - row.clientWidth + pad
+          : null;
+    if (to === null) return;
+    if (typeof row.scrollTo === "function") row.scrollTo({ left: to, behavior: "smooth" });
+    else row.scrollLeft = to;
+  }, [tagged]);
+  const attach = useCallback(
+    (element: HTMLDivElement | null) => {
+      strip.current = element;
+      if (!element) return;
+      readEdges(element);
+      const undoWheel = sidewaysWheel(element);
+      const onScroll = () => readEdges(element);
+      element.addEventListener("scroll", onScroll, { passive: true });
+      const observer =
+        typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => readEdges(element));
+      observer?.observe(element);
+      return () => {
+        undoWheel?.();
+        element.removeEventListener("scroll", onScroll);
+        observer?.disconnect();
+      };
+    },
+    [readEdges],
+  );
   if (!tags.length && !onSort) return null;
-  const more = tags.length > SHOWN;
-  const top = more ? tags.slice(0, SHOWN - 1) : tags;
-  const chosen = tags.find((tag) => tag.id === tagged);
-  const shown = chosen && !top.includes(chosen) ? [...top, chosen] : top;
+  if (!tags.length && onSort)
+    return (
+      <div className="conversations-tags">
+        <div className="conversations-tags-row">
+          <Button
+            variant="quiet"
+            size="sm"
+            icon="bot"
+            className="conversations-tag conversations-sort"
+            onClick={onSort}
+          >
+            {t`Sort into tags`}
+          </Button>
+        </div>
+      </div>
+    );
+  const close = (focus = false) => {
+    setOpen(false);
+    if (focus) allButton.current?.focus();
+  };
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a row of toggles, not a form's fieldset.
-    <div className="conversations-tags" role="group" aria-label={t`Show only a tag`}>
-      {shown.map((each) => (
-        <Button
-          key={each.id}
-          variant="quiet"
-          size="sm"
-          className="conversations-tag"
-          aria-pressed={tagged === each.id}
-          onClick={() => onTag(tagged === each.id ? null : each.id)}
+    <div className="conversations-tags" data-open={open || undefined}>
+      <div className="conversations-tags-row">
+        {/* biome-ignore lint/a11y/useSemanticElements: a row of toggles, not a form's fieldset. */}
+        <div
+          ref={attach}
+          className="conversations-tags-strip"
+          role="group"
+          aria-label={t`Show only a tag`}
+          data-more-start={edges.start || undefined}
+          data-more-end={edges.end || undefined}
         >
-          <TagDot tag={each.color} />
-          {tagName(each)}
-        </Button>
-      ))}
-      {more && (
+          {tags.map((each) => (
+            <Button
+              key={each.id}
+              variant="quiet"
+              size="sm"
+              className="conversations-tag"
+              data-tag-id={each.id}
+              aria-pressed={tagged === each.id}
+              onClick={() => onTag(tagged === each.id ? null : each.id)}
+            >
+              <TagDot tag={each.color} />
+              {tagName(each)}
+            </Button>
+          ))}
+        </div>
         <Button
           ref={allButton}
           variant="quiet"
           size="sm"
-          icon="tag"
-          className="conversations-tag"
-          aria-haspopup="dialog"
-          aria-expanded={all}
-          onClick={() => setAll(true)}
+          className="conversations-tag conversations-tags-all"
+          aria-label={t`All tags · ${tags.length.toLocaleString()}`}
+          aria-expanded={open}
+          aria-controls={panel}
+          onClick={() => setOpen((was) => !was)}
         >
-          {t`All tags · ${tags.length.toLocaleString()}`}
+          {t`All`}
+          <span className="conversations-tags-count num">{tags.length.toLocaleString()}</span>
+          <Icon name="chevron-down" size={14} className="conversations-tags-chevron" />
         </Button>
-      )}
-      {onSort && (
-        <Button
-          variant="quiet"
-          size="sm"
-          icon="bot"
-          className="conversations-tag conversations-sort"
-          onClick={onSort}
-        >
-          {t`Sort into tags`}
-        </Button>
-      )}
-      {more && (
+      </div>
+      <Collapse open={open} id={panel} fit className="conversations-tags-panel">
         <AllTags
-          open={all}
-          anchor={allButton}
           tags={tags}
           tagged={tagged}
-          onClose={() => setAll(false)}
+          onClose={() => close(true)}
           onTag={(tag) => {
-            setAll(false);
+            close();
             onTag(tag);
           }}
+          {...(onSort
+            ? {
+                onSort: () => {
+                  close();
+                  onSort();
+                },
+              }
+            : {})}
         />
-      )}
+      </Collapse>
     </div>
   );
 }
 
 function AllTags({
-  open,
-  anchor,
   tags,
   tagged,
   onClose,
   onTag,
+  onSort,
 }: {
-  open: boolean;
-  anchor: RefObject<HTMLElement | null>;
   tags: readonly TagInUse[];
   tagged: TagId | null;
   onClose(): void;
   onTag(tag: TagId | null): void;
+  onSort?(): void;
 }) {
-  const phone = useMediaQuery(PHONE);
   const [query, setQuery] = useState("");
   const found = tags.filter((tag) => fold(tagName(tag)).includes(fold(query)));
-  const body = (
-    <div className="all-tags">
+  const field = useRef<HTMLInputElement>(null);
+  // A keyboard goes straight to the search; a finger isn't handed a keyboard it didn't ask for.
+  useEffect(() => {
+    if (matches("(pointer: fine)")) field.current?.focus({ preventScroll: true });
+  }, []);
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }
+  };
+  return (
+    <section className="all-tags" aria-label={t`All tags`} onKeyDown={onKeyDown}>
       <TextField
+        ref={field}
         aria-label={t`Find a tag`}
         placeholder={t`Find a tag`}
         autoComplete="off"
@@ -144,30 +233,17 @@ function AllTags({
             onClick={() => onTag(tag.id)}
           >
             <TagDot tag={tag.color} />
-            <span className="all-tags-name">{tagName(tag)}</span>
+            <Marquee className="all-tags-name">{tagName(tag)}</Marquee>
             <span className="all-tags-count num">{tag.count.toLocaleString()}</span>
           </Button>
         ))}
         {!found.length && <p className="all-tags-note">{t`No tag is called that.`}</p>}
       </div>
-    </div>
-  );
-  if (phone)
-    return (
-      <Sheet open={open} onClose={onClose} title={t`All tags`} side="bottom" doneLabel={t`Done`}>
-        {body}
-      </Sheet>
-    );
-  return (
-    <Popover
-      open={open}
-      onClose={onClose}
-      anchor={anchor}
-      side="bottom"
-      align="start"
-      title={t`All tags`}
-    >
-      {body}
-    </Popover>
+      {onSort && (
+        <Button variant="quiet" icon="bot" className="all-tags-row all-tags-sort" onClick={onSort}>
+          {t`Sort into tags`}
+        </Button>
+      )}
+    </section>
   );
 }

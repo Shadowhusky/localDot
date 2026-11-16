@@ -52,27 +52,106 @@
     border-top: 0;
   }
 
-  /* The tags in use, each a filter: a tap shows only that tag, another shows them all. They wrap
-     inside the list's gutter, so each is in sight; the rest wait behind All tags. */
+  /* The tags in use, each a filter: a tap shows only that tag, another shows them all. One line of
+     them scrolls sideways out to the screen's edge and fades where more lie past it; All stays put
+     at the end and unfolds the whole list under the line. */
+  /* Its one column is the list's width, whatever the line of tags would take. */
   .conversations-tags {
-    display: flex;
+    display: grid;
     flex: none;
-    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+  }
+
+  .conversations-tags-row {
+    display: flex;
+    align-items: center;
     gap: calc(var(--spacing) * 2);
+    min-width: 0;
     padding-inline: var(--_gutter);
+  }
+
+  /* The chips' press areas reach past them, so the strip keeps room for them inside itself. */
+  .conversations-tags-strip {
+    position: relative;
+    display: flex;
+    flex: 1;
+    gap: calc(var(--spacing) * 2);
+    min-width: 0;
+    margin-block: calc(var(--spacing) * -2);
+    margin-inline-start: calc(var(--_gutter) * -1);
+    padding-block: calc(var(--spacing) * 2);
+    padding-inline-start: var(--_gutter);
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black var(--ui-fade-start),
+      black calc(100% - var(--ui-fade-end)),
+      transparent
+    );
+    transition:
+      --ui-fade-start var(--dur-fade) var(--ease-standard),
+      --ui-fade-end var(--dur-fade) var(--ease-standard);
+  }
+
+  .conversations-tags-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .conversations-tags-strip[data-more-start] {
+    --ui-fade-start: calc(var(--spacing) * 8);
+  }
+
+  .conversations-tags-strip[data-more-end] {
+    --ui-fade-end: calc(var(--spacing) * 8);
+  }
+
+  .conversations-tags-all.ui-button {
+    gap: calc(var(--spacing) * 1.5);
+  }
+
+  .conversations-tags-all.ui-button[aria-expanded="true"] {
+    --_bg: var(--color-control);
+  }
+
+  .conversations-tags-count {
+    color: var(--color-fg-3);
+  }
+
+  .conversations-tags-chevron {
+    transition: rotate var(--dur-snappy) var(--ease-spring);
+  }
+
+  .conversations-tags-all[aria-expanded="true"] .conversations-tags-chevron {
+    rotate: 180deg;
   }
 
   .all-tags {
     display: grid;
-    gap: calc(var(--spacing) * 3);
-    min-width: min(300px, 100%);
+    gap: calc(var(--spacing) * 2);
   }
 
+  .conversations-tags-panel .all-tags {
+    padding: calc(var(--spacing) * 3) var(--_gutter) calc(var(--spacing) * 1);
+  }
+
+  /* Up and down only: a long name slides inside its row rather than widening the list. */
   .all-tags-list {
     display: grid;
     gap: calc(var(--spacing) / 2);
-    max-height: min(360px, 55dvh);
+    max-height: min(360px, 50dvh);
+    overflow-x: hidden;
     overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .all-tags-sort.ui-button {
+    box-shadow: inset 0 1px 0 var(--color-separator);
+    border-radius: 0;
   }
 
   .all-tags-row.ui-button {
@@ -92,10 +171,7 @@
   .all-tags-name {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
     text-align: start;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .all-tags-count,

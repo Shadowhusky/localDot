@@ -11,6 +11,18 @@
   initial-value: 0px;
 }
 
+@property --ui-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --ui-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @layer kit {
   .ui-status-glyph {
     display: block;
@@ -1156,6 +1168,30 @@
     min-width: 1em;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* A name too long for its room fades out at its end, then slides to show the rest of itself. */
+  .ui-marquee {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .ui-marquee-text {
+    display: inline-block;
+  }
+
+  .ui-marquee[data-over] {
+    mask-image: linear-gradient(to right, black calc(100% - var(--spacing) * 4), transparent);
+  }
+
+  .ui-marquee[data-wrap] {
+    white-space: normal;
+  }
+
+  .ui-marquee[data-wrap] > .ui-marquee-text {
+    display: inline;
   }
 
   .ui-tile {
