@@ -677,7 +677,8 @@ it("reconciled Ready publishes the fresh owner once, even after a lost mutation 
   });
   expect(posts).toBe(1);
   expect(reads).toBe(1);
-  expect(f.result.current.canReplace).toBe(false);
+  // Replace closes once the published Ready settles, which can be a render after it is chosen.
+  await waitFor(() => expect(f.result.current.canReplace).toBe(false));
 });
 
 it.each(["matching", "other request", "other revision", "legacy"] as const)(
