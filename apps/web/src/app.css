@@ -2,7 +2,9 @@
    it; below 1100 px the rail goes under the stage, and a phone drops the top bar. Every region keeps
    its box whatever the task does. */
 @custom-media --wide (width >= 1880px);
-@custom-media --tablet (700px <= width < 1100px);
+@custom-media --tablet (700px <= width < 900px),
+  (900px <= width < 1100px) and (orientation: portrait),
+  (900px <= width < 1100px) and (pointer: fine);
 @custom-media --phone (width < 700px),
   (pointer: coarse) and (orientation: landscape) and (height < 500px);
 @custom-media --phone-landscape (pointer: coarse) and (orientation: landscape) and (height < 500px);
@@ -31,13 +33,16 @@
   inherits: false;
 }
 
+/* Its edges keep clear of a device's own bars and rounded corners (the safe area), as an iPhone Duo
+   held sideways keeps its status bar down one side; the background still reaches every edge. */
 .app {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--rail-w);
   grid-template-rows: var(--bar-h) minmax(0, 1fr);
   height: 100dvh;
   min-height: 0;
-  padding-right: var(--rail-inset);
+  padding: env(safe-area-inset-top) calc(var(--rail-inset) + env(safe-area-inset-right))
+    env(safe-area-inset-bottom) 0;
   overflow: clip;
   background-color: var(--color-void);
 }
@@ -135,7 +140,7 @@
   .app {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: var(--bar-h) auto minmax(0, 1fr);
-    padding-right: 0;
+    padding-right: env(safe-area-inset-right);
   }
 
   .stage-col > .stage-frame {
@@ -170,7 +175,7 @@
     height: var(--_visible-h, 100dvh);
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
-    padding-right: 0;
+    padding: 0;
   }
 
   .app > .bar {

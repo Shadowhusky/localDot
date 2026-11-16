@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "reac
 import { useMediaQuery } from "../ui/media.ts";
 
 // Wide: the stage beside both rails. Laptop: the stage beside one rail that switches between Chat
-// and Activity. Tablet: the stage over that rail. Phone: the stage over the thread, or beside it
-// while the phone is held sideways.
+// and Activity, as a touch screen held sideways between a tablet and a laptop also has. Tablet: the
+// stage over that rail. Phone: the stage over the thread, or beside it while the phone is held
+// sideways.
 export type Layout = "wide" | "laptop" | "tablet" | "phone";
 
 // A phone held sideways is wider than a phone, and far too short for the tablet layout.
@@ -13,12 +14,18 @@ export const HANDHELD = `(width < 700px), ${LANDSCAPE_PHONE}`;
 // Held upright, a screen too wide for a phone's stack and too narrow for a list beside the
 // conversation, as the iPhone Duo open: the list slides over the conversation instead.
 export const SLIDE_OVER = "(600px <= width < 700px) and (orientation: portrait)";
+// A touch screen held sideways between a tablet and a laptop, as the iPhone Duo open: too short to
+// stack the computer over the chat, so it takes the laptop's layout, the computer beside the chat,
+// and the conversations slide over the computer when they are wanted.
+export const TOUCH_SIDEWAYS =
+  "(pointer: coarse) and (orientation: landscape) and (900px <= width < 1100px)";
 
 export function useLayout(): Layout {
   const wide = useMediaQuery("(width >= 1880px)");
   const laptop = useMediaQuery("(width >= 1100px)");
   const handheld = useMediaQuery(HANDHELD);
-  return handheld ? "phone" : wide ? "wide" : laptop ? "laptop" : "tablet";
+  const sideways = useMediaQuery(TOUCH_SIDEWAYS);
+  return handheld ? "phone" : wide ? "wide" : laptop || sideways ? "laptop" : "tablet";
 }
 
 // The on-screen keyboard takes this much of a phone's height or more when it is up.

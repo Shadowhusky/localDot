@@ -222,7 +222,13 @@ import {
 } from "./shell/island.ts";
 import { LocalDotSwitcher } from "./shell/LocalDotSwitcher.tsx";
 import { LookChooser } from "./shell/LookChooser.tsx";
-import { SLIDE_OVER, useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
+import {
+  SLIDE_OVER,
+  TOUCH_SIDEWAYS,
+  useKeyboardUp,
+  useLayout,
+  useViewportFit,
+} from "./shell/layout.ts";
 import { lazyScreen } from "./shell/lazy-screen.tsx";
 import { forgetLocalDot, useOtherLocalDots } from "./shell/localdot-handoff.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
@@ -2195,12 +2201,28 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   // The conversations rail, beside the stage while Watch shows on anything wider than a phone.
   const railShown = !sheets && !replayId && !full && !onboarding.open;
   const railExpanded = panels.sessions ?? railByDefault;
-  const pickFromRail = useHandler((id: string, sessions?: readonly string[]) =>
-    overviewShown ? leaveOverviewFor(id, sessions) : pickConversation(id, sessions),
-  );
-  const newFromRail = useHandler(newConversation.run);
+  // Held sideways between a tablet and a laptop, the expanded list lies over the computer: it goes
+  // once a conversation is chosen from it.
+  const railOverlays = useMediaQuery(TOUCH_SIDEWAYS);
+  const railOver = railOverlays && railShown && railExpanded;
+  const pickFromRail = useHandler((id: string, sessions?: readonly string[]) => {
+    if (railOver) updatePanels({ sessions: false });
+    return overviewShown ? leaveOverviewFor(id, sessions) : pickConversation(id, sessions);
+  });
+  const newFromRail = useHandler(() => {
+    if (railOver) updatePanels({ sessions: false });
+    return newConversation.run();
+  });
   const deletedFromRail = useHandler(conversationList.onDeleted);
   const expandRail = useHandler((sessions: boolean) => updatePanels({ sessions }));
+  useEffect(() => {
+    if (!railOver) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) updatePanels({ sessions: false });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [railOver, updatePanels]);
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
       <AskForm
@@ -3966,7 +3988,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   overview={railOverview}
                 />
               )}
-              {railShown && railExpanded && (wide || layout === "laptop") && (
+              {railOver && (
+                // A tap beside the list puts it away; its own toggle and Escape do too.
+                // biome-ignore lint/a11y/noStaticElementInteractions: a pointer's way out; the keys have the toggle.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: as above.
+                <div className="sessions-scrim" onClick={() => expandRail(false)} />
+              )}
+              {railShown && railExpanded && !railOverlays && (wide || layout === "laptop") && (
                 <ResizeHandle
                   panel={SESSIONS_WIDTH}
                   property="--sessions-w"
@@ -3997,7 +4025,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   panel={CHAT_WIDTH}
                   property="--rail-w"
                   label={t`Conversation width`}
-                  beside={railShown ? (railExpanded ? SESSIONS_WIDTH : SESSIONS_FOLDED) : 0}
+                  beside={
+                    railShown
+                      ? railExpanded && !railOverlays
+                        ? SESSIONS_WIDTH
+                        : SESSIONS_FOLDED
+                      : 0
+                  }
                   className="rail-resize-chat"
                 />
               )}

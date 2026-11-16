@@ -77,3 +77,35 @@ test.describe("the Duo held sideways", () => {
     expect(Math.round(chat?.x ?? 0)).toBe(Math.round(list?.width ?? -1));
   });
 });
+
+// Studio held sideways: too short to stack the computer over the chat, so the computer sits beside
+// the chat, as large as the height allows, and the list slides over the computer when wanted.
+test.describe("Studio on the Duo held sideways", () => {
+  test.use({ viewport: SIDEWAYS, viewStyle: "studio" });
+
+  test("puts the computer beside the chat and slides the list over it", async ({ page, ui }) => {
+    await ui.open("running");
+    const stage = page.locator(".stage-col");
+    const chat = page.locator(".rail-chat");
+    const [stageBox, chatBox] = [await stage.boundingBox(), await chat.boundingBox()];
+    expect((stageBox?.x ?? 0) + (stageBox?.width ?? 0)).toBeLessThanOrEqual(chatBox?.x ?? 0);
+    expect(Math.round(chatBox?.y ?? -1)).toBeLessThan(20);
+    expect(stageBox?.width ?? 0).toBeGreaterThan(SIDEWAYS.width / 2);
+
+    const expand = page.getByRole("button", { name: "Expand conversations" });
+    await expand.click();
+    const rail = page.locator(".sessions");
+    await expect(rail).toHaveAttribute("data-expanded");
+    await expect(page.locator(".sessions-scrim")).toBeVisible();
+    // Over the computer, which keeps its room.
+    expect(await stage.boundingBox()).toEqual(stageBox);
+    await expect.poll(async () => Math.round((await rail.boundingBox())?.width ?? 0)).toBe(256);
+
+    await page.locator(".sessions-scrim").click({ position: { x: SIDEWAYS.width - 60, y: 300 } });
+    await expect(rail).not.toHaveAttribute("data-expanded");
+    await expect(page.locator(".sessions-scrim")).toHaveCount(0);
+    await expand.click();
+    await page.keyboard.press("Escape");
+    await expect(rail).not.toHaveAttribute("data-expanded");
+  });
+});
