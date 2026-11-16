@@ -388,7 +388,7 @@
    uncovers the names. */
 .app[data-sessions] {
   --_sessions-w: calc(var(--spacing) * 14);
-  padding-left: var(--_sessions-w);
+  padding-left: calc(var(--_sessions-w) + env(safe-area-inset-left));
   transition: padding-left var(--dur-default) var(--ease-spring);
 }
 
@@ -418,7 +418,7 @@
 .sessions {
   position: fixed;
   inset-block: 0;
-  left: 0;
+  left: env(safe-area-inset-left);
   display: flex;
   flex-direction: column;
   width: var(--_sessions-w);
@@ -428,6 +428,41 @@
     width var(--dur-default) var(--ease-spring),
     opacity var(--dur-gentle) var(--ease-spring) var(--dur-press),
     translate var(--dur-gentle) var(--ease-spring) var(--dur-press);
+}
+
+/* On a touch screen held sideways between a tablet and a laptop (the iPhone Duo open) the computer
+   keeps its room: the list, expanded, slides over it as a raised layer over the dimmed page, and goes
+   back the way it came. */
+@media (pointer: coarse) and (orientation: landscape) and (900px <= width < 1100px) {
+  .app[data-sessions="expanded"] {
+    --_sessions-w: calc(var(--spacing) * 14);
+  }
+
+  .sessions[data-expanded] {
+    z-index: calc(var(--layer-island) + 2);
+    width: var(--sessions-w);
+    background-color: var(--color-void);
+    box-shadow: var(--shadow-overlay);
+  }
+
+  /* With the page, which follows the part of the screen the keyboard leaves (app.css). */
+  .app > .watch > :is(.sessions, .sessions-scrim) {
+    position: absolute;
+  }
+}
+
+.sessions-scrim {
+  position: fixed;
+  z-index: calc(var(--layer-island) + 1);
+  inset: 0;
+  background-color: var(--color-scrim);
+  animation: sessions-scrim-in var(--dur-default) var(--ease-standard);
+}
+
+@keyframes sessions-scrim-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .app[data-entering] .sessions {

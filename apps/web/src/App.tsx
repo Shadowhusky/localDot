@@ -222,7 +222,14 @@ import {
 } from "./shell/island.ts";
 import { LocalDotSwitcher } from "./shell/LocalDotSwitcher.tsx";
 import { LookChooser } from "./shell/LookChooser.tsx";
-import { useKeyboardUp, useLayout, useViewportFit } from "./shell/layout.ts";
+import {
+  LANDSCAPE_PHONE,
+  SLIDE_OVER,
+  TOUCH_SIDEWAYS,
+  useKeyboardUp,
+  useLayout,
+  useViewportFit,
+} from "./shell/layout.ts";
 import { lazyScreen } from "./shell/lazy-screen.tsx";
 import { forgetLocalDot, useOtherLocalDots } from "./shell/localdot-handoff.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
@@ -260,6 +267,7 @@ import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
 import { switchToDot, useLocalDots } from "./shell/useLocalDots.ts";
 import { useMobileScreen } from "./shell/useMobileScreen.ts";
+import { usePictureInPicture, useTuckOnReading } from "./shell/usePictureInPicture.ts";
 import { useStopAll } from "./shell/useStopAll.ts";
 import { otherView, switchViewLabel, useViewStyle, type ViewStyle } from "./shell/view-style.ts";
 import { runningEngine } from "./stage/BrowserWindow.tsx";
@@ -276,6 +284,7 @@ import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer, announce, withdraw } from "./ui/Announcer.tsx";
 import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
+import { HitButton } from "./ui/HitButton.tsx";
 import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 import { isApple } from "./ui/Kbd.tsx";
@@ -979,11 +988,15 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const viewStyle = guest ? { ...chosenStyle, value: "chat" as const } : chosenStyle;
   // Chat: a stack of the list, the conversation and the computer, opened out from tablet width up.
   const stack = viewStyle.value === "chat";
-  const split = stack && layout !== "phone";
+  const slideOverWidth = useMediaQuery(SLIDE_OVER);
+  const split = stack && (layout !== "phone" || slideOverWidth);
+  // The list over the conversation rather than beside it.
+  const slideOver = split && slideOverWidth;
   // On a wide screen Replay takes the whole page, under the top bar.
   const wideReplay = stack && layout !== "phone" && !!replayId;
   // Studio's phone layout.
   const phone = layout === "phone" && !stack;
+  const sidewaysPhone = useMediaQuery(LANDSCAPE_PHONE);
   // No rails: what a wide Studio keeps in them comes up in sheets.
   const sheets = phone || stack;
   const nav = usePhoneRoute(stack);
@@ -1007,6 +1020,8 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const railByDefault = useRailExpandedByDefault(layout);
   const mobileScreen = useMobileScreen(phone);
+  // Upright, a phone's screen sits over the conversation and tucks into a corner to give it room.
+  const stackedPhone = phone && !sidewaysPhone;
   const panelsButton = useRef<HTMLButtonElement>(null);
   const { panels, update: updatePanels } = usePanelPreferences();
   const railView = panels.view;
@@ -1601,6 +1616,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     reason: conversationReason ?? (fresh ? ALREADY_NEW : undefined),
   };
   const curtain = useCurtain(opening ? "checking" : appStatus.computer, !!replayId);
+  const tucked = stackedPhone && mobileScreen.minimized && !replayId && !curtain.up;
   const [dock, setDock] = useState<HTMLDivElement | null>(null);
   // This task holds the computer: its light, the thumbnail at the thread's foot and the live picture.
   const holding = !curtain.up && (appStatus.control || yours);
@@ -1623,7 +1639,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       (!session.sessionId ||
         (agent.history === true && (session.resting || agent.availability !== "loading"))),
     presented: picture === "live" && !sharedLook.waiting,
-    yielded: curtain.up || !!replayId || mobileScreen.minimized || (sheets && settings.open),
+    yielded: curtain.up || !!replayId || tucked || (sheets && settings.open),
   });
   // The computer as it is, which is what a conversation at rest or a new one shows: taking one up
   // keeps the picture rather than covering it.
@@ -2192,12 +2208,28 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   // The conversations rail, beside the stage while Watch shows on anything wider than a phone.
   const railShown = !sheets && !replayId && !full && !onboarding.open;
   const railExpanded = panels.sessions ?? railByDefault;
-  const pickFromRail = useHandler((id: string, sessions?: readonly string[]) =>
-    overviewShown ? leaveOverviewFor(id, sessions) : pickConversation(id, sessions),
-  );
-  const newFromRail = useHandler(newConversation.run);
+  // Held sideways between a tablet and a laptop, the expanded list lies over the computer: it goes
+  // once a conversation is chosen from it.
+  const railOverlays = useMediaQuery(TOUCH_SIDEWAYS);
+  const railOver = railOverlays && railShown && railExpanded;
+  const pickFromRail = useHandler((id: string, sessions?: readonly string[]) => {
+    if (railOver) updatePanels({ sessions: false });
+    return overviewShown ? leaveOverviewFor(id, sessions) : pickConversation(id, sessions);
+  });
+  const newFromRail = useHandler(() => {
+    if (railOver) updatePanels({ sessions: false });
+    return newConversation.run();
+  });
   const deletedFromRail = useHandler(conversationList.onDeleted);
   const expandRail = useHandler((sessions: boolean) => updatePanels({ sessions }));
+  useEffect(() => {
+    if (!railOver) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) updatePanels({ sessions: false });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [railOver, updatePanels]);
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
       <AskForm
@@ -2342,9 +2374,16 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
     handedOver: !!takeover,
     budgetHeld: agent.snapshot?.budgetHold === "task",
   });
+  const reading = useTuckOnReading(
+    stackedPhone && !tucked && !replayId && !curtain.up && !fullScreen.on,
+    () => mobileScreen.setMinimized(true),
+  );
+  // The conversation takes the tucked screen's room once the reading that tucked it comes to rest.
+  const roomy = tucked && !reading;
+  usePictureInPicture(mobileScreen.ref, tucked, roomy);
   const { focus, leave: leaveFocus } = useFocusMode(
     !curtain.up && !replayId && !stack,
-    !!question || mobileScreen.minimized,
+    !!question || tucked,
     fullScreen.on && phone,
   );
   const touchStill = useStill(focus);
@@ -2383,7 +2422,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         : (session.model.title ?? NEW_TITLE);
   const page = useRef<HTMLDivElement>(null);
   useViewportFit(page, !stack);
-  useChatFit(page, stack);
+  // Held sideways, the open iPhone Duo's keyboard covers the foot of Studio's laptop layout: the
+  // page follows what the keyboard leaves in view, as Chat does.
+  useChatFit(page, stack || railOverlays);
   // The top bar's parts, kept from one render to the next so the bar draws only when they change.
   const saved = settings.saved;
   const brand = useMemo(
@@ -2668,6 +2709,12 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   const monitorButton = useRef<HTMLButtonElement>(null);
   const tuck = useDotTuck({ showDot, flyer, more: moreButton, look: shown.look });
   const [listHidden, setListHidden] = useState(false);
+  // Slid over, the list rests out of the way; beside the conversation it rests in sight.
+  useEffect(() => {
+    setListHidden(slideOver);
+  }, [slideOver]);
+  const hideList = useCallback(() => setListHidden(true), []);
+  const showList = useCallback(() => setListHidden(false), []);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [dotMenu, setDotMenu] = useState(false);
   const [dressing, setDressing] = useState<ConversationEntry | null>(null);
@@ -3105,12 +3152,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           listed={listed}
           onPicture={onPicture}
           connection={connection}
-          covered={
-            stageAway ||
-            overviewShown ||
-            (!replayId && mobileScreen.minimized) ||
-            (sheets && settings.open)
-          }
+          covered={stageAway || overviewShown || (sheets && settings.open)}
           manual={
             yours && manualGeometry && !agent.model.ended
               ? {
@@ -3142,21 +3184,28 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
             !approval &&
             !question &&
             !curtain.up &&
-            !mobileScreen.minimized &&
+            !tucked &&
             !agent.model.safetyPaused?.paused &&
             !agent.model.budget &&
             !agent.model.retrying
           }
         />
         <SharedScreen look={sharedLook} />
-        {!stack && !yours && !full && !focus && stageHud.live && (
+        {!stack && !yours && !full && !focus && !tucked && stageHud.live && (
           <StageExpand
             phone={phone}
             onEnter={fullScreen.enter}
-            onMinimize={phone ? () => mobileScreen.setMinimized(true) : undefined}
+            onMinimize={stackedPhone ? () => mobileScreen.setMinimized(true) : undefined}
           />
         )}
         <SwitchCover state={stageCover} onShowComputer={endStageSwitch} />
+        {tucked && (
+          <HitButton
+            className="stage-pip"
+            label={t`Show screen`}
+            onClick={() => mobileScreen.setMinimized(false)}
+          />
+        )}
       </StageFrame>
     </ErrorBoundary>
   );
@@ -3324,11 +3373,15 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                 startsGroup: index === 0,
                 run: () => otherLocalDots.open(link.url),
               })),
-              {
-                label: mobileScreen.minimized ? t`Show screen` : t`Minimize screen`,
-                icon: mobileScreen.minimized ? "monitor" : "chevron-up",
-                run: () => mobileScreen.setMinimized(!mobileScreen.minimized),
-              },
+              ...(stackedPhone
+                ? [
+                    {
+                      label: tucked ? t`Show screen` : t`Minimize screen`,
+                      icon: tucked ? ("monitor" as const) : ("chevron-up" as const),
+                      run: () => mobileScreen.setMinimized(!tucked),
+                    },
+                  ]
+                : []),
               {
                 label: t`Full screen`,
                 icon: "expand",
@@ -3569,6 +3622,9 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
       nav={nav}
       split={split}
       listHidden={listHidden}
+      slideOver={slideOver}
+      onHideList={hideList}
+      onShowList={showList}
       flyer={flyer}
       flightFrom={flightFrom}
       showDot={showDot.value}
@@ -3587,10 +3643,12 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
           onOpen={(row, from) => {
             flightFrom.current = from;
             pickConversation(row.entry.sessionId, row.entry.sessions);
+            if (slideOver) hideList();
           }}
           onNew={() => {
             if (fresh) nav.show("new");
             else newConversation.run();
+            if (slideOver) hideList();
           }}
           newReason={conversationReason}
           onReplay={() => selectReplay(LIBRARY)}
@@ -3876,7 +3934,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         data-view={viewStyle.value}
         data-guest={guest ? "" : undefined}
         data-sessions={railShown ? (railExpanded ? "expanded" : "collapsed") : undefined}
-        data-screen-minimized={(!replayId && mobileScreen.minimized) || undefined}
+        data-screen-minimized={roomy || undefined}
         // Replay's rail takes the chat's column whether or not Watch shows the chat.
         data-chat-hidden={(!chatVisible && !replayId) || undefined}
         data-activity-hidden={wide || undefined}
@@ -3952,7 +4010,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   overview={railOverview}
                 />
               )}
-              {railShown && railExpanded && (wide || layout === "laptop") && (
+              {railOver && (
+                // A tap beside the list puts it away; its own toggle and Escape do too.
+                // biome-ignore lint/a11y/noStaticElementInteractions: a pointer's way out; the keys have the toggle.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: as above.
+                <div className="sessions-scrim" onClick={() => expandRail(false)} />
+              )}
+              {railShown && railExpanded && !railOverlays && (wide || layout === "laptop") && (
                 <ResizeHandle
                   panel={SESSIONS_WIDTH}
                   property="--sessions-w"
@@ -3963,19 +4027,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   className="rail-resize-sessions"
                 />
               )}
-              {mobileScreen.minimized && (
-                <div className="mobile-screen-restore">
-                  <Button icon="monitor" onClick={() => mobileScreen.setMinimized(false)}>
-                    {t`Show screen`}
-                  </Button>
-                </div>
-              )}
-              <main
-                ref={mobileScreen.ref}
-                className="stage-col"
-                aria-label={t`Computer`}
-                inert={mobileScreen.minimized}
-              >
+              <main ref={mobileScreen.ref} className="stage-col" aria-label={t`Computer`}>
                 {stageFrame}
               </main>
               {chatVisible && (wide || layout === "laptop") && (
@@ -3983,7 +4035,13 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   panel={CHAT_WIDTH}
                   property="--rail-w"
                   label={t`Conversation width`}
-                  beside={railShown ? (railExpanded ? SESSIONS_WIDTH : SESSIONS_FOLDED) : 0}
+                  beside={
+                    railShown
+                      ? railExpanded && !railOverlays
+                        ? SESSIONS_WIDTH
+                        : SESSIONS_FOLDED
+                      : 0
+                  }
                   className="rail-resize-chat"
                 />
               )}
@@ -4461,7 +4519,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
         {showDot.value && dotArrival.look && (
           <ErrorBoundary quiet>
             <PresenceLayer
-              place={mobileScreen.minimized && !replayId && !onboarding.open ? null : place}
+              place={tucked && !onboarding.open ? null : place}
               arrived={dotArrival.settled}
               feed={
                 onboarding.open

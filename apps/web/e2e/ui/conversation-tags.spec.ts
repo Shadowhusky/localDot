@@ -69,7 +69,7 @@ test("Sort into tags tags every conversation with the user's model, and Undo tak
   ui,
 }) => {
   await ui.open("conversations");
-  await filters(page).getByRole("button", { name: "Sort into tags" }).click();
+  await page.getByRole("button", { name: "Sort into tags" }).click();
   const dialog = page.getByRole("alertdialog", { name: "Sort into tags" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("radio", { name: /^Detailed/ }).check();
@@ -89,18 +89,18 @@ test("Sort into tags tags every conversation with the user's model, and Undo tak
   await expect(page.locator(".phone-row-wrap .ui-tag-mark")).toHaveCount(0);
 
   // Auto tagging is kept as soon as it is switched.
-  await filters(page).getByRole("button", { name: "Sort into tags" }).click();
+  await page.getByRole("button", { name: "Sort into tags" }).click();
   const auto = dialog.getByRole("switch", { name: /^Tag new conversations as they finish/ });
   await auto.check();
   await page.getByRole("button", { name: "Cancel" }).click();
-  await filters(page).getByRole("button", { name: "Sort into tags" }).click();
+  await page.getByRole("button", { name: "Sort into tags" }).click();
   await expect(auto).toBeChecked();
 });
 
 // A sort says how far it has come, and hidden it goes on in a toast that becomes its result.
 test("a sort shows its progress, and goes on in a toast once hidden", async ({ page, ui }) => {
   await ui.open("conversations");
-  await filters(page).getByRole("button", { name: "Sort into tags" }).click();
+  await page.getByRole("button", { name: "Sort into tags" }).click();
   const dialog = page.getByRole("alertdialog", { name: "Sort into tags" });
   await dialog.getByRole("button", { name: "Sort", exact: true }).click();
   await expect(dialog.getByRole("progressbar", { name: "Sorting" })).toBeVisible();
@@ -114,15 +114,14 @@ test("a sort shows its progress, and goes on in a toast once hidden", async ({ p
   ).toBeVisible();
 });
 
-// Past a row's worth of tags, the rest are a search away, the row never scrolling sideways.
-test("many tags keep to a row, the rest found under All tags", async ({ page, ui }) => {
+// A dozen conversations, each with a tag of its own: more than a line holds.
+async function manyTags(page: Page, name = (at: number) => `Topic ${at + 1}`) {
   await page.route("**/api/conversations", async (route) => {
     const reply = await route.fetch().catch(() => undefined);
     if (!reply) return route.abort().catch(() => {});
     const listed = await reply.json();
     const colours = ["red", "orange", "yellow", "green", "blue", "purple"];
     const first = listed.conversations[0];
-    // A dozen conversations, each with a tag of its own.
     const conversations = Array.from({ length: 12 }, (_, at) => ({
       ...first,
       sessionId: `01HZ00000000000000000000${String(at + 10).padStart(2, "0")}`,
@@ -132,28 +131,94 @@ test("many tags keep to a row, the rest found under All tags", async ({ page, ui
         {
           id: `01HZ0000000000000000000T${String(at + 1).padStart(2, "0")}`,
           color: colours[at % colours.length],
-          name: `Topic ${at + 1}`,
+          name: name(at),
         },
       ],
     }));
     await route.fulfill({ json: { ...listed, conversations } });
   });
+}
+
+// The tags keep to one line that scrolls sideways, with no bar, under an All that stays put and
+// unfolds every tag in place, with a search and the sort.
+test("many tags keep to one line under a pinned All, which unfolds them all in place", async ({
+  page,
+  ui,
+}) => {
+  await manyTags(page);
   await ui.open("conversations");
   const row = filters(page);
-  await expect(row.getByRole("button", { name: /^All tags · \d+$/ })).toBeVisible();
-  expect(await row.locator(".conversations-tag .ui-tag-dot").count()).toBeLessThanOrEqual(8);
-  // Nothing in the row scrolls, sideways or up and down: it wraps.
-  await expect(row).toHaveCSS("overflow-x", "visible");
-  await expect(row).toHaveCSS("overflow-y", "visible");
-  await expect(row).toHaveCSS("flex-wrap", "wrap");
-  await row.getByRole("button", { name: /^All tags/ }).click();
-  const all = page.getByRole("dialog", { name: "All tags" });
-  await all.getByRole("textbox", { name: "Find a tag" }).fill("Topic 12");
-  await all.getByRole("button", { name: /^Topic 12/ }).click();
-  await expect(all).toBeHidden();
-  await expect(row.getByRole("button", { name: "Topic 12" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  const all = page.getByRole("button", { name: "All tags · 12" });
+  await expect(all).toBeVisible();
+  const tops = await row
+    .locator(".conversations-tag")
+    .evaluateAll((chips) => chips.map((chip) => Math.round(chip.getBoundingClientRect().top)));
+  expect(tops).toHaveLength(12);
+  expect(new Set(tops).size).toBe(1);
+  await expect(row).toHaveCSS("flex-wrap", "nowrap");
+  await expect(row).toHaveCSS("overflow-x", "auto");
+  await expect(row).toHaveCSS("scrollbar-width", "none");
+  expect(await row.evaluate((strip) => strip.scrollWidth > strip.clientWidth)).toBe(true);
+  const pinned = await all.boundingBox();
+  await row.evaluate((strip) => {
+    strip.scrollLeft = strip.scrollWidth;
+  });
+  expect(await all.boundingBox()).toEqual(pinned);
+
+  await all.click();
+  await expect(all).toHaveAttribute("aria-expanded", "true");
+  const list = page.getByRole("region", { name: "All tags" });
+  await expect(list.getByRole("button", { name: "Sort into tags" })).toBeVisible();
+  // It unfolds under the line, not over it.
+  const [listBox, allBox] = [await list.boundingBox(), await all.boundingBox()];
+  expect(listBox?.y ?? 0).toBeGreaterThanOrEqual((allBox?.y ?? 0) + (allBox?.height ?? 0));
+  await list.getByRole("textbox", { name: "Find a tag" }).fill("Topic 12");
+  await list.getByRole("button", { name: /^Topic 12/ }).click();
+  await expect(all).toHaveAttribute("aria-expanded", "false");
+  const chosen = row.getByRole("button", { name: "Topic 12" });
+  await expect(chosen).toHaveAttribute("aria-pressed", "true");
+  await expect(chosen).toBeInViewport({ ratio: 0.9 });
   await expect(page.locator(".phone-row-wrap")).toHaveCount(1);
+});
+
+// A name too long for its row slides to show the rest of itself, and wraps under reduced motion.
+test.describe("a long tag name", () => {
+  const LONG = "Household paperwork and tax form";
+  const longName = (at: number) => (at === 0 ? LONG : `Topic ${at + 1}`);
+
+  test("wraps under reduced motion, so the whole name shows", async ({ page, ui }) => {
+    await manyTags(page, longName);
+    await ui.open("conversations");
+    await page.getByRole("button", { name: /^All tags/ }).click();
+    const name = page.getByRole("region", { name: "All tags" }).locator(".ui-marquee").first();
+    await name.evaluate((box) => {
+      (box as HTMLElement).style.maxWidth = "80px";
+    });
+    await expect(name).toHaveAttribute("data-wrap");
+    await expect(name).toHaveText(LONG);
+    expect(await name.evaluate((box) => box.scrollWidth <= box.clientWidth + 1)).toBe(true);
+  });
+
+  test.describe("in motion", () => {
+    test.use({ reducedMotion: "no-preference" });
+    test("slides to show the rest of itself", async ({ page, ui }) => {
+      await manyTags(page, longName);
+      await ui.open("conversations");
+      await page.getByRole("button", { name: /^All tags/ }).click();
+      const name = page.getByRole("region", { name: "All tags" }).locator(".ui-marquee").first();
+      await name.evaluate((box) => {
+        (box as HTMLElement).style.maxWidth = "80px";
+      });
+      await expect(name).toHaveAttribute("data-over");
+      await expect
+        .poll(() =>
+          name
+            .locator(".ui-marquee-text")
+            .evaluate(
+              (text) => text.getAnimations().filter((a) => a.playState === "running").length,
+            ),
+        )
+        .toBe(1);
+    });
+  });
 });

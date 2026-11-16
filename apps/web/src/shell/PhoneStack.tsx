@@ -26,6 +26,10 @@ const SLOP = 10;
 const SIDEWAYS = 1.3;
 // In a browser tab the first of the screen's width belongs to Safari's own back swipe.
 const SAFARI_EDGE = 20;
+// How far in from the leading edge a finger can start the slid-over list's swipe, past Safari's.
+const LIST_EDGE = 28;
+// The room a hidden slid-over list keeps past the edge for its shadow (--spacing × 8).
+const SHADOW_ROOM = 32;
 const AT_REST = 0.0008;
 const SIDEWAYS_CONTENT = ".md-table, .thread-message pre, .thread-bubble-files";
 const TAPS_LIST_FROM = 0.04;
@@ -47,6 +51,11 @@ export interface PhoneStackProps {
   split: boolean;
   // The list is out of the way beside the conversation.
   listHidden?: boolean;
+  // Held upright, a screen between a phone's and a tablet's: the conversation keeps the whole width
+  // and the list slides over it, the conversation dimmed behind, until one is chosen.
+  slideOver?: boolean;
+  onHideList?(): void;
+  onShowList?(): void;
   list: ReactNode;
   // The conversation's top bar, and the thread under it.
   bar: ReactNode;
@@ -69,6 +78,9 @@ export function PhoneStack({
   nav,
   split,
   listHidden = false,
+  slideOver = false,
+  onHideList,
+  onShowList,
   list,
   bar,
   thread,
@@ -339,6 +351,137 @@ export function PhoneStack({
     };
   }, []);
 
+  // Slid over, the list follows a finger 1:1: in from the leading edge, and out again by a drag on
+  // it or on the dimmed conversation. Let go, it goes the way it was thrown, or back if it wasn't.
+  const listState = useRef({ hidden: listHidden, onHideList, onShowList });
+  listState.current = { hidden: listHidden, onHideList, onShowList };
+  useEffect(() => {
+    const element = root.current;
+    const panel = listScreen.current;
+    if (!element || !panel || !split || !slideOver) return;
+    let finger: {
+      id: number;
+      x: number;
+      y: number;
+      on: boolean;
+      base: number;
+      from: number;
+      at: number;
+      v: Velocity;
+    } | null = null;
+    let swallowClick = false;
+    const scrim = () => element.querySelector<HTMLElement>(".phone-scrim");
+    const span = () => (panel.offsetWidth || 1) + SHADOW_ROOM;
+    const place = (p: number) => {
+      panel.style.transition = "none";
+      panel.style.translate = `${(p - 1) * span()}px 0`;
+      const dim = scrim();
+      if (!dim) return;
+      dim.style.transition = "none";
+      dim.style.opacity = String(p);
+    };
+    const settle = () => {
+      panel.style.transition = "";
+      panel.style.translate = "";
+      const dim = scrim();
+      if (!dim) return;
+      dim.style.transition = "";
+      dim.style.opacity = "";
+    };
+    const down = (event: PointerEvent) => {
+      if (!event.isPrimary || event.pointerType === "mouse") return;
+      const target = event.target as Element;
+      if (target.closest("input, textarea, [contenteditable]")) return;
+      if (scrollsSideways(target, element)) return;
+      const hidden = listState.current.hidden;
+      if (hidden) {
+        const at = event.clientX - element.getBoundingClientRect().left;
+        const from = browserTab() ? SAFARI_EDGE : 0;
+        if (at < from || at > from + LIST_EDGE) return;
+      } else if (!target.closest(".phone-list, .phone-scrim")) return;
+      const from = hidden ? 0 : 1;
+      finger = {
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        on: false,
+        base: 0,
+        from,
+        at: from,
+        v: new Velocity(),
+      };
+    };
+    const move = (event: PointerEvent) => {
+      if (!finger || event.pointerId !== finger.id) return;
+      const dx = event.clientX - finger.x;
+      const dy = event.clientY - finger.y;
+      if (!finger.on) {
+        if (Math.hypot(dx, dy) < SLOP) return;
+        const opening = finger.from === 0;
+        if ((opening ? dx < 0 : dx > 0) || Math.abs(dx) < Math.abs(dy) * SIDEWAYS) {
+          finger = null;
+          return;
+        }
+        finger.on = true;
+        finger.base = dx;
+        try {
+          element.setPointerCapture?.(event.pointerId);
+        } catch {
+          // A pointer the browser no longer tracks; the window still hears it.
+        }
+      }
+      const moved = dx - finger.base;
+      finger.at = clamp(finger.from + moved / span());
+      finger.v.add(moved);
+      place(finger.at);
+    };
+    const up = (event: PointerEvent) => {
+      if (!finger || event.pointerId !== finger.id) return;
+      const was = finger;
+      finger = null;
+      if (!was.on) return;
+      swallowClick = true;
+      const v = was.v.get();
+      const open =
+        event.type !== "pointercancel" &&
+        (Math.abs(v) > 80 ? was.at * span() + project(v) > span() / 2 : was.at > 0.5);
+      // The list's own rest styles take over from where the finger left it.
+      settle();
+      const { hidden, onHideList: hide, onShowList: show } = listState.current;
+      if (open && hidden) show?.();
+      else if (!open && !hidden) hide?.();
+    };
+    const click = (event: MouseEvent) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    element.addEventListener("pointerdown", down, true);
+    element.addEventListener("click", click, true);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      element.removeEventListener("pointerdown", down, true);
+      element.removeEventListener("click", click, true);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      settle();
+    };
+  }, [split, slideOver]);
+
+  // Escape puts a slid-over list away, as a tap beside it does.
+  useEffect(() => {
+    if (!split || !slideOver || listHidden || !onHideList) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) onHideList();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [split, slideOver, listHidden, onHideList]);
+
   // A table or block of code that doesn't fit takes a sideways finger; one that fits leaves it to
   // the swipe back. The browser reads this as the finger lands, so it is written ahead.
   useEffect(() => {
@@ -370,17 +513,28 @@ export function PhoneStack({
       ref={root}
       className="phone-stack"
       data-split={split || undefined}
+      data-slide-over={(split && slideOver) || undefined}
       data-list-hidden={(split && listHidden) || undefined}
       data-level={level}
     >
-      <div ref={listScreen} className="phone-screen phone-list" inert={!split && level > 0}>
+      <div
+        ref={listScreen}
+        className="phone-screen phone-list"
+        inert={(!split && level > 0) || (slideOver && listHidden)}
+      >
         {list}
         <div ref={dim} className="phone-dim" />
       </div>
+      {split && slideOver && (
+        // A tap on the dimmed conversation puts the list away; the list's own button and Escape do too.
+        // biome-ignore lint/a11y/noStaticElementInteractions: a pointer's way out; the keys have the list's button.
+        // biome-ignore lint/a11y/useKeyWithClickEvents: as above.
+        <div className="phone-scrim" onClick={onHideList} />
+      )}
       <div
         ref={chatScreen}
         className="phone-screen phone-chat"
-        inert={!split && level === 0}
+        inert={(!split && level === 0) || (slideOver && !listHidden)}
         data-away={level === 0 && !split ? "" : undefined}
       >
         <div ref={edge} className="phone-edge" />
@@ -390,7 +544,7 @@ export function PhoneStack({
         </div>
         {computer}
       </div>
-      {split && (
+      {split && !slideOver && (
         <ResizeHandle
           panel={CHAT_LIST_WIDTH}
           property="--chat-list-w"

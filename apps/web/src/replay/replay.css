@@ -2,7 +2,9 @@
    the rail, or a recording on the stage with its transport, dot's band and the steps in the rail.
    Its parts take Watch's own places in the page grid, so nothing moves between the two: the rail
    has the chat's column at every width, as the page keeps it while Replay shows. */
-@custom-media --tablet (700px <= width < 1100px);
+@custom-media --tablet (700px <= width < 900px),
+  (900px <= width < 1100px) and (orientation: portrait),
+  (900px <= width < 1100px) and (pointer: fine);
 @custom-media --phone (width < 700px),
   (pointer: coarse) and (orientation: landscape) and (height < 500px);
 

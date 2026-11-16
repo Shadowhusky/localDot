@@ -20,7 +20,7 @@ import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
 import { GroupHeading } from "../ui/GroupHeading.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
-import { useVirtualRows } from "../ui/useVirtualRows.ts";
+import { useVirtualRows, WHOLE_STEPS } from "../ui/useVirtualRows.ts";
 import { ActivityDetail } from "./ActivityDetails.tsx";
 import { ActivityRow, PlainSteps, RunningTime } from "./ActivityRow.tsx";
 import { clock, groupReadSteps, hasDetails, modelMarks } from "./activity.ts";
@@ -496,7 +496,10 @@ const WorkHistory = memo(function WorkHistory({
     [groups, expanded, marks],
   );
   const keys = useMemo(() => display.map((row) => row.key), [display]);
-  const virtual = useVirtualRows(list, keys, estimateWorkStep, { anchored: true });
+  const virtual = useVirtualRows(list, keys, estimateWorkStep, {
+    anchored: true,
+    beyond: WHOLE_STEPS,
+  });
   return (
     <RunPicturesScope steps={steps}>
       <ScrollArea

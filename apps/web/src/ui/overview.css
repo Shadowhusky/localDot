@@ -24,14 +24,7 @@
 
   .app[data-overview]
     > .watch
-    > :is(
-      .stage-col,
-      .rail-chat,
-      .rail-resize-chat,
-      .rail-activity,
-      .rail-resize-activity,
-      .mobile-screen-restore
-    ) {
+    > :is(.stage-col, .rail-chat, .rail-resize-chat, .rail-activity, .rail-resize-activity) {
     display: none;
   }
 

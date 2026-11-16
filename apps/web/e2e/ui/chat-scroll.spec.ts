@@ -14,6 +14,17 @@ import {
 runAt("c14", "c39", "w14", "w39");
 
 test.use({ fixedClock: false, reducedMotion: "no-preference" });
+
+// At a phone's size Studio's screen tucks into a corner as the reader starts to scroll, and the
+// conversation takes its room once the scroll rests (usePictureInPicture.ts). These follow the
+// reading itself, so the screen starts tucked.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("localdot.mobile-screen-minimized", "true");
+    } catch {}
+  });
+});
 test.setTimeout(360_000);
 
 const threadOf = (page: Page) => page.locator(".thread-scroll");
