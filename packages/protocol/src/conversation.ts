@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ULID_PATTERN } from "./ids.ts";
 import { PersonaId } from "./personas.ts";
-import { LookWearables } from "./task-look.ts";
+import { LOOK_REDRAWS, LookWearables } from "./task-look.ts";
 
 // The tasks of a conversation the app shows and reads back, newest first.
 export const CONVERSATION_TASKS = 24;
@@ -192,6 +192,9 @@ export const ConversationEntry = z.strictObject({
   persona: PersonaId.optional(),
   // The look the user chose for it.
   look: LookWearables.optional(),
+  // Which draw of its first task its look wears, given once so it never changes as other
+  // conversations come and go.
+  draw: z.number().int().min(0).max(LOOK_REDRAWS).optional(),
 });
 export type ConversationEntry = z.infer<typeof ConversationEntry>;
 

@@ -150,6 +150,7 @@ describe("sign-ins in the shared browser", () => {
       reload: async () => {},
     });
     const signOut = vi.fn(async () => ({ cookies: 3 }));
+    const siteStorage = vi.fn(async () => [["workos:refresh-token", "mock-refresh"] as const]);
     const service = new BrowserHttp({
       config: {
         browserCellId: "01K6NZAGJT44QM01BDMEMSHP25",
@@ -166,6 +167,7 @@ describe("sign-ins in the shared browser", () => {
       input: { inject: vi.fn(), type: vi.fn() },
       observation: { observe: vi.fn() },
       accounts: { domains: async () => [{ domain: "google.com", count: 2 }], signOut },
+      sites: { siteStorage },
       ready: () => true,
       fence: () => {},
       stop: async () => {},
@@ -192,5 +194,18 @@ describe("sign-ins in the shared browser", () => {
     const done = await post({ site: "google.com" });
     expect(await done.json()).toEqual({ cookies: 3 });
     expect(signOut).toHaveBeenCalledWith("google.com");
+    // A computer server's saved storage, for its preview; no other site's.
+    const storage = (origin: string) =>
+      fetch(`${base}/sites/storage`, {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify({ origin }),
+      });
+    expect((await storage("https://accounts.google.com")).status).toBe(400);
+    expect(siteStorage).not.toHaveBeenCalled();
+    expect(await (await storage("http://localhost:4173")).json()).toEqual({
+      items: [["workos:refresh-token", "mock-refresh"]],
+    });
+    expect(siteStorage).toHaveBeenCalledWith("http://localhost:4173", expect.any(AbortSignal));
   });
 });

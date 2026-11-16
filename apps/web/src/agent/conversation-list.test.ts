@@ -367,4 +367,14 @@ describe("conversations' looks", () => {
     spreadLooks([older]);
     expect(conversationLook(newer)).toEqual(conversationLook(older));
   });
+
+  it("wears the draw the daemon gave, whoever else is listed", () => {
+    const older = entry({ firstTask: "01M7HTG21AXNDEXQR8VQD0YK4F" });
+    const newer = entry({ firstTask: "01M7HTG21AXNDEXQR8VQD0YK4G", draw: 2 });
+    const worn = taskOutfit(`${newer.firstTask}#2`);
+    spreadLooks([newer, older]);
+    expect(conversationLook(newer)).toEqual(worn);
+    spreadLooks([newer]);
+    expect(conversationLook(newer)).toEqual(worn);
+  });
 });

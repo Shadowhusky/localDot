@@ -1,5 +1,6 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { join } from "node:path";
+import { ownerOrigins } from "../guard.ts";
 import { webDir } from "../static-ui.ts";
 
 export type MacResult = "shown" | "failed" | "unavailable";
@@ -27,6 +28,20 @@ export function cleanLine(text: string, max: number): string {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+// Where a banner's click may find localDot already open: the link's own address, the same port by
+// its other loopback name, and every HTTPS front the owner reaches it at.
+export function openAt(link: string, fronts: readonly string[] = ownerOrigins()): string[] {
+  const { origin, hostname, port, protocol } = new URL(link);
+  const twin = { "127.0.0.1": "localhost", localhost: "127.0.0.1" }[hostname];
+  return [
+    ...new Set([
+      origin,
+      ...(twin ? [`${protocol}//${twin}${port ? `:${port}` : ""}`] : []),
+      ...fronts,
+    ]),
+  ];
+}
+
 // A real app bundle gives Notification Center its own localDot identity and mascot.
 export function macNotifier(
   opts: {
@@ -34,6 +49,7 @@ export function macNotifier(
     execFile?: ExecFile;
     now?: () => number;
     bundle?: string;
+    fronts?: () => readonly string[];
   } = {},
 ): MacNotifier {
   const bundle = opts.bundle ?? webDir("dist/native/localDot.app");
@@ -42,7 +58,10 @@ export function macNotifier(
   const notifier = bannerCommand({
     available: (opts.platform ?? process.platform) === "darwin",
     file: join(bundle, "Contents/MacOS/localdot-notify"),
-    args: (title, body, link) => (link ? [title, body, link] : [title, body]),
+    args: (title, body, link) =>
+      link
+        ? [title, body, link, openAt(link, opts.fronts?.() ?? ownerOrigins()).join(" ")]
+        : [title, body],
     env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME, LANG: "en_US.UTF-8" },
     failure:
       "localDot notifications are unavailable; allow localDot in macOS System Settings > Notifications",

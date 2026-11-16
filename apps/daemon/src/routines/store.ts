@@ -488,12 +488,14 @@ export class RoutineStore {
     return rows.map((row) => row.id);
   }
 
+  // Continuing them says someone still wants them, as turning one back on does.
   resumeStopAll(): string[] {
+    const now = this.#now();
     const rows = this.#db
       .prepare(
-        "UPDATE routines SET state = 'active', paused_reason = NULL, next_due_at = NULL, revision = revision + 1, updated_at = ? WHERE state = 'paused' AND paused_reason = 'stop_all' RETURNING id",
+        "UPDATE routines SET state = 'active', paused_reason = NULL, next_due_at = NULL, absence_asked_at = NULL, last_seen_at = ?, revision = revision + 1, updated_at = ? WHERE state = 'paused' AND paused_reason = 'stop_all' RETURNING id",
       )
-      .all(this.#now()) as { id: string }[];
+      .all(now, now) as { id: string }[];
     return rows.map((row) => row.id);
   }
 

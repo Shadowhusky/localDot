@@ -795,4 +795,16 @@ export const shell = {
   "No tag is called that.": "没有这个名称的标签。",
   "All tags": "全部标签",
   "{0}, {1}. {2}. {3}": "{0}，{1}。{2}。{3}",
+  "Stop everything paused 1 routine":
+    "\u201c\u5168\u90e8\u505c\u6b62\u201d\u6682\u505c\u4e86 1 \u4e2a\u4f8b\u884c\u4efb\u52a1",
+  "Stop everything paused {0} routines":
+    "\u201c\u5168\u90e8\u505c\u6b62\u201d\u6682\u505c\u4e86 {0} \u4e2a\u4f8b\u884c\u4efb\u52a1",
+  "They run again on schedule once you continue them.":
+    "\u7ee7\u7eed\u540e\uff0c\u5b83\u4eec\u4f1a\u6309\u8ba1\u5212\u91cd\u65b0\u8fd0\u884c\u3002",
+  "1 routine is still paused":
+    "\u4ecd\u6709 1 \u4e2a\u4f8b\u884c\u4efb\u52a1\u5904\u4e8e\u6682\u505c\u72b6\u6001",
+  "{0} routines are still paused":
+    "\u4ecd\u6709 {0} \u4e2a\u4f8b\u884c\u4efb\u52a1\u5904\u4e8e\u6682\u505c\u72b6\u6001",
+  "Stop everything paused them. They run again once you continue them.":
+    "\u5b83\u4eec\u88ab\u201c\u5168\u90e8\u505c\u6b62\u201d\u6682\u505c\u3002\u7ee7\u7eed\u540e\u4f1a\u91cd\u65b0\u8fd0\u884c\u3002",
 } satisfies Catalog;

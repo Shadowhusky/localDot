@@ -268,7 +268,7 @@ import { useTabAttention } from "./shell/tab-attention.ts";
 import { switchToDot, useLocalDots } from "./shell/useLocalDots.ts";
 import { useMobileScreen } from "./shell/useMobileScreen.ts";
 import { usePictureInPicture, useTuckOnReading } from "./shell/usePictureInPicture.ts";
-import { useStopAll } from "./shell/useStopAll.ts";
+import { useStopAll, useStoppedRoutinesNotice } from "./shell/useStopAll.ts";
 import { otherView, switchViewLabel, useViewStyle, type ViewStyle } from "./shell/view-style.ts";
 import { runningEngine } from "./stage/BrowserWindow.tsx";
 import { useStageConnection, useStagePicture } from "./stage/connection.ts";
@@ -1072,6 +1072,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
   );
   const switchViewNow = useRef(() => {});
   const stopAll = useStopAll(routines.api);
+  useStoppedRoutinesNotice(routines.reply, routines.api);
   const settingsStopAll = useMemo(
     () => ({ run: () => void stopAll.run(), running: stopAll.running }),
     [stopAll],
@@ -4008,6 +4009,7 @@ function Theatre({ api, guest = null }: { api: ApiClient; guest?: Guest | null }
                   newReason={newConversation.reason}
                   onDeleted={deletedFromRail}
                   overview={railOverview}
+                  onSortTags={sortTags}
                 />
               )}
               {railOver && (

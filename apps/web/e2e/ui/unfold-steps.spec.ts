@@ -79,13 +79,19 @@ test("a long run of steps opened near the bottom of the chat comes into view to 
   const list = run.getByRole("region", { name: "Work history" });
   await expect(list).toBeVisible();
 
-  // The list's end comes up to 8 px above the jump button, and no further. A phone's chat has no
-  // room for that under the head, which goes up only as far as 16 px inside the view's top.
+  // The list's end comes up to 8 px above the jump button, and no further. A chat with no room for
+  // that under the head, as a phone's may be, takes the head up only as far as 16 px inside the
+  // view's top.
   const clear = Math.round(before.jumpReach + 8);
-  if (isPhone(page)) {
-    await expect.poll(async () => Math.round((await placed(run)).top)).toBe(16);
-    expect((await placed(run)).bottom).toBeGreaterThanOrEqual(16);
-  } else await expect.poll(async () => Math.round((await placed(run)).bottom)).toBe(clear);
+  await expect
+    .poll(async () => {
+      const at = await placed(run);
+      return Math.round(at.bottom) === clear || Math.round(at.top) === 16;
+    })
+    .toBe(true);
+  if (!isPhone(page))
+    await expect.poll(async () => Math.round((await placed(run)).bottom)).toBe(clear);
+  expect((await placed(run)).bottom).toBeGreaterThanOrEqual(16);
   const after = await placed(run);
   expect(after.top).toBeGreaterThanOrEqual(16);
   expect(after.scrollTop).toBeGreaterThan(before.scrollTop);
@@ -101,11 +107,20 @@ test("a long run of steps opened near the bottom of the chat comes into view to 
   await page.waitForTimeout(600);
   expect(Math.round((await placed(run)).top)).toBe(Math.round(after.top));
 
-  // Folding it again leaves its head where it is.
+  // Folding it again leaves its head where it is, unless the thread's end is too near to hold it
+  // there: then the thread's end draws it down, never up and never out of view.
   await press(page, toggle);
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await ui.settle();
-  expect(Math.round((await placed(run)).top)).toBe(Math.round(after.top));
+  const folded = await placed(run);
+  const atEnd = await toggle.evaluate((node) => {
+    const view = node.closest(".thread-scroll") as HTMLElement;
+    return view.scrollTop >= view.scrollHeight - view.clientHeight - 1;
+  });
+  if (atEnd) expect(Math.round(folded.top)).toBeGreaterThanOrEqual(Math.round(after.top));
+  else expect(Math.round(folded.top)).toBe(Math.round(after.top));
+  expect(folded.bottom).toBeGreaterThanOrEqual(0);
+  expect(await seen(toggle)).toBe(true);
 });
 
 test("a run of steps opened high in the chat moves it only as far as the run needs", async ({
@@ -126,14 +141,14 @@ test("a run of steps opened high in the chat moves it only as far as the run nee
   await page.waitForTimeout(300);
   const after = await placed(run);
   expect(await seen(toggle)).toBe(true);
-  if (isPhone(page)) {
-    // A phone's chat has no room for the whole run under its head: the head goes up to the top
-    // of the view and no further, the list under it.
-    expect(Math.round(after.top)).toBe(16);
-  } else {
+  if (Math.round(after.top) === Math.round(before.top)) {
     // All of it is in view already: the chat stays where it is.
-    expect(after.bottom).toBeGreaterThan(before.jumpReach + 8);
-    expect(Math.round(after.top)).toBe(Math.round(before.top));
+    expect(after.bottom).toBeGreaterThan(before.jumpReach + 8 - 1);
+  } else {
+    // A chat with no room for the whole run under its head, as a phone's may be: the head goes up
+    // to the top of the view and no further, the list under it.
+    expect(isPhone(page)).toBe(true);
+    expect(Math.round(after.top)).toBe(16);
   }
 });
 

@@ -269,7 +269,10 @@ export function FileViewer<E extends AnyEntry>({
     }
     showing.current = open;
   }, [index, open, goal, speed, glide, jump]);
+  // A picture being marked up keeps the viewer on it: moving to another file would drop the marks.
+  const [marking, setMarking] = useState(false);
   const go = (step: -1 | 1) => {
+    if (marking) return;
     const next = index + step;
     if (next >= 0 && next < total) onIndex(next);
     else if (total > 1) glide(index, step * NUDGE, SETTLE);
@@ -312,6 +315,7 @@ export function FileViewer<E extends AnyEntry>({
     moves: { t: number; x: number }[];
   } | null>(null);
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (marking) return;
     if (event.pointerType !== "touch" || swipe.current) {
       // A second finger is a pinch, and the picture's to act on.
       if (swipe.current?.decided) glide(index, 0, SETTLE);
@@ -483,7 +487,7 @@ export function FileViewer<E extends AnyEntry>({
       closeOutside
       flush
       detents={LARGE}
-      footer={total > 1 || download ? footer : undefined}
+      footer={!marking && (total > 1 || download) ? footer : undefined}
     >
       <div
         ref={root}
@@ -510,6 +514,8 @@ export function FileViewer<E extends AnyEntry>({
                 value={{
                   meta: onShow ? meta : metaOf(pane.item, pane.item.bytes),
                   actions: onShow ? actions : undefined,
+                  close: onClose,
+                  marking: setMarking,
                 }}
               >
                 {isFrameEntry(pane.item.entry) ? (

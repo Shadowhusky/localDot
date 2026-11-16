@@ -864,4 +864,6 @@ export const agent = {
     "回复丢失或无法验证。这条消息可能已被接受。",
   "This message was not accepted. Check the computer and task, then try again.":
     "这条消息未被接受。请检查电脑和任务后重试。",
+  "The message box can't take files right now.":
+    "\u6d88\u606f\u6846\u73b0\u5728\u65e0\u6cd5\u6dfb\u52a0\u6587\u4ef6\u3002",
 } satisfies Catalog;

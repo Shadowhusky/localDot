@@ -17,7 +17,10 @@ function fixture() {
   const port = agentRunnerPort(
     { start: vi.fn(), end: vi.fn(() => true), get: (id: string) => sessions.get(id) as never },
     live,
-    { listSessions: () => [{ id: "S1", title: "Find flights", startedAt: "", events: 1 }] },
+    {
+      sessionInfo: (ids) =>
+        new Map(ids.includes("S1") ? [["S1", { title: "Find flights", startedAt: "" }]] : []),
+    },
     () => ({ has: (id) => id === "S1", latest: () => "S2" }),
   );
   return { sessions, live, port };

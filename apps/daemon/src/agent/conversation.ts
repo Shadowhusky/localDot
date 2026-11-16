@@ -27,12 +27,14 @@ import {
   EARLIER_TURN_CHARS,
   EARLIER_TURNS,
   isOwnWords,
+  LOOK_REDRAWS,
   type LocalDotEvent,
   LookWearables,
   messageName,
   NamedTag,
   type PersonaId,
   SmartTagOptions,
+  spreadDraws,
   TAG_LIBRARY,
   TAGS_PER_CONVERSATION,
   TagId,
@@ -76,6 +78,8 @@ const Organized = z.strictObject({
   // Its latest task when it was archived: a task that goes on with it brings it back.
   archived: z.string().regex(ULID_PATTERN).optional(),
   look: LookWearables.optional(),
+  // Which draw its look wears, given the first time it was listed.
+  draw: z.number().int().min(0).max(LOOK_REDRAWS).optional(),
 });
 type Organized = z.infer<typeof Organized>;
 const OrganizedFile = z.strictObject({
@@ -155,7 +159,7 @@ const NOTHING_DONE = new Set<LocalDotEvent["type"]>([
 
 export type ConversationLog = Pick<
   EventLog,
-  "hasSession" | "logFile" | "listSessions" | "titles" | "forget"
+  "hasSession" | "logFile" | "recentSessions" | "titles" | "forget"
 >;
 
 interface TaskHead {
@@ -570,7 +574,7 @@ ${checkpoint}`),
   }
 
   #latestTask(): string | null {
-    for (const session of this.log.listSessions().slice(0, LOOK_BACK))
+    for (const session of this.log.recentSessions().slice(0, LOOK_BACK))
       if (this.isTask(session.id)) return session.id;
     return null;
   }
@@ -598,11 +602,46 @@ ${checkpoint}`),
         max,
       ),
     );
+    const entries = shown.filter((each) => kept.has(each)).map((each) => this.#entry(each));
     return {
-      conversations: shown.filter((each) => kept.has(each)).map((each) => this.#entry(each)),
+      // A shared link's own list is too few to draw looks against; it shows those already given.
+      conversations: this.#withDraws(entries, records, !keep),
       archivedCount: found.filter((each) => each.archived).length,
       tags: this.tags(),
     };
+  }
+
+  // Each conversation keeps the draw its look was first given, so no look changes as others are
+  // deleted, archived or leave the list. One listed for the first time gets the first draw that
+  // wears what no older one listed with it wears.
+  #withDraws(
+    entries: ConversationEntry[],
+    records: Map<string, Organized>,
+    give: boolean,
+  ): ConversationEntry[] {
+    const seedOf = (entry: ConversationEntry) => entry.firstTask ?? entry.sessionId;
+    if (give) {
+      const given = spreadDraws(
+        entries.map((entry) => {
+          const persona = entry.live?.persona ?? entry.persona;
+          const draw = records.get(seedOf(entry))?.draw;
+          return {
+            seed: seedOf(entry),
+            ...(persona ? { persona } : {}),
+            ...(entry.look ? { look: entry.look } : {}),
+            ...(draw !== undefined ? { draw } : {}),
+          };
+        }),
+      );
+      if (given.size) {
+        for (const [seed, draw] of given) records.set(seed, { ...records.get(seed), draw });
+        this.#saveOrganized(records);
+      }
+    }
+    return entries.map((entry) => {
+      const draw = records.get(seedOf(entry))?.draw;
+      return draw === undefined ? entry : { ...entry, draw };
+    });
   }
 
   // A routine started this task.
@@ -722,6 +761,7 @@ ${checkpoint}`),
       ...(pinned ? { pinned: true } : {}),
       ...(archived ? { archived: latest } : {}),
       ...(look ? { look } : {}),
+      ...(was?.draw !== undefined ? { draw: was.draw } : {}),
     };
     if (Object.keys(next).length) records.set(root, next);
     else records.delete(root);
@@ -754,7 +794,7 @@ ${checkpoint}`),
   #found(): { sessions: string[]; startedAt: string }[] {
     const found: { sessions: string[]; startedAt: string }[] = [];
     const continuedBy = new Map<string, (typeof found)[number]>();
-    for (const session of this.log.listSessions().slice(0, LIST_SCAN)) {
+    for (const session of this.log.recentSessions().slice(0, LIST_SCAN)) {
       const head = this.#facts(session.id);
       if (!head) continue;
       let conversation = continuedBy.get(session.id);

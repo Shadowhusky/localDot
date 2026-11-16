@@ -171,3 +171,30 @@ test("a routine's sheet lists its schedule and opens its conversation", async ({
   const rail = await chatRail(page);
   await expect(rail.getByText("1 new statement saved to Bills")).toBeVisible();
 });
+
+// Stop everything pauses every routine until they are continued; a page opened after it, as after
+// an update, says so once and continues them in one press, and so does Routines while any wait.
+test("routines Stop everything paused say so after a reload, and continue in one press", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("first-run");
+  await qa(page, fixture.origin, "routine/runs");
+  const stopped = await page.request.post(`${fixture.origin}/api/stop-all`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  expect(stopped.ok(), await stopped.text()).toBe(true);
+  await page.reload();
+  if (isPhone(page)) {
+    await page.getByRole("button", { name: "More", exact: true }).last().tap();
+    await page.getByRole("menuitem", { name: "Routines" }).tap();
+  } else await page.getByRole("radio", { name: "Routines" }).click();
+  await expect(page.getByText("1 routine is still paused", { exact: true })).toBeVisible();
+  const banner = page.locator(".routines-panel").getByText("Stop everything paused 1 routine");
+  await expect(banner).toBeVisible();
+  await press(
+    page,
+    page.locator(".routines-panel").getByRole("button", { name: "Continue routines" }),
+  );
+  await expect(banner).toBeHidden();
+});

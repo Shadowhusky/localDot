@@ -249,6 +249,16 @@ export class EventLog {
     return Math.max(0, Math.round(daemonMicros - this.originOf(sessionId)));
   }
 
+  // The sessions newest first, without counting their events, which reads every event's row.
+  recentSessions(): Omit<SessionSummary, "events">[] {
+    const sessions = this.#db
+      .prepare(
+        "SELECT id, title, started_at AS startedAt FROM sessions ORDER BY started_at DESC, id DESC",
+      )
+      .all() as unknown as Omit<SessionSummary, "events">[];
+    return sessions.filter((session) => !this.hasPendingDeletion(session.id));
+  }
+
   listSessions(): SessionSummary[] {
     const sessions = this.#db
       .prepare(`

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, runAt, test } from "./harness.ts";
+import { expect, isPhone, runAt, test } from "./harness.ts";
 
 runAt("c14", "w39");
 test.use({ viewStyle: "chat", phoneList: true });
@@ -179,6 +179,40 @@ test("many tags keep to one line under a pinned All, which unfolds them all in p
   await expect(chosen).toHaveAttribute("aria-pressed", "true");
   await expect(chosen).toBeInViewport({ ratio: 0.9 });
   await expect(page.locator(".phone-row-wrap")).toHaveCount(1);
+});
+
+// Studio's list beside the screen: the same line of tags over the names once they show, each one
+// showing only the conversations with it; folded to its marks, it lets the tag go.
+test.describe("Studio's list", () => {
+  test.use({ viewStyle: "studio", phoneList: false });
+
+  test("shows the tags over the names, and only the conversations with the one chosen", async ({
+    page,
+    ui,
+  }) => {
+    test.skip(isPhone(page), "A phone has no list beside the screen");
+    await manyTags(page);
+    await ui.open("conversations");
+    const rail = page.locator(".sessions");
+    await page.getByRole("button", { name: "Expand conversations" }).click();
+    await expect(rail).toHaveAttribute("data-expanded");
+    const row = rail.getByRole("group", { name: "Show only a tag" });
+    const tops = await row
+      .locator(".conversations-tag")
+      .evaluateAll((chips) => chips.map((chip) => Math.round(chip.getBoundingClientRect().top)));
+    expect(tops).toHaveLength(12);
+    expect(new Set(tops).size).toBe(1);
+    await expect(rail.getByRole("button", { name: "All tags · 12" })).toBeVisible();
+    await row.getByRole("button", { name: "Topic 3", exact: true }).click();
+    await expect(rail.locator(".sessions-item")).toHaveCount(1);
+    await expect(rail.locator(".sessions-item")).toContainText("Topic task 3");
+    await row.getByRole("button", { name: "Topic 3", exact: true }).click();
+    await expect(rail.locator(".sessions-item")).toHaveCount(12);
+    await row.getByRole("button", { name: "Topic 5", exact: true }).click();
+    await page.getByRole("button", { name: "Collapse conversations" }).click();
+    await expect(row).toHaveCount(0);
+    await expect(rail.locator(".sessions-item")).toHaveCount(12);
+  });
 });
 
 // A name too long for its row slides to show the rest of itself, and wraps under reduced motion.

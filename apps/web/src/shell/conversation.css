@@ -864,12 +864,13 @@
   white-space: pre;
 }
 
+/* Tall enough to look over a step's picture without opening it, never past the thread's own room. */
 .thread-work {
-  --work-history-room: 280px;
+  --work-history-room: 560px;
 }
 
 .thread-work-scroll {
-  max-height: min(280px, 32dvh, var(--work-history-room));
+  max-height: min(560px, 60dvh, var(--work-history-room));
   padding-inline: calc(var(--spacing) * 2);
   scrollbar-width: thin;
 }

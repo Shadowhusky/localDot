@@ -90,7 +90,7 @@ export class SearchFeed {
       index: SearchIndex;
       eventLog: Pick<
         EventLog,
-        "read" | "listSessions" | "subscribe" | "hasSession" | "sessionInfo"
+        "read" | "recentSessions" | "subscribe" | "hasSession" | "sessionInfo"
       >;
       notes: Pick<MemoryStore, "listNotes" | "read">;
       yieldEvery?: number;
@@ -148,7 +148,7 @@ export class SearchFeed {
   async backfill(): Promise<void> {
     this.deps.index.pruneOrphans();
     let n = 0;
-    for (const s of this.deps.eventLog.listSessions()) {
+    for (const s of this.deps.eventLog.recentSessions()) {
       if (!this.deps.eventLog.hasSession(s.id)) continue;
       try {
         this.catchUp(s.id);

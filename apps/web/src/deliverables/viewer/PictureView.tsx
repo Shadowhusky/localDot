@@ -2,15 +2,18 @@ import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { t } from "../../i18n/index.ts";
+import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { SegmentedControl } from "../../ui/SegmentedControl.tsx";
-import { ViewerBar, ViewerLoading, ViewerMessage } from "./states.tsx";
+import { Markup } from "./Markup.tsx";
+import { ViewerBar, ViewerFile, ViewerLoading, ViewerMessage } from "./states.tsx";
 import {
   centred,
   dragged,
@@ -36,17 +39,46 @@ type Mode = "fit" | "actual" | "free";
 
 // A picture on a dark stage: shown whole at first, then zoomed with the buttons, a pinch, the
 // trackpad or a double click, and dragged about once it is larger than the stage. Transparent parts
-// show a checkerboard. An SVG is drawn as a picture too, never as part of the page.
-export function PictureView({
+// show a checkerboard. An SVG is drawn as a picture too, never as part of the page. Mark up draws on
+// a copy of it for the message.
+export function PictureView(props: {
+  src: string;
+  name: string;
+  caption?: ReactNode;
+  lead?: ReactNode;
+}) {
+  const [marking, setMarking] = useState(false);
+  const viewer = useContext(ViewerFile);
+  const mark = (on: boolean) => {
+    setMarking(on);
+    viewer.marking?.(on);
+  };
+  if (marking)
+    return (
+      <Markup
+        src={props.src}
+        name={props.name}
+        onDone={(attached) => {
+          mark(false);
+          if (attached) viewer.close?.();
+        }}
+      />
+    );
+  return <Picture {...props} onMarkUp={() => mark(true)} />;
+}
+
+function Picture({
   src,
   name,
   caption,
   lead,
+  onMarkUp,
 }: {
   src: string;
   name: string;
   caption?: ReactNode;
   lead?: ReactNode;
+  onMarkUp(): void;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -240,6 +272,18 @@ export function PictureView({
               {natural.w} × {natural.h}
             </span>
           ) : undefined
+        }
+        end={
+          <Button
+            size="sm"
+            variant="quiet"
+            icon="pen-line"
+            className="viewer-mark-up"
+            disabledReason={failed ? t`Couldn't show this picture` : undefined}
+            onClick={onMarkUp}
+          >
+            {t`Mark up`}
+          </Button>
         }
       >
         {lead}

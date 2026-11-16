@@ -264,9 +264,12 @@ describe("routine store", () => {
     expect(store.pauseAllActive("stop_all")).toEqual([a.id]);
     expect(store.get(a.id)).toMatchObject({ state: "paused", pausedReason: "stop_all" });
     expect(store.pauseAllActive("stop_all")).toEqual([]);
+    store.setAbsenceAsked(a.id, 1);
     expect(store.resumeStopAll()).toEqual([a.id]);
     expect(store.get(a.id)).toMatchObject({ state: "active", pausedReason: null, nextDueAt: null });
     expect(store.get(b.id)).toMatchObject({ state: "paused", pausedReason: "user" });
+    // Continuing them counts as someone wanting them, so the absence guard starts its 14 days again.
+    expect(store.get(a.id)).toMatchObject({ absenceAskedAt: null, lastSeenAt: clock });
   });
 
   it("brings a finished one-off back when its schedule changes", () => {
