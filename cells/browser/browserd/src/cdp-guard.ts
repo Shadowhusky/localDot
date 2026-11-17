@@ -26,13 +26,6 @@ export const cookiePartitionKey = schema.union([
 ]);
 const commands = Object.freeze({
   "Storage.getCookies": empty,
-  "DOMStorage.enable": empty,
-  "DOMStorage.getDOMStorageItems": schema.strictObject({
-    storageId: schema.strictObject({
-      securityOrigin: schema.string().min(1).max(64),
-      isLocalStorage: schema.literal(true),
-    }),
-  }),
   "Network.deleteCookies": schema.strictObject({
     name: cookieText,
     domain: schema.string().min(1).max(256),
@@ -220,14 +213,6 @@ function frozenParams(value: Record<string, unknown>): Readonly<Record<string, u
   return Object.freeze(value);
 }
 
-// A server in the computer itself, by its loopback name: the only sites whose saved storage leaves
-// the browser, for their previews to open signed in as they are here.
-export function devServerOrigin(origin: string): boolean {
-  if (!/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d{1,5}$/u.test(origin)) return false;
-  const url = URL.canParse(origin) ? new URL(origin) : null;
-  return url?.origin === origin && Number(url.port) > 0;
-}
-
 export function guardCdpCommand(
   method: string,
   rawParams: unknown,
@@ -240,7 +225,7 @@ export function guardCdpCommand(
   if (!parsed.success) throw new CdpRefused("params");
   const params = frozenParams(parsed.data as Record<string, unknown>);
   const pageCommand =
-    /^(Page|DOM|DOMSnapshot|DOMStorage|Accessibility|Runtime|Network|Emulation)\./u.test(name) ||
+    /^(Page|DOM|DOMSnapshot|Accessibility|Runtime|Network|Emulation)\./u.test(name) ||
     name === "Storage.clearDataForOrigin";
   if (pageCommand || (name === "Target.setAutoAttach" && sessionId !== undefined)) {
     if (
@@ -269,11 +254,6 @@ export function guardCdpCommand(
     if (!scheme || !navigable(`${origin}/`) || new URL(origin).origin !== origin)
       throw new CdpRefused("url");
   }
-  if (
-    name === "DOMStorage.getDOMStorageItems" &&
-    !devServerOrigin((params.storageId as { securityOrigin: string }).securityOrigin)
-  )
-    throw new CdpRefused("url");
   if (name === "Browser.cancelDownload" && !capabilities.ownsDownload(params.guid as string))
     throw new CdpRefused("download");
   if (

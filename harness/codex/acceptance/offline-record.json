@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "48154222ebdf1bbd4e0be8dbc42d0a8f11ac8f56f944ec1355014faf9ed183b8",
+  "inputSha256": "c7cc4d3531369e2b050504dccdd64335f06c787b3f0f361b2c1849fed50c40b6",
   "inputs": {
     ".github/workflows/ci.yml": "d25b8b8b0087d30fdd8063f85283a12fd4541f28e72352e478c4cb006c70836e",
     "apps/daemon/src/access-links.test.ts": "79a43911bb7601856e2a40afb0c0781649dbb6bb4c3020305f616ea6bca17643",
@@ -394,7 +394,7 @@
     "apps/daemon/src/browser/cli.test.ts": "dde42f12bfd760ecfc3e184ef8e6b9e9a539dffe07224f45a99bd75dd5e9cedf",
     "apps/daemon/src/browser/cli.ts": "2f87b69136b14454939badc6083d0ec8925058d3269e917b67eb6ffcf665d5df",
     "apps/daemon/src/browser/client.test.ts": "ec95fb4dee96e4479d30de39f9ae101d76e0c45b0e73fd7fc5f6b09de5501d25",
-    "apps/daemon/src/browser/client.ts": "c6547c05dd1bcc349880264cb7210aee36e45127396b8160351899aeb0ddcbb9",
+    "apps/daemon/src/browser/client.ts": "d6380227dd1c7451a973396b9a9da0857bbcc5c96fe538a809ac005841ddc66b",
     "apps/daemon/src/browser/download-client.test.ts": "43ddf754f691858182d439ecd58de2ee3646b24f7fdce84cf3682f55021e2cdf",
     "apps/daemon/src/browser/download-collector.test.ts": "908f148a1928ee42b83327180b728c03bd254308147ae269cc1dad9fbaf32c6a",
     "apps/daemon/src/browser/download-collector.ts": "bc97f687d2389e829cbae9d3a760173bb99307c5e303cfc0024bcf90fa959d02",
@@ -801,7 +801,7 @@
     "apps/daemon/src/main-startup.test.ts": "1cd20bbb7e4c86b2f7e101388060d9e6b43186f8e36899c87d8d26dd010aea60",
     "apps/daemon/src/main-startup.ts": "2cace882eeec33364fa18a462fe7d2c736f799a6f1ac6e1ac1a773b42953de85",
     "apps/daemon/src/main.test.ts": "ef5addc925ec16e30250aa48d5549b7b9c74ccda51b0728944a3aec79e04109e",
-    "apps/daemon/src/main.ts": "bede21d4de85feab8921f2f5d81f1e6972aa889a40e0db96919f0e483db974ca",
+    "apps/daemon/src/main.ts": "c8892dc9de27c1c3625a53dc9610eb8bb4d0256159bfe7a175dc2f34731f1b60",
     "apps/daemon/src/notify/attention.test.ts": "5153a723e53a32362a3f19770b16545dc1ac374294d9c7ecac9f63172c62b28f",
     "apps/daemon/src/notify/attention.ts": "799e8df156fe481a5aff47f1d4e7815c1df9a17bdc583f6759032703123e6475",
     "apps/daemon/src/notify/banner.test.ts": "b6f97743d58353ed9836b670cb6923c5ba6efc6a282a4cf16ee62bcea8ebc9c0",
@@ -844,11 +844,14 @@
     "apps/daemon/src/port.ts": "a5a52aa9d062547ed93312e754084f0e675021862b86f9a718985a20dd679599",
     "apps/daemon/src/previews/check.ts": "01d72e983016113f06ea20d47d6529944507e94828096d01a9a4ac8814544f8d",
     "apps/daemon/src/previews/config.ts": "feefff5cbeb21cd73a876f90239e099607211e0d75519c3dd8525cbcc7d6bd7e",
+    "apps/daemon/src/previews/desktop-storage.docker.test.ts": "423fc94010b0b0a0f687c9b5fae709ee6c89707d08fce3c77059edf9a11a35d8",
+    "apps/daemon/src/previews/desktop-storage.test.ts": "e9895438784351a7a20cd3823e3d7258a16fd1b702b091cc8d06f3d0e0a9a5dc",
+    "apps/daemon/src/previews/desktop-storage.ts": "f26a9d2081ad55ff1ad5c1adf7c52e863ef38d12003e7ddfcae3c8b1467ad49d",
     "apps/daemon/src/previews/fronts.test.ts": "d16f67b4be249e675a7234cc514f3b63fa562e50694604af21775a7ecaa998c2",
     "apps/daemon/src/previews/fronts.ts": "581b4821e8c8cd1baa22f740861ee17b72740dc2c669fd817e93bc65322cb64a",
     "apps/daemon/src/previews/previews.docker.test.ts": "795895d2983549320f495c48f6434b4d4deefbc9ccd7b73a92aa988cfe924793",
     "apps/daemon/src/previews/previews.test.ts": "a9673f4008ad8d1ed9a375aea7f2528bdb119ca03ab1069962263f68c5213c2e",
-    "apps/daemon/src/previews/previews.ts": "36d72b85fd6e7899ebd8a569508818f5e15c53220206d96ba4604387e6fb9e93",
+    "apps/daemon/src/previews/previews.ts": "178fee75df421c9cef8fae45c1a426e79739989c6f8b89b53eaa51d1d4f40ae4",
     "apps/daemon/src/previews/rewrite.test.ts": "0e312b34940c75aa7650a22bb605e0da5246b4760bf25bde8a4d15662173d08c",
     "apps/daemon/src/previews/rewrite.ts": "0c5b33d310d533614db3e09b4f2bc38a6a6db68fe84c03abea1ce2f805e7e254",
     "apps/daemon/src/previews/routes.test.ts": "4b796e3c9026acaedac67f7388be2c854bd1b955663f3d95e9834fd0a17921dd",
@@ -1309,7 +1312,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "209a92686bfef4057998622c6753ab08e3b784743b06513d03e0f5b3531ee464",
+  "reportSha256": "d9a7061d3401924b0c37479be87eb2882730451d191ee328c649f530c36056ff",
   "exit": {
     "code": 0,
     "signal": null

@@ -91,12 +91,10 @@ export interface PreviewsDeps {
   // A task is under way on this computer, or the user holds it: nothing of dot's is stopped then.
   working?(cellId: string): boolean;
   fronts(): Promise<PreviewFronts>;
-  // What a server's app saved in the computer's browser, at the first of the origins the browser
-  // knows it by, so its preview opens signed in as it is there. The task asking looks first in its
-  // own browser.
+  // What a server's app saved in the computer's desktop browser, at the first of the origins the
+  // browser knows it by, so its preview opens signed in as it is there.
   siteStorage?(
     cellId: string,
-    sessionId: string | undefined,
     origins: readonly string[],
     signal: AbortSignal,
   ): Promise<readonly (readonly [string, string])[]>;
@@ -166,8 +164,6 @@ export interface PreviewTurn {
 export class Previews {
   readonly #open = new Map<number, Open>();
   readonly #lastKey = new Map<number, string>();
-  // The task that last opened a preview on each computer, whose browser is asked first.
-  readonly #openedBy = new Map<string, string>();
   readonly #freedAt = new Map<number, number>();
   readonly #listings = new Map<
     string,
@@ -345,7 +341,6 @@ export class Previews {
     requestHost?: string,
   ): Promise<PreviewOpened> {
     const cellId = this.#cell(sessionId);
-    this.#openedBy.set(cellId, sessionId);
     const endpoint = this.#endpoint(cellId);
     if (endpoint === "off")
       throw new PreviewError(409, { state: "computer-off", message: COMPUTER_OFF });
@@ -566,12 +561,17 @@ export class Previews {
     return [gone.site.port];
   }
 
-  // The computer's browser knows a server by its loopback names at its own port.
+  // The computer's browser knows a server by its loopback names at its own port. The preview opens
+  // once the wait is up, while a read that is still stopping finishes on its own.
   #storage(cellId: string, target: PreviewTarget): Promise<readonly (readonly [string, string])[]> {
     const read = this.deps.siteStorage;
     if (!read || target.scheme !== "http") return Promise.resolve([]);
     const origins = [`http://localhost:${target.port}`, `http://127.0.0.1:${target.port}`];
-    return read(cellId, this.#openedBy.get(cellId), origins, AbortSignal.timeout(STORAGE_MS));
+    const signal = AbortSignal.timeout(STORAGE_MS);
+    return Promise.race([
+      read(cellId, origins, signal).catch(() => []),
+      new Promise<[]>((resolve) => signal.addEventListener("abort", () => resolve([]))),
+    ]);
   }
 
   async #serve(port: number): Promise<void> {

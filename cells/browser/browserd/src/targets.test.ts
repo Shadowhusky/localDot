@@ -166,45 +166,6 @@ describe("private browser target ownership", () => {
     expect(JSON.stringify(cookies)).not.toContain("secret-canary");
   });
 
-  it("reads a computer server's saved storage from a tab showing it, and no other site's", async () => {
-    const peer = await started();
-    const shown = (url: string) => ({ targetInfos: [{ ...info(), url }] });
-    let tabs = shown("http://localhost:4173/app?x=1");
-    peer.intercept((command) => {
-      if (command.method === "Target.getTargets") {
-        queueMicrotask(() => peer.reply(command, tabs));
-        return true;
-      }
-      if (command.method !== "DOMStorage.getDOMStorageItems") return false;
-      queueMicrotask(() =>
-        peer.reply(command, {
-          entries: [
-            ["workos:refresh-token", "mock-refresh"],
-            ["huge", "x".repeat(300 * 1024)],
-            ["theme", "dark"],
-          ],
-        }),
-      );
-      return true;
-    });
-    expect(await peer.targets.siteStorage("http://localhost:4173")).toEqual([
-      ["workos:refresh-token", "mock-refresh"],
-      ["theme", "dark"],
-    ]);
-    const read = peer.writes.find((command) => command.method === "DOMStorage.getDOMStorageItems");
-    expect(read).toMatchObject({
-      sessionId: "session-1",
-      params: { storageId: { securityOrigin: "http://localhost:4173", isLocalStorage: true } },
-    });
-    // No tab shows it: nothing, and nothing is opened to find out.
-    tabs = shown("http://localhost:5173/");
-    expect(await peer.targets.siteStorage("http://localhost:4173")).toEqual([]);
-    await expect(peer.targets.siteStorage("https://accounts.google.com")).rejects.toThrow(
-      "protocol",
-    );
-    expect(peer.writes.filter((command) => command.method === "Target.createTarget")).toEqual([]);
-  });
-
   it("reload waits beyond acknowledgement and subframe events for the root load", async () => {
     const peer = await started();
     let completed = false;
